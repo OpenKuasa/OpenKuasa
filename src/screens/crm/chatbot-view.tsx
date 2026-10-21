@@ -173,6 +173,18 @@ function SettingsForm({ settings, action }: { settings: ChatbotSettings; action?
   );
 }
 
+/** What the Daily answers field holds, and the saved number it was last taken from. */
+export type DailyLimitField = { value: string; from: number };
+
+/**
+ * The field once the saved number is `limit`: a new saved number (after a save
+ * goes through, or someone else's) replaces what is shown; otherwise what was
+ * typed stays, so a refused save keeps it.
+ */
+export function syncDailyLimitField(field: DailyLimitField, limit: number): DailyLimitField {
+  return field.from === limit ? field : { value: String(limit), from: limit };
+}
+
 /**
  * How many answers the chat on landing pages gives a day. Owners and admins
  * change it; everyone else sees the number. Without an action it is only shown.
@@ -180,8 +192,12 @@ function SettingsForm({ settings, action }: { settings: ChatbotSettings; action?
 export function DailyLimitForm({ limit, action }: { limit: number; action?: CrmFormAction }) {
   const [saved, setSaved] = useState(false);
   const { formAction, pending, error } = useCrmForm(action ?? (async () => undefined), () => setSaved(true));
-  // Held here so a rejected save keeps what was typed.
-  const [value, setValue] = useState(String(limit));
+  // Held here so a rejected save keeps what was typed. Not remounted when the
+  // saved number changes, so "Saved." stays after a save goes through.
+  const [field, setField] = useState<DailyLimitField>({ value: String(limit), from: limit });
+  const synced = syncDailyLimitField(field, limit);
+  if (synced !== field) setField(synced);
+  const value = synced.value;
 
   return (
     <form action={action ? formAction : undefined} className="mt-3 space-y-1.5 border-t pt-3">
@@ -198,7 +214,7 @@ export function DailyLimitForm({ limit, action }: { limit: number; action?: CrmF
           value={value}
           onChange={(event) => {
             setSaved(false);
-            setValue(event.target.value);
+            setField({ value: event.target.value, from: limit });
           }}
           readOnly={!action}
           aria-describedby="bot-daily-limit-help"
@@ -752,8 +768,6 @@ export function ChatbotView({
             )}
           </p>
           <DailyLimitForm
-            // A fresh form when the saved number changes.
-            key={dailyAnswerLimit}
             limit={dailyAnswerLimit}
             action={canSetDailyLimit ? actions?.saveDailyLimit : undefined}
           />

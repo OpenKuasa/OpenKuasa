@@ -15,8 +15,10 @@
 --     300 a day, the order of the two counters and the refusal statuses are
 --     unchanged. Visitors are told the chat is busy, as before.
 --
--- Additive. Safe before or after the app release that uses it: the old app
--- never writes the column, so its saves keep the limit as it is.
+-- Additive. Apply BEFORE the app release that uses it: the new AI Chatbot
+-- screen reads daily_answer_limit and cannot load without it. Applying early
+-- is safe: the old app never writes the column, so its saves keep the limit
+-- as it is.
 
 alter table public.crm_chatbot_settings
   add column daily_answer_limit int not null default 200

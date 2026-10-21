@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { ChatbotView, DailyLimitForm } from '@/screens/crm/chatbot-view';
+import { ChatbotView, DailyLimitForm, syncDailyLimitField } from '@/screens/crm/chatbot-view';
 import { DEFAULT_CHATBOT_SETTINGS } from '@/lib/crm/chatbot';
 
 /**
@@ -64,5 +64,14 @@ describe('the daily answers field', () => {
     expect(field(member)).toMatch(/readonly/i);
     expect(member).toContain('Only an owner or admin can change it.');
     expect(member).toContain('id="bot-name"');
+  });
+
+  it('takes a newly saved number without remounting, and keeps what was typed otherwise', () => {
+    const field = { value: '75', from: 200 };
+    // Nothing new was saved: what was typed stays (a refused save keeps it).
+    expect(syncDailyLimitField(field, 200)).toBe(field);
+    // A save went through: the field shows the saved number.
+    expect(syncDailyLimitField(field, 75)).toEqual({ value: '75', from: 75 });
+    expect(syncDailyLimitField({ value: '75', from: 75 }, 300)).toEqual({ value: '300', from: 300 });
   });
 });
