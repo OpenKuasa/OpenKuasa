@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { formatDay } from '@/lib/people/dates';
 import { leaveLabel } from '@/lib/people/overview';
-import { buildTeamSection, loadTeamSection, showsTeamSection } from '@/lib/people/team-section';
+import { buildTeamSection, loadTeamSection, showsTeamSection, waitingFromReports } from '@/lib/people/team-section';
 import { ZERO_WAITING } from '@/lib/people/waiting-counts';
-import type { Employee, LeaveRequest, PeopleViewer } from '@/lib/people/types';
+import type { Claim, Employee, LeaveRequest, OvertimeRecord, PeopleViewer, TimeOffRequest } from '@/lib/people/types';
 
 const TODAY = '2026-10-09';
 const owner: PeopleViewer = { employeeId: null, isHr: true, isOwner: true, isDemo: false };
@@ -115,23 +115,71 @@ describe('active reports only', () => {
 
 describe('loadTeamSection', () => {
   const readWaiting = async () => ZERO_WAITING;
+  const lists = {
+    listTimeOffRequests: async () => [] as TimeOffRequest[],
+    listClaims: async () => [] as Claim[],
+    listOvertime: async () => [] as OvertimeRecord[],
+  };
   it('is unavailable, not empty, when the leave read throws', async () => {
-    const data = { listLeaveRequests: async () => { throw new Error('boom'); } };
+    const data = { ...lists, listLeaveRequests: async () => { throw new Error('boom'); } };
     expect(await loadTeamSection(data, { viewer: manager, employees, today: TODAY, readWaiting })).toBe('unavailable');
   });
   it('is unavailable, not "nothing waiting", when the waiting-count read fails', async () => {
-    const data = { listLeaveRequests: async () => [] as LeaveRequest[] };
+    const data = { ...lists, listLeaveRequests: async () => [] as LeaveRequest[] };
     const failing = async (): Promise<typeof ZERO_WAITING> => {
       throw new Error('hr_waiting_counts failed: 42883');
     };
     expect(await loadTeamSection(data, { viewer: manager, employees, today: TODAY, readWaiting: failing })).toBe('unavailable');
   });
   it('is null for a member and reads nothing', async () => {
-    const data = { listLeaveRequests: async () => { throw new Error('read'); } };
+    const data = { ...lists, listLeaveRequests: async () => { throw new Error('read'); } };
     expect(await loadTeamSection(data, { viewer: member, employees, today: TODAY, readWaiting })).toBeNull();
   });
   it('is the section when the reads work', async () => {
-    const data = { listLeaveRequests: async () => [] as LeaveRequest[] };
+    const data = { ...lists, listLeaveRequests: async () => [] as LeaveRequest[] };
     expect(await loadTeamSection(data, { viewer: manager, employees, today: TODAY, readWaiting })).toMatchObject({ members: 5 });
+  });
+
+  it("counts only an admin's own reports, not the whole workspace, and never calls hr_waiting_counts", async () => {
+    const row = (employee_id: string, status: string) => ({ employee_id, status });
+    const data = {
+      listLeaveRequests: async () =>
+        [leave({ id: 'a', employee_id: 'r1', status: 'pending' }), leave({ id: 'b', employee_id: 'x9', status: 'pending' })],
+      listTimeOffRequests: async () => [row('r2', 'pending'), row('r2', 'approved')] as unknown as TimeOffRequest[],
+      listClaims: async () => [row('x9', 'pending'), row('boss', 'pending')] as unknown as Claim[],
+      listOvertime: async () => [row('r3', 'pending'), row('r4', 'pending')] as unknown as OvertimeRecord[],
+    };
+    const workspaceWide = async () => ({ leave: 9, time_off: 9, claims: 9, overtime: 9 });
+    const section = await loadTeamSection(data, { viewer: adminWithTeam, employees, today: TODAY, readWaiting: workspaceWide });
+    expect(section).toMatchObject({
+      waiting: [
+        { label: 'Leave', count: 1 },
+        { label: 'Overtime', count: 2 },
+        { label: 'Time-Off', count: 1 },
+      ],
+      waitingTotal: 4,
+    });
+  });
+  it('keeps hr_waiting_counts for a plain manager', async () => {
+    const data = { ...lists, listLeaveRequests: async () => [] as LeaveRequest[] };
+    const counts = async () => ({ leave: 2, time_off: 0, claims: 0, overtime: 0 });
+    expect(await loadTeamSection(data, { viewer: manager, employees, today: TODAY, readWaiting: counts })).toMatchObject({ waitingTotal: 2 });
+  });
+  it('is unavailable when one of the admin reads fails', async () => {
+    const data = { ...lists, listLeaveRequests: async () => [] as LeaveRequest[], listClaims: async () => { throw new Error('boom'); } };
+    expect(await loadTeamSection(data, { viewer: adminWithTeam, employees, today: TODAY, readWaiting })).toBe('unavailable');
+  });
+});
+
+describe('waitingFromReports', () => {
+  it('counts pending rows of the given ids only', () => {
+    const ids = new Set(['r1']);
+    const rows = {
+      leave: [leave({ employee_id: 'r1', status: 'pending' }), leave({ employee_id: 'r1', status: 'cancelled' })],
+      timeOff: [] as TimeOffRequest[],
+      claims: [{ employee_id: 'r2', status: 'pending' }] as unknown as Claim[],
+      overtime: [] as OvertimeRecord[],
+    };
+    expect(waitingFromReports(rows, ids)).toEqual({ leave: 1, time_off: 0, claims: 0, overtime: 0 });
   });
 });
