@@ -1,18 +1,22 @@
 import { getViewer, hasSupabaseEnv } from '@/lib/auth/viewer';
 import {
+  CHATBOT_MESSAGES,
   createKnowledgeEntry,
   deleteKnowledgeEntry,
   loadChatbot,
   loadChatbotActivity,
   parseChatbotSettingsForm,
+  parseDailyLimitForm,
   parseKnowledgeForm,
   readKnowledgeId,
   resumeChatbot,
+  saveChatbotDailyLimit,
   saveChatbotSettings,
   updateKnowledgeEntry,
   type Chatbot,
   type ChatbotActivity,
 } from '@/lib/crm/chatbot';
+import { CrmContactFormError } from '@/lib/crm/contacts';
 import type { CrmFormState } from '@/lib/crm/form-state';
 import { runCrmWrite } from '@/lib/crm/run-write';
 import { errorCodeOf } from '@/lib/ai/call-log';
@@ -31,6 +35,18 @@ async function saveSettingsAction(_prev: CrmFormState, formData: FormData) {
   return runCrmWrite(CHATBOT_PATH, formData, 'Could not save the bot.', () =>
     saveChatbotSettings(supabase, orgId, parseChatbotSettingsForm(formData), userId),
   );
+}
+
+async function saveDailyLimitAction(_prev: CrmFormState, formData: FormData) {
+  'use server';
+  const { orgId, userId, role } = await getViewer();
+  const supabase = await createClient();
+
+  return runCrmWrite(CHATBOT_PATH, formData, 'Could not save the daily answers.', async () => {
+    // The database refuses anyone else too; this says so before asking it.
+    if (role !== 'owner' && role !== 'admin') throw new CrmContactFormError(CHATBOT_MESSAGES.dailyLimitForbidden);
+    await saveChatbotDailyLimit(supabase, orgId, parseDailyLimitForm(formData), userId);
+  });
 }
 
 async function saveEntryAction(_prev: CrmFormState, formData: FormData) {
@@ -69,6 +85,7 @@ async function resumeAction(_prev: CrmFormState, formData: FormData) {
 
 const ACTIONS = {
   saveSettings: saveSettingsAction,
+  saveDailyLimit: saveDailyLimitAction,
   saveEntry: saveEntryAction,
   removeEntry: removeEntryAction,
   resume: resumeAction,
@@ -119,6 +136,9 @@ export default async function ChatbotPage() {
     <ChatbotView
       settings={bot.settings}
       saved={bot.saved}
+      dailyAnswerLimit={bot.dailyAnswerLimit}
+      // Owners and admins set it; everyone else sees it.
+      canSetDailyLimit={role === 'owner' || role === 'admin'}
       knowledge={bot.knowledge}
       pausedReason={bot.pausedReason}
       activity={activity}

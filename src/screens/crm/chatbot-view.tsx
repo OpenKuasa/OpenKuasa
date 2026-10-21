@@ -22,6 +22,7 @@ import { Textarea } from '@/components/ui/textarea';
 import {
   BOT_NAME_MAX,
   CHATBOT_TONES,
+  DAILY_ANSWER_LIMIT_MAX,
   HANDOFF_AFTER_MAX,
   KNOWLEDGE_BODY_MAX,
   KNOWLEDGE_MAX,
@@ -41,6 +42,7 @@ import { SELECT_CLASS, useCrmForm } from './crm-form';
 
 type Actions = {
   saveSettings: CrmFormAction;
+  saveDailyLimit: CrmFormAction;
   saveEntry: CrmFormAction;
   removeEntry: CrmFormAction;
   resume: CrmFormAction;
@@ -167,6 +169,60 @@ function SettingsForm({ settings, action }: { settings: ChatbotSettings; action?
           ) : null}
         </div>
       ) : null}
+    </form>
+  );
+}
+
+/**
+ * How many answers the chat on landing pages gives a day. Owners and admins
+ * change it; everyone else sees the number. Without an action it is only shown.
+ */
+export function DailyLimitForm({ limit, action }: { limit: number; action?: CrmFormAction }) {
+  const [saved, setSaved] = useState(false);
+  const { formAction, pending, error } = useCrmForm(action ?? (async () => undefined), () => setSaved(true));
+  // Held here so a rejected save keeps what was typed.
+  const [value, setValue] = useState(String(limit));
+
+  return (
+    <form action={action ? formAction : undefined} className="mt-3 space-y-1.5 border-t pt-3">
+      <Label htmlFor="bot-daily-limit">Daily answers</Label>
+      <div className="flex flex-wrap items-center gap-2">
+        <Input
+          id="bot-daily-limit"
+          name="dailyAnswerLimit"
+          type="number"
+          inputMode="numeric"
+          min="1"
+          max={DAILY_ANSWER_LIMIT_MAX}
+          step="1"
+          value={value}
+          onChange={(event) => {
+            setSaved(false);
+            setValue(event.target.value);
+          }}
+          readOnly={!action}
+          aria-describedby="bot-daily-limit-help"
+          className="w-28"
+          required
+        />
+        {action ? (
+          <Button type="submit" size="sm" variant="outline" disabled={pending}>
+            <Check className="size-4" />
+            {pending ? 'Saving…' : 'Save'}
+          </Button>
+        ) : null}
+        {saved && !pending && !error ? <p className="text-sm text-muted-foreground">Saved.</p> : null}
+      </div>
+      {error ? (
+        <p role="alert" className="text-sm text-destructive">
+          {error}
+        </p>
+      ) : null}
+      <p id="bot-daily-limit-help" className="text-xs text-muted-foreground">
+        Each answer uses your workspace&rsquo;s AI key. Once the day&rsquo;s answers are used, visitors are told the
+        chat is busy and to try again later. The count starts again at 8 am Malaysia time.
+        {action ? null : ' Only an owner or admin can change it.'}
+      </p>
     </form>
   );
 }
@@ -473,6 +529,8 @@ function ConversationItem({ conversation }: { conversation: ChatConversation }) 
 export function ChatbotView({
   settings,
   saved,
+  dailyAnswerLimit,
+  canSetDailyLimit,
   knowledge,
   pausedReason,
   activity,
@@ -482,6 +540,10 @@ export function ChatbotView({
   settings: ChatbotSettings;
   /** False until the workspace has saved its settings once. */
   saved: boolean;
+  /** How many answers the chat on landing pages gives a day. */
+  dailyAnswerLimit: number;
+  /** Whether the signed-in person is an owner or admin, who alone may change the daily answers. */
+  canSetDailyLimit: boolean;
   knowledge: KnowledgeEntry[];
   /** Set while the server has stopped the chat on landing pages. */
   pausedReason: ChatbotPause | null;
@@ -689,6 +751,12 @@ export function ChatbotView({
               </>
             )}
           </p>
+          <DailyLimitForm
+            // A fresh form when the saved number changes.
+            key={dailyAnswerLimit}
+            limit={dailyAnswerLimit}
+            action={canSetDailyLimit ? actions?.saveDailyLimit : undefined}
+          />
         </BentoCard>
 
         <BentoCard
