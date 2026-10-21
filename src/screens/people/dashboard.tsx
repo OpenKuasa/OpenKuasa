@@ -28,26 +28,30 @@ export default async function DashboardScreen() {
     const today = todayInMalaysia(now);
     const team = isTeamView(ctx.viewer);
     const employees = await data.listEmployees();
-    if (!team) {
-      // A manager's company-wide cards keep their HR-only notices; the team card is extra.
-      const mine = await loadTeamSection(data, {
+    // The team card is extra, for a manager and for an owner or admin who also has a team; null for anyone else.
+    const loadMine = () =>
+      loadTeamSection(data, {
         viewer: ctx.viewer,
         employees,
         today,
         readWaiting: () => (ctx.orgId ? readWaitingCountsStrict({ client: ctx.client, orgId: ctx.orgId }) : Promise.resolve(ZERO_WAITING)),
       });
+    if (!team) {
+      // A manager's company-wide cards keep their HR-only notices.
+      const mine = await loadMine();
       return {
         dashboard: buildDashboardModel({ employees, leave: [], attendance: [], runs: [], payslips: [] }, today, false),
         mine,
       };
     }
-    const [leave, attendance, runs, payslips] = await Promise.all([
+    const [leave, attendance, runs, payslips, mine] = await Promise.all([
       data.listLeaveRequests(),
       data.listAttendance(dashboardAttendanceFrom(today), today),
       data.listPayrollRuns(),
       data.listPayslips(),
+      loadMine(),
     ]);
-    return { dashboard: buildDashboardModel({ employees, leave, attendance, runs, payslips }, today, true), mine: null };
+    return { dashboard: buildDashboardModel({ employees, leave, attendance, runs, payslips }, today, true), mine };
   });
   const model = loaded?.dashboard ?? null;
   const mine = loaded?.mine ?? null;

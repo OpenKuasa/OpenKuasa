@@ -11,6 +11,8 @@ const admin: PeopleViewer = { employeeId: 'boss', isHr: true, isDemo: false };
 const member: PeopleViewer = { employeeId: 'e1', isHr: false, isDemo: false };
 const demo: PeopleViewer = { employeeId: 'e1', isHr: false, isDemo: true };
 const manager: PeopleViewer = { employeeId: 'boss', isHr: false, isDemo: false, managesTeam: true };
+const adminWithTeam: PeopleViewer = { employeeId: 'boss', isHr: true, isDemo: false, managesTeam: true };
+const demoWithFlag: PeopleViewer = { employeeId: 'boss', isHr: false, isDemo: true, managesTeam: true };
 
 const emp = (id: string, over: Partial<Employee> = {}): Employee => ({
   id, user_id: null, employee_no: id, name: id.toUpperCase(), work_email: null, department_id: null, department_name: null,
@@ -27,14 +29,21 @@ const build = (over: Partial<Parameters<typeof buildTeamSection>[0]> = {}) =>
   buildTeamSection({ viewer: manager, employees, leave: [], waiting: ZERO_WAITING, today: TODAY, ...over });
 
 describe('showsTeamSection', () => {
-  it('is for a manager only', () => {
-    expect([owner, admin, member, demo, manager].map(showsTeamSection)).toEqual([false, false, false, false, true]);
+  it('is for anyone with reports outside the demo: a manager, or an owner or admin who has a team', () => {
+    expect([owner, admin, member, demo, manager, adminWithTeam, demoWithFlag].map(showsTeamSection)).toEqual([
+      false, false, false, false, true, true, false,
+    ]);
   });
 });
 
 describe('buildTeamSection', () => {
-  it('is null for everyone but a manager', () => {
-    for (const viewer of [owner, admin, member, demo]) expect(build({ viewer })).toBeNull();
+  it('is null for anyone without reports, and in the demo', () => {
+    for (const viewer of [owner, admin, member, demo, demoWithFlag]) expect(build({ viewer })).toBeNull();
+  });
+
+  it("gives an admin with a team the same card a manager gets, built from the whole list HR reads", () => {
+    expect(build({ viewer: adminWithTeam })).toEqual(build({ viewer: manager }));
+    expect(build({ viewer: adminWithTeam })!.members).toBe(5);
   });
 
   it('counts the team and lists the reports away today, not the manager, and not others', () => {

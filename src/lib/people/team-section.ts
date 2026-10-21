@@ -1,11 +1,12 @@
 /**
- * The dashboard's "My team" card for a manager: how many report to them, who is away today and what is waiting
- * for their decision. Pure; the screen reads the rows. Nothing here is for HR, a member or the demo.
+ * The dashboard's "My team" card for anyone with reports (a manager, or an owner or admin who also has a team): how
+ * many report to them, who is away today and what is waiting for their decision. Pure; the screen reads the rows.
+ * Nothing here is for someone without reports or for the demo.
  */
 import { formatDay } from './dates';
 import { leaveLabel, onLeaveOn } from './overview';
 import { reportsOf } from './reporting';
-import { teamScreenView } from './tier';
+import { hasReports } from './tier';
 import type { Employee, LeaveRequest, PeopleData, PeopleViewer } from './types';
 import { waitingTotal, type WaitingCounts } from './waiting-counts';
 
@@ -27,12 +28,12 @@ const KINDS: { key: keyof WaitingCounts; label: string; href: string }[] = [
 
 /** Whether the dashboard reads anything for the team card. */
 export function showsTeamSection(viewer: PeopleViewer): boolean {
-  return teamScreenView(viewer) === 'manager';
+  return hasReports(viewer);
 }
 
 const when = (from: string, to: string) => (from === to ? formatDay(from) : `${formatDay(from)}–${formatDay(to)}`);
 
-/** The dashboard's team card: null for everyone but a manager outside the demo. */
+/** The dashboard's team card: null for anyone without reports, and in the demo. */
 export function buildTeamSection(input: {
   viewer: PeopleViewer;
   employees: Employee[];
@@ -56,7 +57,7 @@ export function buildTeamSection(input: {
 }
 
 /**
- * The card for the dashboard: the section, null for anyone but a manager, or 'unavailable' when its own reads
+ * The card for the dashboard: the section, null for anyone without reports, or 'unavailable' when its own reads
  * fail, so the rest of the dashboard still renders and the card never claims "Nobody is away" on a failed read.
  * `readWaiting` must throw on a failure (pass `readWaitingCountsStrict`), never answer zeros: zeros read as
  * "Nothing is waiting for you".
