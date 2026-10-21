@@ -1,4 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { z } from 'zod';
 import { CrmContactFormError } from '@/lib/crm/contacts';
 import { klDay } from '@/lib/crm/deal-stats';
 
@@ -27,6 +28,11 @@ export const KNOWLEDGE_TITLE_MAX = 120;
 export const KNOWLEDGE_BODY_MAX = 4000;
 /** How many knowledge entries a workspace can keep. The database enforces it. */
 export const KNOWLEDGE_MAX = 20;
+/** How many answers the chat on landing pages gives a day: the default, and the most allowed. */
+export const DAILY_ANSWER_LIMIT_DEFAULT = 200;
+export const DAILY_ANSWER_LIMIT_MAX = 1000;
+/** The database's code for "only an owner or admin can change the daily answer limit". */
+export const DAILY_LIMIT_FORBIDDEN_CODE = 'KR002';
 
 export const CHATBOT_MESSAGES = {
   name: 'Enter a name for the bot.',
@@ -41,6 +47,8 @@ export const CHATBOT_MESSAGES = {
   bodyTooLong: `Keep an entry to ${KNOWLEDGE_BODY_MAX.toLocaleString('en-MY')} characters or fewer. Split a longer one in two.`,
   full: `A workspace can keep at most ${KNOWLEDGE_MAX} entries. Delete one, or add to an existing entry.`,
   gone: 'That entry no longer exists.',
+  dailyLimit: `Enter a whole number from 1 to ${DAILY_ANSWER_LIMIT_MAX.toLocaleString('en-MY')}.`,
+  dailyLimitForbidden: 'Only an owner or admin can change the daily answers.',
 } as const;
 
 const M = CHATBOT_MESSAGES;
@@ -109,6 +117,8 @@ export type Chatbot = {
   pausedReason: ChatbotPause | null;
   /** False until the workspace has saved its settings once. */
   saved: boolean;
+  /** How many answers the chat on landing pages gives a day. Only an owner or admin changes it. */
+  dailyAnswerLimit: number;
   knowledge: KnowledgeEntry[];
   /** The workspace's name, as the bot says whom it answers for. */
   businessName: string;
@@ -153,6 +163,20 @@ export function parseChatbotSettingsForm(formData: FormData): ChatbotSettings {
   }
 
   return { botName, tone, welcome, handoffEnabled, handoffAfter };
+}
+
+const dailyAnswerLimitSchema = z
+  .string()
+  .trim()
+  .regex(/^\d{1,4}$/)
+  .transform(Number)
+  .pipe(z.number().int().min(1).max(DAILY_ANSWER_LIMIT_MAX));
+
+/** Validates the Daily answers form: a whole number from 1 to 1,000. */
+export function parseDailyLimitForm(formData: FormData): number {
+  const parsed = dailyAnswerLimitSchema.safeParse(String(formData.get('dailyAnswerLimit') ?? ''));
+  if (!parsed.success) throw new CrmContactFormError(M.dailyLimit);
+  return parsed.data;
 }
 
 /** Validates the knowledge entry form. Line breaks in the body are kept. */
@@ -226,6 +250,7 @@ type SettingsRow = {
   handoff_enabled: boolean | null;
   handoff_after: number | null;
   paused_reason?: string | null;
+  daily_answer_limit?: number | null;
 };
 
 export function mapChatbotSettings(row: SettingsRow): ChatbotSettings {
@@ -243,7 +268,7 @@ export async function loadChatbot(client: SupabaseClient, orgId: string): Promis
   const [settings, knowledge, org] = await Promise.all([
     client
       .from('crm_chatbot_settings')
-      .select('bot_name,tone,welcome,handoff_enabled,handoff_after,paused_reason')
+      .select('bot_name,tone,welcome,handoff_enabled,handoff_after,paused_reason,daily_answer_limit')
       .eq('org_id', orgId)
       .maybeSingle(),
     client
@@ -263,6 +288,7 @@ export async function loadChatbot(client: SupabaseClient, orgId: string): Promis
     settings: row ? mapChatbotSettings(row) : DEFAULT_CHATBOT_SETTINGS,
     pausedReason: row?.paused_reason === 'key_refused' || row?.paused_reason === 'no_credit' ? row.paused_reason : null,
     saved: row !== null,
+    dailyAnswerLimit: row?.daily_answer_limit ?? DAILY_ANSWER_LIMIT_DEFAULT,
     knowledge: (knowledge.data ?? []) as KnowledgeEntry[],
     // The name is a nicety: the bot still works without it.
     businessName: (org.data as { name?: string } | null)?.name ?? '',
@@ -310,6 +336,40 @@ export async function saveChatbotSettings(
   if (inserted.error.code !== UNIQUE_VIOLATION) throw inserted.error;
   const again = await update();
   if (again.error) throw again.error;
+}
+
+/**
+ * Saves how many answers the chat on landing pages gives a day. The database
+ * lets only an owner or admin change it; anyone else is told so. The first
+ * save makes the row, with the starting name and welcome.
+ */
+export async function saveChatbotDailyLimit(
+  client: SupabaseClient,
+  orgId: string,
+  limit: number,
+  userId?: string | null,
+): Promise<void> {
+  const refused = (error: { code?: string }) => {
+    if (error.code === DAILY_LIMIT_FORBIDDEN_CODE) throw new CrmContactFormError(M.dailyLimitForbidden);
+    throw error;
+  };
+  const columns = { daily_answer_limit: limit, ...(userId ? { updated_by: userId } : {}) };
+  const update = () =>
+    client
+      .from('crm_chatbot_settings')
+      .update({ ...columns, updated_at: new Date().toISOString() })
+      .eq('org_id', orgId)
+      .select('org_id');
+
+  const updated = await update();
+  if (updated.error) refused(updated.error);
+  if (updated.data && updated.data.length > 0) return;
+
+  const inserted = await client.from('crm_chatbot_settings').insert({ org_id: orgId, ...columns });
+  if (!inserted.error) return;
+  if (inserted.error.code !== UNIQUE_VIOLATION) refused(inserted.error);
+  const again = await update();
+  if (again.error) refused(again.error);
 }
 
 export async function createKnowledgeEntry(

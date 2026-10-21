@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   CHATBOT_MESSAGES as M,
+  DAILY_ANSWER_LIMIT_DEFAULT,
   DEFAULT_CHATBOT_SETTINGS,
   KNOWLEDGE_BODY_MAX,
   buildChatbotSystem,
@@ -11,9 +12,11 @@ import {
   mapConversations,
   monthStart,
   parseChatbotSettingsForm,
+  parseDailyLimitForm,
   parseKnowledgeForm,
   readKnowledgeId,
   resumeChatbot,
+  saveChatbotDailyLimit,
   saveChatbotSettings,
   updateKnowledgeEntry,
 } from '@/lib/crm/chatbot';
@@ -87,6 +90,25 @@ describe('the bot settings form', () => {
     expect(() => parseChatbotSettingsForm(form({ ...SETTINGS, ...change }))).toThrow(
       new CrmContactFormError(message),
     );
+  });
+});
+
+describe('the daily answers form', () => {
+  it('takes a whole number from 1 to 1,000', () => {
+    expect(DAILY_ANSWER_LIMIT_DEFAULT).toBe(200);
+    expect(parseDailyLimitForm(form({ dailyAnswerLimit: '1' }))).toBe(1);
+    expect(parseDailyLimitForm(form({ dailyAnswerLimit: ' 50 ' }))).toBe(50);
+    expect(parseDailyLimitForm(form({ dailyAnswerLimit: '1000' }))).toBe(1000);
+  });
+
+  it('refuses anything else, saying what it takes', () => {
+    for (const value of ['', '0', '1001', '-5', '2.5', '1e3', 'abc', '99999']) {
+      expect(() => parseDailyLimitForm(form({ dailyAnswerLimit: value })), value).toThrow(
+        new CrmContactFormError(M.dailyLimit),
+      );
+    }
+    expect(() => parseDailyLimitForm(new FormData())).toThrow(M.dailyLimit);
+    expect(M.dailyLimit).toBe('Enter a whole number from 1 to 1,000.');
   });
 });
 
@@ -170,6 +192,7 @@ describe('reading and saving the bot', () => {
       settings: DEFAULT_CHATBOT_SETTINGS,
       pausedReason: null,
       saved: false,
+      dailyAnswerLimit: DAILY_ANSWER_LIMIT_DEFAULT,
       knowledge: [],
       businessName: 'Rimba',
     });
@@ -215,6 +238,40 @@ describe('reading and saving the bot', () => {
     const raced = fakeClient([{ data: [] }, { error: { code: '23505' } }, { data: [{ org_id: ORG }] }]);
     await saveChatbotSettings(raced.client, ORG, DEFAULT_CHATBOT_SETTINGS);
     expect(raced.seen.map((call) => call.op)).toEqual(['update', 'insert', 'update']);
+  });
+
+  it('reads the daily answers, and 200 for a row from before they existed', async () => {
+    const row = { bot_name: 'Melati', tone: 'friendly', welcome: 'Hi', handoff_enabled: true, handoff_after: 3 };
+    const set = fakeClient([{ data: { ...row, daily_answer_limit: 50 } }, { data: [] }, { data: null }]);
+    expect((await loadChatbot(set.client, ORG)).dailyAnswerLimit).toBe(50);
+    const old = fakeClient([{ data: row }, { data: [] }, { data: null }]);
+    expect((await loadChatbot(old.client, ORG)).dailyAnswerLimit).toBe(200);
+  });
+
+  it('saves the daily answers on the row, or makes the row the first time', async () => {
+    const existing = fakeClient([{ data: [{ org_id: ORG }] }]);
+    await saveChatbotDailyLimit(existing.client, ORG, 50, 'user-1');
+    expect(existing.seen).toHaveLength(1);
+    expect(existing.seen[0]).toMatchObject({ op: 'update', table: 'crm_chatbot_settings', filters: [['org_id', ORG]] });
+    expect(existing.seen[0].payload).toMatchObject({ daily_answer_limit: 50, updated_by: 'user-1' });
+    // Only the limit: the bot's other settings are left as they are.
+    expect(existing.seen[0].payload).not.toHaveProperty('bot_name');
+
+    const first = fakeClient([{ data: [] }, {}]);
+    await saveChatbotDailyLimit(first.client, ORG, 80);
+    expect(first.seen.map((call) => call.op)).toEqual(['update', 'insert']);
+    expect(first.seen[1].payload).toEqual({ org_id: ORG, daily_answer_limit: 80 });
+  });
+
+  it('says only an owner or admin can change the daily answers when the database refuses', async () => {
+    const refused = fakeClient([{ error: { code: 'KR002' } }]);
+    await expect(saveChatbotDailyLimit(refused.client, ORG, 50)).rejects.toThrow(
+      new CrmContactFormError(M.dailyLimitForbidden),
+    );
+    const firstRefused = fakeClient([{ data: [] }, { error: { code: 'KR002' } }]);
+    await expect(saveChatbotDailyLimit(firstRefused.client, ORG, 50)).rejects.toThrow(M.dailyLimitForbidden);
+    const other = fakeClient([{ error: { code: '42501' } }]);
+    await expect(saveChatbotDailyLimit(other.client, ORG, 50)).rejects.not.toBeInstanceOf(CrmContactFormError);
   });
 
   it('says the knowledge is full when the database refuses a twenty-first entry', async () => {
