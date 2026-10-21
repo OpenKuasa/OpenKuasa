@@ -12,14 +12,20 @@
  */
 import type { SupabaseClient } from '@supabase/supabase-js';
 import {
-  type SubmissionInput,
   type SubmissionOutcome,
+  type SubmissionToSend,
   submissionOutcome,
 } from './form-submissions';
 
 /** Everything the public page knows about a form. */
 export type PublicForm =
-  | { accepting: true; name: string; orgName: string }
+  | {
+      accepting: true;
+      name: string;
+      orgName: string;
+      /** The sentence the visitor ticks, the workspace's name already filled in. */
+      consentText: string;
+    }
   /** A draft or paused form: nothing about it or its workspace is given out. */
   | { accepting: false };
 
@@ -29,6 +35,7 @@ type PublicFormRow = {
   form_name: string | null;
   org_name: string | null;
   accepting: boolean | null;
+  consent_text: string | null;
 };
 
 /**
@@ -47,8 +54,16 @@ export async function getPublicForm(
   }
   const row = (Array.isArray(data) ? data[0] : data) as PublicFormRow | null | undefined;
   if (!row) return null;
-  if (row.accepting !== true || !row.form_name || !row.org_name) return { accepting: false };
-  return { accepting: true, name: row.form_name, orgName: row.org_name };
+  // A form without its sentence cannot be agreed to, so it is not offered.
+  if (row.accepting !== true || !row.form_name || !row.org_name || !row.consent_text?.trim()) {
+    return { accepting: false };
+  }
+  return {
+    accepting: true,
+    name: row.form_name,
+    orgName: row.org_name,
+    consentText: row.consent_text,
+  };
 }
 
 /** Who is looking, when the server counts a view as itself. */
@@ -96,12 +111,13 @@ export async function recordFormView(
 
 /**
  * Sends one checked submission. `honeypot` is what the hidden field held; the
- * database thanks and discards a submission that filled it.
+ * database thanks and discards a submission that filled it. The database
+ * refuses one whose consent box was not ticked, and stores the wording agreed to.
  */
 export async function submitPublicForm(
   client: SupabaseClient,
   formId: string,
-  input: SubmissionInput,
+  input: SubmissionToSend,
   honeypot = '',
 ): Promise<SubmissionOutcome> {
   const { data, error } = await client.rpc('submit_public_form', {
@@ -111,6 +127,7 @@ export async function submitPublicForm(
     p_phone: input.phone,
     p_message: input.message,
     p_honeypot: honeypot,
+    p_consent: input.consent,
   });
   if (error) {
     console.error('[public-forms] submit_public_form failed:', error);

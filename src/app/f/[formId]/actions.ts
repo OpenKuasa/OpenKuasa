@@ -3,6 +3,7 @@
 import { z } from 'zod';
 import { hasSupabaseEnv } from '@/lib/auth/viewer';
 import {
+  CONSENT_FIELD,
   HONEYPOT_FIELD,
   SUBMISSION_MESSAGES,
   type SubmissionErrors,
@@ -26,6 +27,8 @@ export type PublicFormState =
       errors?: SubmissionErrors;
       /** What was typed, so a rejected form is not emptied. */
       values?: SubmissionValues;
+      /** Whether the consent box was ticked, so a rejected form keeps it. */
+      consented?: boolean;
     }
   | undefined;
 
@@ -53,23 +56,32 @@ export async function submitPublicFormAction(
     message: read(formData, 'message'),
   };
 
+  // A ticked native box posts "on"; anything else is not agreement.
+  const consented = formData.get(CONSENT_FIELD) === 'on';
+
   // A script filled the field no person can see: thank it and keep nothing.
   if (read(formData, HONEYPOT_FIELD).trim()) return { done: true };
 
+  // Every problem at once: the fields, and the box when it was left unticked.
   const parsed = parseSubmission(values);
-  if (!parsed.ok) return { errors: parsed.errors, values };
+  const consentError = consented ? {} : { consent: SUBMISSION_MESSAGES.consent };
+  if (!parsed.ok) return { errors: { ...parsed.errors, ...consentError }, values, consented };
+  if (!consented) return { errors: consentError, values, consented };
 
   if (!z.uuid().safeParse(formId).success || !hasSupabaseEnv()) {
-    return { error: SUBMISSION_MESSAGES.failed, values };
+    return { error: SUBMISSION_MESSAGES.failed, values, consented };
   }
 
   // Counted only now, so a post that was never going to be sent uses up nothing. A check a
   // visitor has to pass (a challenge token) would be verified here too, before anything is written.
   const limited = await formSubmitLimited();
-  if (limited) return { error: limited, values };
+  if (limited) return { error: limited, values, consented };
 
   // Sent by the server as itself: the database takes a response from nobody else.
-  const outcome = await submitPublicForm(serverWriteClient(createAnonymousClient), formId, parsed.input);
+  const outcome = await submitPublicForm(serverWriteClient(createAnonymousClient), formId, {
+    ...parsed.input,
+    consent: consented,
+  });
   switch (outcome.kind) {
     case 'ok':
       return { done: true };
@@ -77,10 +89,10 @@ export async function submitPublicFormAction(
     case 'not_found':
       return { closed: true };
     case 'throttled':
-      return { error: SUBMISSION_MESSAGES.throttled, values };
+      return { error: SUBMISSION_MESSAGES.throttled, values, consented };
     case 'invalid':
-      return { errors: outcome.errors, values };
+      return { errors: outcome.errors, values, consented };
     default:
-      return { error: SUBMISSION_MESSAGES.failed, values };
+      return { error: SUBMISSION_MESSAGES.failed, values, consented };
   }
 }

@@ -39,6 +39,7 @@ import {
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { LiveDot } from '@/components/ui/live-dot';
+import { Textarea } from '@/components/ui/textarea';
 import {
   Select,
   SelectContent,
@@ -55,7 +56,10 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import {
+  DEFAULT_FORM_CONSENT,
   FORM_CATEGORY_MAX,
+  FORM_CONSENT_MAX,
+  FORM_CONSENT_PLACEHOLDER,
   FORM_NAME_MAX,
   FORM_SLUG_MAX,
   FORM_STATUSES,
@@ -521,7 +525,7 @@ function CreateFormButton({
 }
 
 /** The card above the table: adds a form, or edits the one picked from a row. */
-function LeadFormCard({
+export function LeadFormCard({
   editing,
   suggestions,
   nameRef,
@@ -544,6 +548,7 @@ function LeadFormCard({
   // An existing form keeps its short name unless it is changed on purpose.
   const [slugEdited, setSlugEdited] = useState(editing != null);
   const [status, setStatus] = useState<FormStatus>(editing?.status ?? 'draft');
+  const [consentText, setConsentText] = useState(editing?.consent_text ?? DEFAULT_FORM_CONSENT);
   const [pending, start] = useTransition();
   const [failure, setFailure] = useState<string | null>(null);
   // An old message is not shown while the next attempt is still running.
@@ -553,7 +558,7 @@ function LeadFormCard({
     // Handled here rather than as a form action, so the fields are never reset
     // and a rejected form keeps everything that was typed.
     event.preventDefault();
-    const parsed = parseFormFields({ name, category, slug, status });
+    const parsed = parseFormFields({ name, category, slug, status, consent_text: consentText });
     if (!parsed.ok) {
       setFailure(parsed.error);
       return;
@@ -654,6 +659,26 @@ function LeadFormCard({
               </option>
             ))}
           </select>
+        </div>
+        <div className="space-y-1.5 md:col-span-12">
+          <Label htmlFor={`${id}-consent`}>Consent sentence</Label>
+          <Textarea
+            id={`${id}-consent`}
+            name="consent_text"
+            rows={2}
+            value={consentText}
+            // One more than allowed, so a pasted sentence that is too long is reported, not cut.
+            maxLength={FORM_CONSENT_MAX + 1}
+            required
+            aria-describedby={`${id}-consent-hint`}
+            onChange={(e) => setConsentText(e.target.value)}
+            className="min-h-16"
+          />
+          <p id={`${id}-consent-hint`} className="text-xs text-muted-foreground">
+            Visitors tick a box beside this sentence before they can send the form, and each
+            submission keeps the wording they agreed to. {FORM_CONSENT_PLACEHOLDER} becomes your
+            workspace&apos;s name. Up to {FORM_CONSENT_MAX} characters.
+          </p>
         </div>
         <div className="flex flex-wrap items-center gap-3 md:col-span-12">
           <Button type="submit" className="w-full md:w-auto" disabled={pending}>
@@ -858,6 +883,33 @@ function PublicLink({ form, url }: { form: Form; url: string }) {
   );
 }
 
+/**
+ * What a visitor agreed to when they sent a submission: when, and the sentence
+ * as they read it. Submissions from before consent was asked for say so.
+ */
+export function SubmissionConsent({
+  submission,
+}: {
+  submission: Pick<FormSubmission, 'consent_text' | 'consented_at'>;
+}) {
+  const { consent_text: text, consented_at: at } = submission;
+  return (
+    <div className="flex min-w-0 gap-2 sm:col-span-2">
+      <dt className="shrink-0 text-muted-foreground">Consent</dt>
+      {text && at ? (
+        <dd className="min-w-0 break-words">
+          <span className="font-medium">Consented {formatSubmissionTime(at)}</span>
+          <span className="block text-muted-foreground">“{text}”</span>
+        </dd>
+      ) : (
+        <dd className="min-w-0 text-muted-foreground">
+          Not recorded (sent before consent was asked for)
+        </dd>
+      )}
+    </div>
+  );
+}
+
 type SubmissionsState =
   | { status: 'loading' }
   | { status: 'failed'; error: string }
@@ -978,6 +1030,7 @@ function SubmissionsCard({
                       {row.message || '—'}
                     </dd>
                   </div>
+                  <SubmissionConsent submission={row} />
                 </dl>
                 {remove && deletingId === row.id ? (
                   <div

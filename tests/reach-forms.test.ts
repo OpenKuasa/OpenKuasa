@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   DEFAULT_FORM_CATEGORIES,
+  DEFAULT_FORM_CONSENT,
   FORM_MESSAGES,
   NO_FORM_FILTERS,
   filterForms,
@@ -72,13 +73,33 @@ describe('slug rules', () => {
 });
 
 describe('parseFormFields', () => {
-  const typed = { name: ' Raya Promo ', category: ' Promotions ', slug: '/raya-promo', status: 'active' };
+  const typed = {
+    name: ' Raya Promo ',
+    category: ' Promotions ',
+    slug: '/raya-promo',
+    status: 'active',
+    consent_text: `  ${DEFAULT_FORM_CONSENT}\n`,
+  };
 
   it('shapes what was typed for the actions', () => {
     expect(parseFormFields(typed)).toEqual({
       ok: true,
-      input: { name: 'Raya Promo', category: 'Promotions', slug: 'raya-promo', status: 'active' },
+      input: {
+        name: 'Raya Promo',
+        category: 'Promotions',
+        slug: 'raya-promo',
+        status: 'active',
+        consent_text: DEFAULT_FORM_CONSENT,
+      },
     });
+  });
+  it('asks for a consent sentence of 1 to 300 characters, counted as the database counts them', () => {
+    expect(parseFormFields({ ...typed, consent_text: ' \n\t ' })).toEqual({ ok: false, error: FORM_MESSAGES.consent });
+    expect(parseFormFields({ ...typed, consent_text: 'c'.repeat(301) })).toEqual({ ok: false, error: FORM_MESSAGES.consentTooLong });
+    expect(parseFormFields({ ...typed, consent_text: ` ${'c'.repeat(300)} ` })).toMatchObject({ ok: true, input: { consent_text: 'c'.repeat(300) } });
+    // One emoji is one character, as in Postgres, not two UTF-16 units.
+    expect(parseFormFields({ ...typed, consent_text: '😀'.repeat(300) })).toMatchObject({ ok: true });
+    expect(parseFormFields({ ...typed, consent_text: '😀'.repeat(301) })).toEqual({ ok: false, error: FORM_MESSAGES.consentTooLong });
   });
   it('asks for a name first', () => {
     expect(parseFormFields({ ...typed, name: '   ' })).toEqual({ ok: false, error: 'Enter a name for the form.' });

@@ -75,7 +75,7 @@ describe('AI write tools reuse the capability schemas (parity)', () => {
     const create = z.toJSONSchema(createFormInput, { io: 'input' }) as { required?: string[]; properties: Record<string, unknown> };
     // Only the name is needed; the link is derived when it is left out.
     expect(create.required).toEqual(['name']);
-    expect(Object.keys(create.properties).sort()).toEqual(['category', 'channel', 'name', 'slug', 'status']);
+    expect(Object.keys(create.properties).sort()).toEqual(['category', 'channel', 'consent_text', 'name', 'slug', 'status']);
   });
 
   it('omits write tools when the caller cannot write', () => {

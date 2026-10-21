@@ -81,6 +81,14 @@ describe('form capability schemas', () => {
     expect(first(deleteFormInput, { id: 'form_1' })).toBe('That form no longer exists.');
     expect(first(updateFormInput, { id: 'nope', name: 'x' })).toBe('That form no longer exists.');
   });
+  it('asks for a consent sentence of 1 to 300 characters', () => {
+    expect(first(createFormInput, { name: 'x y', consent_text: '   ' })).toBe('Enter the sentence visitors tick to agree.');
+    expect(first(updateFormInput, { id: ID, consent_text: 'c'.repeat(301) }))
+      .toBe('Keep the consent sentence to 300 characters or fewer.');
+    expect(updateFormInput.safeParse({ id: ID, consent_text: 'c'.repeat(300) }).success).toBe(true);
+    // Left out, a new form takes the database's default.
+    expect(createFormInput.parse({ name: 'x y' })).not.toHaveProperty('consent_text');
+  });
   it('has no place for the counters or the workspace', () => {
     const parsed = updateFormInput.parse({ id: ID, name: 'x', views_count: 9, submissions_count: 9, org_id: 'other' });
     expect(parsed).not.toHaveProperty('views_count');
@@ -103,6 +111,14 @@ describe('createForm', () => {
     expect(calls[0].values).toEqual({
       org_id: 'org-1', name: 'Raya Promo', category: 'Promotions', slug: 'raya-promo', channel: null, status: 'active',
     });
+  });
+  it('leaves the consent sentence to the database default unless one is given', async () => {
+    const { ctx, calls } = fakeClient({ data: row, error: null });
+    await createForm(ctx, { name: 'Raya Promo' });
+    expect(calls[0].values).not.toHaveProperty('consent_text');
+    const own = fakeClient({ data: row, error: null });
+    await createForm(own.ctx, { name: 'Raya Promo', consent_text: '  {workspace} may call me.  ' });
+    expect(own.calls[0].values).toMatchObject({ consent_text: '{workspace} may call me.' });
   });
   it('derives the link from the name when none is given', async () => {
     const { ctx, calls } = fakeClient({ data: row, error: null });
@@ -150,6 +166,14 @@ describe('updateForm', () => {
     const alone = fakeClient({ data: row, error: null });
     expect(await updateForm(alone.ctx, { id: ID, slug: '' })).toMatchObject({ ok: false });
     expect(alone.calls).toHaveLength(0);
+  });
+  it('saves a changed consent sentence, trimmed', async () => {
+    const { ctx, calls } = fakeClient({ data: row, error: null });
+    expect((await updateForm(ctx, { id: ID, consent_text: ' I agree {workspace} may email me. ' })).ok).toBe(true);
+    expect(calls[0].values).toEqual({
+      consent_text: 'I agree {workspace} may email me.',
+      updated_at: expect.any(String),
+    });
   });
   it('has nothing to do when only the id is sent', async () => {
     const { ctx, calls } = fakeClient({ data: row, error: null });

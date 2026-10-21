@@ -42,6 +42,8 @@ let serverOnly = false;
 let migrationMissing = false;
 
 const ORG_NAME = 'Public Forms Kedai Sdn Bhd';
+/** The default consent sentence, as a visitor of this workspace reads it. */
+const CONSENT = `I agree that ${ORG_NAME} may keep these details and contact me about my enquiry.`;
 const UNKNOWN = '00000000-0000-4000-8000-00000000dead';
 
 beforeAll(async () => {
@@ -85,7 +87,7 @@ async function makeForm(org: Owned, name: string, status: 'draft' | 'active' | '
   return data!.id as string;
 }
 
-const submit = (formId: string, fields: { name?: string | null; email?: string | null; phone?: string | null; message?: string | null; honeypot?: string }) =>
+const submit = (formId: string, fields: { name?: string | null; email?: string | null; phone?: string | null; message?: string | null; honeypot?: string; consent?: boolean | null }) =>
   writer.rpc('submit_public_form', {
     p_form_id: formId,
     p_name: fields.name === undefined ? 'Siti Aisyah' : fields.name,
@@ -93,6 +95,8 @@ const submit = (formId: string, fields: { name?: string | null; email?: string |
     p_phone: fields.phone ?? null,
     p_message: fields.message ?? null,
     p_honeypot: fields.honeypot ?? null,
+    // The box is ticked unless a test says otherwise (20261124130000_kasturi_form_consent.sql).
+    p_consent: fields.consent === undefined ? true : fields.consent,
   });
 
 /**
@@ -147,10 +151,12 @@ testWithSupabase('the public lookup gives the form name, the workspace name and 
   const formId = await makeForm(owner, 'Raya Promo');
   const { data, error } = await visitor.rpc('get_public_form', { p_form_id: formId });
   expect(error, error?.message).toBeNull();
-  expect(data).toEqual([{ form_name: 'Raya Promo', org_name: ORG_NAME, accepting: true }]);
-  expect(Object.keys(data[0]).sort()).toEqual(['accepting', 'form_name', 'org_name']);
+  expect(data).toEqual([{ form_name: 'Raya Promo', org_name: ORG_NAME, accepting: true, consent_text: CONSENT }]);
+  expect(Object.keys(data[0]).sort()).toEqual(['accepting', 'consent_text', 'form_name', 'org_name']);
   // Through the module the page uses.
-  expect(await getPublicForm(visitor, formId)).toEqual({ accepting: true, name: 'Raya Promo', orgName: ORG_NAME });
+  expect(await getPublicForm(visitor, formId)).toEqual({
+    accepting: true, name: 'Raya Promo', orgName: ORG_NAME, consentText: CONSENT,
+  });
 });
 
 testWithSupabase('a draft or paused form is "not accepting" with no names; an unknown form is nothing at all', async (ctx) => {
@@ -159,7 +165,7 @@ testWithSupabase('a draft or paused form is "not accepting" with no names; an un
     const formId = await makeForm(owner, `Hidden ${status}`, status);
     const { data, error } = await visitor.rpc('get_public_form', { p_form_id: formId });
     expect(error, error?.message).toBeNull();
-    expect(data, status).toEqual([{ form_name: null, org_name: null, accepting: false }]);
+    expect(data, status).toEqual([{ form_name: null, org_name: null, accepting: false, consent_text: null }]);
     expect(await getPublicForm(visitor, formId)).toEqual({ accepting: false });
 
     const refused = await submit(formId, {});
@@ -310,7 +316,7 @@ testWithSupabase('the throttle refuses the 31st submission to one form within a 
   expect((await submit(formId, { name: 'Flood 31', email: address })).data).toBe('throttled');
   expect((await submit(formId, { name: 'Flood 32', email: email('flood-other') })).data).toBe('throttled');
   // Through the module the page uses.
-  expect(await submitPublicForm(writer, formId, { name: 'Flood 33', email: address, phone: null, message: null }))
+  expect(await submitPublicForm(writer, formId, { name: 'Flood 33', email: address, phone: null, message: null, consent: true }))
     .toEqual({ kind: 'throttled' });
 
   expect(await submissionsOf(formId)).toHaveLength(30);
@@ -441,7 +447,7 @@ testWithSupabase('the demo workspace takes no public submissions, and a demo gue
 
   // An active demo form is closed to the public, and says nothing about itself.
   const looked = await visitor.rpc('get_public_form', { p_form_id: demoForm.id });
-  expect(looked.data).toEqual([{ form_name: null, org_name: null, accepting: false }]);
+  expect(looked.data).toEqual([{ form_name: null, org_name: null, accepting: false, consent_text: null }]);
   expect((await submit(demoForm.id, {})).data).toBe('closed');
   await viewAs(null, demoForm.id);
   const after = await v.from('forms').select('views_count, submissions_count').eq('id', demoForm.id).single();
