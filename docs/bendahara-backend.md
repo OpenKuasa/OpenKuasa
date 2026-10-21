@@ -181,6 +181,7 @@ policy.
 | `finance_invoices`, `finance_invoice_lines` | Sales invoices and their lines. A draft has no `invoice_no`. Lines keep the order they were entered in (`position`). `quotation_id` is the quotation an invoice was made from, if any. |
 | `finance_quotations`, `finance_quotation_lines` | Quotations and their lines, shaped like invoices. A draft has no `quotation_no`. |
 | `finance_credit_notes` | A credit against one posted invoice: one amount and a reason, no lines. A draft has no `credit_note_no`. |
+| `finance_sst_settings` | One row per workspace: the SST taxable period's start month, the service and sales tax registration numbers, and when service tax is due. Owner or admin writes; see SST settings and tax type. |
 | `finance_supplier_credit_notes`, `finance_supplier_credit_applications` | A credit from a supplier against one posted bill (one amount, a reason, the supplier's own reference), and which bill took how much of it. See Supplier credit notes. |
 | `finance_transactions` | One row per movement of money: direction, account, date, amount, method, status. |
 | `finance_allocations` | How a movement is split across the documents it pays. Each row names exactly one document: a bill (`bill_id`), an invoice (`invoice_id`), a credit note (`credit_note_id`) or an expense (`expense_id`). `reason` is what a refund is for. One payment pays one kind of document: bills, or invoices and credit notes, or expenses. |
@@ -1842,6 +1843,44 @@ credit is applied to it (`FIN59`).
 `credited` off `balance`. Payments, posted contra entries and applied credit together may not pass a
 bill's total (`FIN05`): `finance_supplier_credit_application_guard`, `finance_allocation_guard_credit`
 and `finance_contra_guard_credit` each count the other two.
+
+## SST settings and tax type
+
+`20261124100000_bendahara_sst_settings` (database only; the screens come
+later). Stage 1 of the SST-02 return (#222): store what the return needs.
+
+**The table.** `finance_sst_settings` holds one row per workspace (`org_id` is
+the key, and the row goes when the workspace is deleted):
+`period_start_month` (1 to 12, the month the first two-month taxable period
+starts), `service_tax_no` and `sales_tax_no` (the registration numbers: null,
+or 1 to 35 characters with no space at either end), `service_tax_basis`
+(`payment`, the default, when service tax is due on what the customer paid, or
+`invoice`, on what was invoiced), and `updated_by` / `updated_at`, which a
+trigger (`finance_sst_settings_stamp`) sets on every update whatever the caller
+sent. Every member reads it; only an owner or admin inserts or updates it
+(`private.finance_may_sign_off`); there is no delete policy, and delete is not
+granted. It has the restrictive `mfa_required` policy like every finance table.
+
+**The columns.** `finance_products` and `finance_invoice_lines` each gain
+`tax_type` (`sales`, `service`, `none`, or null) and `sst_code` (the item's
+SST code: null, or 1 to 20 characters with no space at either end).
+
+**The rule.** `private.finance_sst_tax_type_for_rate(rate)` is the one mapping
+from a rate to a tax type: 5 and 10 are `sales`, 6 and 8 are `service`, 0 is
+`none`, and any other rate is null (a person picks the type). Existing products
+took their type from their rate when the migration ran.
+
+**The triggers.** A product inserted without a `tax_type` takes its rate's
+(`finance_product_tax_type`, before insert). An invoice line saved without a
+`tax_type` takes its product's `tax_type` and `sst_code`, or, with no product,
+its rate's type and no code (`finance_invoice_line_tax`, before insert or
+update). A type sent on the line stands. Because `finance_save_invoice`
+deletes and re-inserts a draft's lines on every save, a draft re-saved after
+its product changed takes the product's new type. `finance_invoice_line_tax`
+fires after `finance_invoice_line_guard` and `finance_invoice_line_rate` (same
+timing, name order), so a line of a posted invoice is still refused first with
+`FIN01`. It runs as the owner and reads the product in the line's own
+workspace only. Lines saved before the migration keep a null type.
 
 ## Refunds
 
