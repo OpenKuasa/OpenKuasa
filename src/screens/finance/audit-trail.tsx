@@ -1,313 +1,258 @@
-'use client';
-
-import { useState } from 'react';
+import Link from 'next/link';
 import { Activity, PieChart, ScrollText, Search } from 'lucide-react';
 import { ScreenContainer } from '@/components/screen/screen-container';
-import { filterRows, NoMatchesRow } from '@/components/screen/table-filter';
 import { PageHeader } from '@/components/screen/page-header';
 import { BentoGrid, BentoCard, BentoStat } from '@/components/bento/bento';
 import { AreaTrend, DonutStat, Sparkline, type Series, type Slice } from '@/components/charts';
+import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { getViewer, hasSupabaseEnv } from '@/lib/auth/viewer';
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table';
-import { cn } from '@/lib/utils';
+  AUDIT_ENTITY_TYPES,
+  AUDIT_PERIODS,
+  buildAuditSummary,
+  listFinanceAudit,
+  parseAuditFilters,
+  readAuditSummaryRows,
+  type AuditEntry,
+  type AuditFilters,
+  type AuditSummary,
+} from '@/lib/finance/audit';
+import { money, rm } from '@/lib/finance/format';
+import { displayDate } from '@/lib/finance/view-helpers';
+import { addDays, clockTime, malaysiaDate, todayInMalaysia } from '@/lib/people/dates';
+import { createClient } from '@/lib/supabase/server';
+import { SAMPLE_AUDIT_ENTRIES, SAMPLE_TODAY } from './audit-sample';
 
-/* ---- mock data (Rimba Ventures Sdn Bhd) --------------------------- */
+const ACTIVITY_SERIES: Series[] = [{ key: 'events', label: 'Events', color: 'var(--chart-1)' }];
+const SLICE_COLORS = ['var(--chart-1)', 'var(--chart-2)', 'var(--chart-5)', 'var(--chart-3)', 'var(--chart-4)', 'var(--muted-foreground)'];
 
-const ACTIVITY_TREND = [
-  { label: 'Thu', events: 12 },
-  { label: 'Fri', events: 18 },
-  { label: 'Sat', events: 9 },
-  { label: 'Sun', events: 6 },
-  { label: 'Mon', events: 26 },
-  { label: 'Tue', events: 23 },
-  { label: 'Wed', events: 24 },
-  { label: 'Today', events: 24 },
-];
-const ACTIVITY_SERIES: Series[] = [
-  { key: 'events', label: 'Events', color: 'var(--chart-1)' },
-];
+const CANT_LOAD = "Couldn't load the audit trail — please refresh";
+const NOTHING_YET = 'Nothing recorded yet. The audit trail starts on 23 Oct 2026; earlier changes were not recorded.';
+const NO_MATCH = 'No events match these filters.';
 
-/** Events this week by category — sums to 142. */
-const BY_CATEGORY: Slice[] = [
-  { key: 'sales', label: 'Sales', value: 48, color: 'var(--chart-1)' },
-  { key: 'purchases', label: 'Purchases', value: 36, color: 'var(--chart-2)' },
-  { key: 'expenses', label: 'Expenses', value: 32, color: 'var(--chart-5)' },
-  { key: 'products', label: 'Products', value: 14, color: 'var(--chart-3)' },
-  { key: 'compliance', label: 'Compliance', value: 12, color: 'var(--chart-4)' },
-];
+const SELECT_CLASS =
+  'h-9 w-full rounded-md border border-input bg-transparent px-2.5 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 sm:w-44';
 
-type AuditAction = 'Created' | 'Updated' | 'Deleted';
-type AuditCategory = 'Sales' | 'Purchases' | 'Expenses' | 'Products' | 'Compliance';
+type Loaded = { entries: AuditEntry[]; nextBefore: string | null; summary: AuditSummary };
 
-type AuditEntry = {
-  id: string;
-  timestamp: string;
-  user: string;
-  action: AuditAction;
-  category: AuditCategory;
-  entity: string;
-  details: string;
-};
+const toSummaryRows = (entries: AuditEntry[]) =>
+  entries.map((e) => ({ created_at: e.createdAt, entity_type: e.entityType, actor_name: e.actorName, event: e.details.event }));
 
-const ENTRIES: AuditEntry[] = [
-  { id: '1', timestamp: '07 Oct 14:20', user: 'Saudara', action: 'Created', category: 'Sales', entity: 'INV-1042', details: 'Invoice RM 1,240 for Aisyah Trading' },
-  { id: '2', timestamp: '07 Oct 11:05', user: 'Aisyah', action: 'Updated', category: 'Expenses', entity: 'EXP-320', details: 'Amount RM 180 → RM 200' },
-  { id: '3', timestamp: '06 Oct 16:40', user: 'Faiz', action: 'Deleted', category: 'Sales', entity: 'QT-214', details: 'Draft quotation removed' },
-  { id: '4', timestamp: '06 Oct 10:12', user: 'Saudara', action: 'Created', category: 'Purchases', entity: 'BILL-088', details: 'Bill RM 2,300 from Lim Hardware' },
-  { id: '5', timestamp: '05 Oct 17:30', user: 'Aisyah', action: 'Updated', category: 'Compliance', entity: 'INV-1038', details: 'Customer TIN corrected for LHDN resubmission' },
-  { id: '6', timestamp: '05 Oct 09:48', user: 'Faiz', action: 'Created', category: 'Expenses', entity: 'EXP-321', details: 'Expense RM 95 — TNB electricity' },
-  { id: '7', timestamp: '04 Oct 15:22', user: 'Saudara', action: 'Updated', category: 'Products', entity: 'PRD-010', details: 'Price RM 80 → RM 85' },
-  { id: '8', timestamp: '03 Oct 13:07', user: 'Aisyah', action: 'Deleted', category: 'Expenses', entity: 'EXP-317', details: 'Duplicate expense entry removed' },
-  { id: '9', timestamp: '03 Oct 09:15', user: 'Saudara', action: 'Created', category: 'Compliance', entity: 'INV-1041', details: 'e-Invoice submitted to LHDN MyInvois' },
-  { id: '10', timestamp: '02 Oct 16:02', user: 'Nurul', action: 'Updated', category: 'Purchases', entity: 'BILL-086', details: 'Nusantara Logistics bill approved for payment' },
-];
+/** Without a database: the sample log, narrowed by the same filters the database applies. */
+function sampleLoad(filters: AuditFilters): Loaded {
+  const days = AUDIT_PERIODS.find((p) => p.value === filters.period)?.days ?? null;
+  const from = days === null ? null : addDays(SAMPLE_TODAY, -days);
+  const q = filters.q.toLowerCase();
+  const entries = SAMPLE_AUDIT_ENTRIES.filter(
+    (e) =>
+      (!filters.type || e.entityType === filters.type) &&
+      (!filters.actor || e.actorName === filters.actor) &&
+      (from === null || malaysiaDate(e.createdAt) >= from) &&
+      (!q || `${e.action} ${e.target ?? ''} ${e.details.party ?? ''}`.toLowerCase().includes(q)),
+  );
+  return { entries, nextBefore: null, summary: buildAuditSummary(toSummaryRows(SAMPLE_AUDIT_ENTRIES), SAMPLE_TODAY) };
+}
 
-const ACTION_STYLES: Record<AuditAction, string> = {
-  Created: 'bg-emerald-500/15 text-emerald-600',
-  Updated: 'bg-amber-500/15 text-amber-600',
-  Deleted: 'bg-red-500/15 text-red-600',
-};
+/** The log page and the summary; null when either could not be read. */
+async function load(filters: AuditFilters): Promise<Loaded | null> {
+  if (!hasSupabaseEnv()) return sampleLoad(filters);
+  try {
+    const viewer = await getViewer();
+    const ctx = { client: await createClient(), orgId: viewer.orgId };
+    const [page, rows] = await Promise.all([listFinanceAudit(ctx, filters), readAuditSummaryRows(ctx)]);
+    return { ...page, summary: buildAuditSummary(rows, todayInMalaysia(new Date())) };
+  } catch (error) {
+    console.error('[finance] the audit trail could not be read:', error);
+    return null;
+  }
+}
 
-const CATEGORY_COLOR: Record<AuditCategory, string> = {
-  Sales: 'var(--chart-1)',
-  Purchases: 'var(--chart-2)',
-  Expenses: 'var(--chart-5)',
-  Products: 'var(--chart-3)',
-  Compliance: 'var(--chart-4)',
-};
+const isFiltered = (f: AuditFilters) => f.type !== null || f.actor !== null || f.q !== '' || f.period !== parseAuditFilters({}).period;
 
-/* ------------------------------------------------------------------ */
+/** The link to the next older page, keeping the filters. */
+function olderHref(f: AuditFilters, before: string) {
+  const p = new URLSearchParams();
+  if (f.type) p.set('type', f.type);
+  if (f.actor) p.set('actor', f.actor);
+  if (f.period !== parseAuditFilters({}).period) p.set('period', f.period);
+  if (f.q) p.set('q', f.q);
+  p.set('before', before);
+  return `/finance/audit-trail?${p.toString()}`;
+}
 
-export default function AuditTrailScreen() {
-  const [query, setQuery] = useState('');
-  const [user, setUser] = useState('all');
-  const [category, setCategory] = useState('all');
-  const [action, setAction] = useState('all');
-  const rows = filterRows(ENTRIES, query, (e) => `${e.entity} ${e.details} ${e.user}`, { user, category, action });
+function Details({ entry }: { entry: AuditEntry }) {
+  const { party, amount, amount_myr: amountMyr, currency } = entry.details;
+  const base = amountMyr ?? amount;
+  const parts: string[] = [];
+  if (party) parts.push(party);
+  if (typeof base === 'number') {
+    const foreign = currency && currency !== 'MYR' && typeof amount === 'number' ? ` (${money(amount, currency)})` : '';
+    parts.push(`${rm(base)}${foreign}`);
+  }
+  return <>{parts.join(' · ')}</>;
+}
+
+export default async function AuditTrailScreen({
+  searchParams,
+}: {
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
+}) {
+  const params = searchParams ? await searchParams : {};
+  const filters = parseAuditFilters(params);
+  const data = await load(filters);
 
   return (
     <ScreenContainer>
-      <PageHeader
-        title="Audit Trail"
-        subtitle="Every change to the books, logged for you, Saudara."
-      />
+      <PageHeader title="Audit Trail" subtitle="Every change to the books, logged for you, Saudara." />
 
-      <BentoGrid>
-        {/* KPI row */}
-        <BentoCard tone="primary" className="col-span-1 md:col-span-3">
-          <BentoStat
-            label="Events today"
-            value="24"
-            delta="+4"
-            onPrimary
-            chart={
-              <Sparkline
-                data={[12, 18, 9, 6, 26, 23, 24, 24]}
-                color="var(--primary-foreground)"
-                height={36}
-              />
-            }
-          />
-        </BentoCard>
-        <BentoCard className="col-span-1 md:col-span-3">
-          <BentoStat
-            label="This week"
-            value="142"
-            delta="+9%"
-            deltaTone="up"
-            chart={
-              <Sparkline
-                data={[98, 108, 112, 120, 128, 134, 138, 142]}
-                color="var(--chart-2)"
-                height={36}
-              />
-            }
-          />
-        </BentoCard>
-        <BentoCard className="col-span-1 md:col-span-3">
-          <BentoStat
-            label="Compliance events"
-            value="12"
-            delta="LHDN & SST"
-            deltaTone="flat"
-            chart={
-              <Sparkline
-                data={[6, 7, 8, 9, 10, 11, 11, 12]}
-                color="var(--chart-4)"
-                height={36}
-              />
-            }
-          />
-        </BentoCard>
-        <BentoCard className="col-span-1 md:col-span-3">
-          <BentoStat
-            label="Deletions"
-            value="6"
-            delta="−2"
-            deltaTone="up"
-            chart={
-              <Sparkline
-                data={[9, 8, 8, 7, 7, 6, 6, 6]}
-                color="var(--chart-3)"
-                height={36}
-              />
-            }
-          />
-        </BentoCard>
+      {data === null ? (
+        <BentoGrid>
+          <BentoCard className="col-span-2 md:col-span-12">
+            <p className="text-sm text-muted-foreground">{CANT_LOAD}</p>
+          </BentoCard>
+        </BentoGrid>
+      ) : (
+        <AuditBody data={data} filters={filters} />
+      )}
+    </ScreenContainer>
+  );
+}
 
-        {/* Activity trend + category mix */}
-        <BentoCard
-          title="Activity over time"
-          subtitle="Logged events · last 8 days"
-          icon={Activity}
-          className="col-span-2 md:col-span-8"
-        >
-          <AreaTrend data={ACTIVITY_TREND} series={ACTIVITY_SERIES} height={240} />
-        </BentoCard>
-        <BentoCard
-          title="By category"
-          subtitle="Events this week"
-          icon={PieChart}
-          className="col-span-2 md:col-span-4"
-        >
-          <DonutStat
-            data={BY_CATEGORY}
-            height={240}
-            centerValue="142"
-            centerLabel="events"
-          />
-        </BentoCard>
+function AuditBody({ data, filters }: { data: Loaded; filters: AuditFilters }) {
+  const { entries, nextBefore, summary } = data;
+  const trend = summary.daily.map((d) => ({ label: d.label, events: d.count }));
+  const slices: Slice[] = summary.byType.map((t, i) => ({
+    key: t.type,
+    label: t.label,
+    value: t.count,
+    color: SLICE_COLORS[i % SLICE_COLORS.length],
+  }));
+  const typeLabel = new Map(AUDIT_ENTITY_TYPES.map((t) => [t.value, t]));
+  const total = summary.byType.reduce((n, t) => n + t.count, 0);
 
-        {/* Audit log table */}
-        <BentoCard
-          title="Activity log"
-          subtitle="Who changed what, and when"
-          icon={ScrollText}
-          className="col-span-2 md:col-span-12"
-        >
-          <div className="mb-4 flex flex-wrap items-center gap-2">
-            <div className="relative w-full sm:w-64">
-              <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-              <Input
-                type="search"
-                aria-label="Search activity…"
-                placeholder="Search activity…"
-                className="pl-8"
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-              />
-            </div>
-            <Select value={user} onValueChange={setUser}>
-              <SelectTrigger className="w-40">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All users</SelectItem>
-                <SelectItem value="Saudara">Saudara</SelectItem>
-                <SelectItem value="Aisyah">Aisyah</SelectItem>
-                <SelectItem value="Faiz">Faiz</SelectItem>
-                <SelectItem value="Nurul">Nurul</SelectItem>
-              </SelectContent>
-            </Select>
-            <Select value={category} onValueChange={setCategory}>
-              <SelectTrigger className="w-40">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All categories</SelectItem>
-                <SelectItem value="Sales">Sales</SelectItem>
-                <SelectItem value="Purchases">Purchases</SelectItem>
-                <SelectItem value="Expenses">Expenses</SelectItem>
-                <SelectItem value="Products">Products</SelectItem>
-                <SelectItem value="Compliance">Compliance</SelectItem>
-              </SelectContent>
-            </Select>
-            <Select value={action} onValueChange={setAction}>
-              <SelectTrigger className="w-40">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All actions</SelectItem>
-                <SelectItem value="Created">Created</SelectItem>
-                <SelectItem value="Updated">Updated</SelectItem>
-                <SelectItem value="Deleted">Deleted</SelectItem>
-              </SelectContent>
-            </Select>
+  return (
+    <BentoGrid>
+      <BentoCard tone="primary" className="col-span-1 md:col-span-3">
+        <BentoStat
+          label="Events today"
+          value={String(summary.today)}
+          onPrimary
+          chart={<Sparkline data={summary.daily.map((d) => d.count)} color="var(--primary-foreground)" height={36} />}
+        />
+      </BentoCard>
+      <BentoCard className="col-span-1 md:col-span-3">
+        <BentoStat label="This week" value={String(summary.week)} />
+      </BentoCard>
+      <BentoCard className="col-span-1 md:col-span-3">
+        <BentoStat label="Voids this month" value={String(summary.voidsThisMonth)} />
+      </BentoCard>
+      <BentoCard className="col-span-1 md:col-span-3">
+        <BentoStat label="Deletions this month" value={String(summary.deletionsThisMonth)} />
+      </BentoCard>
+
+      <BentoCard title="Activity over time" subtitle="Logged events · last 14 days" icon={Activity} className="col-span-2 md:col-span-8">
+        <AreaTrend data={trend} series={ACTIVITY_SERIES} height={240} />
+      </BentoCard>
+      <BentoCard title="By document type" subtitle="All logged events" icon={PieChart} className="col-span-2 md:col-span-4">
+        {slices.length === 0 ? (
+          <p className="text-sm text-muted-foreground">Nothing recorded yet.</p>
+        ) : (
+          <DonutStat data={slices} height={240} centerValue={String(total)} centerLabel="events" />
+        )}
+      </BentoCard>
+
+      <BentoCard title="Activity log" subtitle="Who changed what, and when" icon={ScrollText} className="col-span-2 md:col-span-12">
+        <form method="get" action="/finance/audit-trail" className="mb-4 flex flex-wrap items-center gap-2">
+          <select name="type" aria-label="Document type" defaultValue={filters.type ?? ''} className={SELECT_CLASS}>
+            <option value="">All document types</option>
+            {AUDIT_ENTITY_TYPES.map((t) => (
+              <option key={t.value} value={t.value}>
+                {t.label}
+              </option>
+            ))}
+          </select>
+          <select name="actor" aria-label="Person" defaultValue={filters.actor ?? ''} className={SELECT_CLASS}>
+            <option value="">All people</option>
+            {summary.actors.map((a) => (
+              <option key={a} value={a}>
+                {a}
+              </option>
+            ))}
+          </select>
+          <select name="period" aria-label="Period" defaultValue={filters.period} className={SELECT_CLASS}>
+            {AUDIT_PERIODS.map((p) => (
+              <option key={p.value} value={p.value}>
+                {p.label}
+              </option>
+            ))}
+          </select>
+          <div className="relative w-full sm:w-64">
+            <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+            <Input type="search" name="q" aria-label="Search activity" placeholder="Search activity…" defaultValue={filters.q} className="pl-8" />
           </div>
+          <Button type="submit">Apply</Button>
+          <Link href="/finance/audit-trail" className="text-sm text-muted-foreground underline-offset-4 hover:underline">
+            Clear
+          </Link>
+        </form>
 
-          <div className="overflow-x-auto">
-            <Table>
-              <TableHeader>
-                <TableRow className="bg-muted/40">
-                  <TableHead className="whitespace-nowrap">Timestamp</TableHead>
-                  <TableHead>User</TableHead>
-                  <TableHead>Action</TableHead>
-                  <TableHead>Category</TableHead>
-                  <TableHead>Entity</TableHead>
-                  <TableHead>Details</TableHead>
+        <div className="overflow-x-auto">
+          <Table>
+            <TableHeader>
+              <TableRow className="bg-muted/40">
+                <TableHead className="whitespace-nowrap">When</TableHead>
+                <TableHead>Who</TableHead>
+                <TableHead>What</TableHead>
+                <TableHead>Document</TableHead>
+                <TableHead>Details</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {entries.length === 0 && (
+                <TableRow>
+                  <TableCell colSpan={5} className="py-8 text-center text-sm text-muted-foreground">
+                    {isFiltered(filters) || filters.before ? NO_MATCH : NOTHING_YET}
+                  </TableCell>
                 </TableRow>
-              </TableHeader>
-              <TableBody>
-                {rows.length === 0 && <NoMatchesRow colSpan={6} />}
-                {rows.map((e) => (
+              )}
+              {entries.map((e) => {
+                const path = typeLabel.get(e.entityType)?.path ?? null;
+                const label = e.target ?? typeLabel.get(e.entityType)?.label ?? e.entityType;
+                return (
                   <TableRow key={e.id}>
                     <TableCell className="whitespace-nowrap tabular-nums text-muted-foreground">
-                      {e.timestamp}
+                      {displayDate(malaysiaDate(e.createdAt))} {clockTime(e.createdAt)}
                     </TableCell>
-                    <TableCell className="whitespace-nowrap font-medium">
-                      {e.user}
-                    </TableCell>
-                    <TableCell>
-                      <span
-                        className={cn(
-                          'inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium',
-                          ACTION_STYLES[e.action],
-                        )}
-                      >
-                        {e.action}
-                      </span>
-                    </TableCell>
-                    <TableCell>
-                      <span
-                        className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium text-foreground"
-                        style={{
-                          backgroundColor: `color-mix(in oklab, ${CATEGORY_COLOR[e.category]} 16%, transparent)`,
-                        }}
-                      >
-                        <span
-                          className="size-1.5 rounded-full"
-                          style={{ backgroundColor: CATEGORY_COLOR[e.category] }}
-                        />
-                        {e.category}
-                      </span>
-                    </TableCell>
+                    <TableCell className="whitespace-nowrap font-medium">{e.actorName}</TableCell>
+                    <TableCell className="whitespace-nowrap">{e.action}</TableCell>
                     <TableCell className="whitespace-nowrap font-mono text-xs">
-                      {e.entity}
+                      {path ? (
+                        <Link href={path} className="underline-offset-4 hover:underline">
+                          {label}
+                        </Link>
+                      ) : (
+                        label
+                      )}
                     </TableCell>
-                    <TableCell className="min-w-64 text-muted-foreground">
-                      {e.details}
+                    <TableCell className="min-w-48 text-muted-foreground">
+                      <Details entry={e} />
                     </TableCell>
                   </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+                );
+              })}
+            </TableBody>
+          </Table>
+        </div>
+        {nextBefore && (
+          <div className="mt-4">
+            <Link href={olderHref(filters, nextBefore)} className="text-sm font-medium underline-offset-4 hover:underline">
+              Older
+            </Link>
           </div>
-        </BentoCard>
-      </BentoGrid>
-    </ScreenContainer>
+        )}
+      </BentoCard>
+    </BentoGrid>
   );
 }
