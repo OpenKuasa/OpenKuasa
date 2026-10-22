@@ -15,7 +15,16 @@ type CallEnd = {
     inputTokenDetails?: { cacheReadTokens?: number | undefined; cacheWriteTokens?: number | undefined };
   };
   performance: { responseTimeMs: number };
+  /** OpenRouter says which provider served the call (`openrouter.provider`): each provider keeps its own prompt cache. */
+  providerMetadata?: unknown;
 };
+
+/** The provider OpenRouter routed the call to, as a short label of plain characters, or '' when it did not say. */
+function servedBy(metadata: unknown): string {
+  const name = (metadata as { openrouter?: { provider?: unknown } } | null | undefined)?.openrouter?.provider;
+  if (typeof name !== 'string') return '';
+  return name.replace(/\s+/g, '_').replace(/[^A-Za-z0-9_.-]/g, '').slice(0, 40);
+}
 
 export function logModelCall(agent: string, model: string) {
   return (call: CallEnd) => {
@@ -24,8 +33,9 @@ export function logModelCall(agent: string, model: string) {
         ? call.finishReason
         : ((call.finishReason as { unified?: string } | null)?.unified ?? 'unknown');
     const cache = call.usage.inputTokenDetails;
+    const provider = servedBy(call.providerMetadata);
     console.info(
-      `[ai] agent=${agent} model=${call.modelId || model} ms=${Math.round(call.performance.responseTimeMs)} ` +
+      `[ai] agent=${agent} model=${call.modelId || model}${provider ? ` provider=${provider}` : ''} ms=${Math.round(call.performance.responseTimeMs)} ` +
         // `cached` is input read from the prompt cache (billed at a fraction), `wrote` is input written to it.
         `in=${call.usage.inputTokens ?? '?'} cached=${cache?.cacheReadTokens ?? 0} wrote=${cache?.cacheWriteTokens ?? 0} ` +
         `out=${call.usage.outputTokens ?? '?'} finish=${finish}`,

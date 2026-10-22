@@ -71,6 +71,14 @@ describe('logModelCall', () => {
     );
   });
 
+  it('names the provider OpenRouter sent the call to, since each provider keeps its own cache', () => {
+    const info = vi.spyOn(console, 'info').mockImplementation(() => {});
+    logModelCall('lekir', 'fallback')({ ...call({ cacheReadTokens: 0, cacheWriteTokens: 4600 }), providerMetadata: { openrouter: { provider: 'Amazon Bedrock' } } });
+    expect(info).toHaveBeenCalledWith(
+      '[ai] agent=lekir model=anthropic/claude-sonnet-4.6 provider=Amazon_Bedrock ms=1234 in=5000 cached=0 wrote=4600 out=120 finish=stop',
+    );
+  });
+
   it('says 0 when the provider reports no cache figures, so a missing cache is visible', () => {
     const info = vi.spyOn(console, 'info').mockImplementation(() => {});
     logModelCall('lekir', 'fallback')(call());
