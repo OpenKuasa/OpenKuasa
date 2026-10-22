@@ -23,7 +23,7 @@ import type {
   PeopleData,
   PeopleViewer,
   Shift,
-  ShiftKind,
+  ShiftType,
   TimesheetEntry,
   Weekday,
 } from './types';
@@ -413,13 +413,12 @@ export function buildTimesheet(input: {
 /* Shift Calendar                                                    */
 /* ---------------------------------------------------------------- */
 
-export const SHIFT_LABEL: Record<ShiftKind, string> = { morning: 'Morning', night: 'Night', off: 'Off' };
-
 export type ShiftRow = {
   employee_id: string;
   name: string;
   department: string | null;
-  cells: (ShiftKind | null)[];
+  /** Monday to Sunday: the shift type's id, or null for no shift. */
+  cells: (string | null)[];
   /** HR may change this row: an active employee, outside the demo. */
   editable: boolean;
 };
@@ -435,17 +434,33 @@ export type ShiftCalendarModel = {
   rows: ShiftRow[];
   /** HR outside the demo: the grid takes edits. */
   editable: boolean;
-  /** Last week's shifts by cell key (`employee|date`), for "Copy last week". Empty unless editable. */
-  previous: Record<string, ShiftKind>;
-  morning_count: number;
-  night_count: number;
+  /** Every type of the workspace, archived ones too (they stay on past shifts), by id. */
+  types: Record<string, ShiftType>;
+  /** The workspace's types as listed, archived ones too, by name: for the types panel. */
+  type_list: ShiftType[];
+  /** The types a cell may be set to: not archived, by name. */
+  active_types: ShiftType[];
+  /** Last week's shifts by cell key (`employee|date`), for "Copy last week": only those on a type still active. Empty unless editable. */
+  previous: Record<string, string>;
+  /** Shifts this week on a working type, and on an off type. */
+  working_count: number;
+  off_count: number;
+  /** How many shifts each type has this week, most first; types not used are left out. */
+  by_type: { type: ShiftType; count: number }[];
 };
+
+/** A type the rows point at but the list lacks (it should not happen): drawn by name only. */
+const unknownType = (id: string): ShiftType => ({
+  id, name: UNKNOWN, start_time: null, end_time: null, is_off: false, color: 'slate', archived: true,
+});
 
 export function buildShiftCalendar(input: {
   shifts: Shift[];
   employees: Employee[];
   viewer: PeopleViewer;
   today: string;
+  /** The workspace's shift types; none for a workspace that has not set any up. */
+  types?: ShiftType[];
   /** The Monday to show; this week when left out. */
   week?: string;
 }): ShiftCalendarModel {
@@ -456,6 +471,9 @@ export function buildShiftCalendar(input: {
   const view = weekView(viewer);
   const editable = view === 'hr';
   const people = new Map(input.employees.map((e) => [e.id, e]));
+  const types: Record<string, ShiftType> = {};
+  for (const t of input.types ?? []) types[t.id] = t;
+  const typeOf = (id: string) => types[id] ?? unknownType(id);
   const visible = visibleIds(viewer, input.employees);
   const seen = input.shifts.filter((s) => visible === null || visible.has(s.employee_id));
   const shifts = seen.filter((s) => s.work_date >= start && s.work_date <= end);
@@ -476,14 +494,24 @@ export function buildShiftCalendar(input: {
   if (editable) for (const e of input.employees) if (e.status === 'active') rowFor(e.id);
   for (const shift of shifts) {
     const index = days.findIndex((d) => d.date === shift.work_date);
-    rowFor(shift.employee_id).cells[index] = shift.shift;
+    rowFor(shift.employee_id).cells[index] = shift.shift_type_id;
+    if (!types[shift.shift_type_id]) types[shift.shift_type_id] = unknownType(shift.shift_type_id);
   }
 
-  const previous: Record<string, ShiftKind> = {};
+  const previous: Record<string, string> = {};
   if (editable) {
     const from = addDays(start, -7);
-    for (const s of seen) if (s.work_date >= from && s.work_date < start) previous[cellKey(s.employee_id, s.work_date)] = s.shift;
+    for (const s of seen) {
+      const type = types[s.shift_type_id];
+      if (s.work_date >= from && s.work_date < start && type && !type.archived) previous[cellKey(s.employee_id, s.work_date)] = s.shift_type_id;
+    }
   }
+
+  const counts = new Map<string, number>();
+  for (const s of shifts) counts.set(s.shift_type_id, (counts.get(s.shift_type_id) ?? 0) + 1);
+  const byType = [...counts.entries()]
+    .map(([id, count]) => ({ type: typeOf(id), count }))
+    .sort((a, b) => b.count - a.count || a.type.name.localeCompare(b.type.name));
 
   return {
     team: isTeamView(viewer),
@@ -494,9 +522,13 @@ export function buildShiftCalendar(input: {
     days,
     rows: [...byPerson.values()].sort(byOwnThenName(view === 'manager' ? viewer.employeeId : null)),
     editable,
+    types,
+    type_list: [...(input.types ?? [])].sort((a, b) => a.name.localeCompare(b.name)),
+    active_types: (input.types ?? []).filter((t) => !t.archived).sort((a, b) => a.name.localeCompare(b.name)),
     previous,
-    morning_count: shifts.filter((s) => s.shift === 'morning').length,
-    night_count: shifts.filter((s) => s.shift === 'night').length,
+    working_count: shifts.filter((s) => !typeOf(s.shift_type_id).is_off).length,
+    off_count: shifts.filter((s) => typeOf(s.shift_type_id).is_off).length,
+    by_type: byType,
   };
 }
 

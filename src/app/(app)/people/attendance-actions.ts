@@ -13,7 +13,7 @@ import {
 } from '@/lib/people/attendance-writes';
 import { type CapResult, type PeopleWriteContext, WRITE_FAILED } from '@/lib/people/capabilities';
 import { PEOPLE_PATHS } from '@/lib/people/paths';
-import { saveHours, saveRoster } from '@/lib/people/roster-writes';
+import { archiveShiftType, saveHours, saveRoster, saveShiftType } from '@/lib/people/roster-writes';
 import { getPeopleViewer } from '@/lib/people/viewer';
 import { createClient } from '@/lib/supabase/server';
 
@@ -123,6 +123,18 @@ export async function saveRosterAction(input: unknown) {
   const guard = await asAdmin();
   if (refused(guard)) return guard;
   return changed(await saveRoster(guard.ctx, input as never));
+}
+
+export async function saveShiftTypeAction(input: unknown) {
+  const guard = await asAdmin();
+  if (refused(guard)) return guard;
+  return changed(await saveShiftType(guard.ctx, input as never));
+}
+
+export async function archiveShiftTypeAction(input: unknown) {
+  const guard = await asAdmin();
+  if (refused(guard)) return guard;
+  return changed(await archiveShiftType(guard.ctx, input as never));
 }
 
 // ---- Hours: your own, or anyone's for an owner or admin ------------------------------------

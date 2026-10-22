@@ -34,6 +34,7 @@ import type {
 } from './types';
 import { STATUTORY_FIELDS } from './statutory-fields';
 import { DEFAULT_PEOPLE_SETTINGS, WEEKDAYS } from './types';
+import { type ShiftTypeRow, shiftTypeOf } from './roster';
 
 
 /** The API answers with at most this many rows per request. */
@@ -436,7 +437,11 @@ export function createSupabasePeopleData(client: SupabaseClient, orgId: string):
       rows<TimesheetEntry>('hr_timesheet_entries', 'id,employee_id,work_date,hours,billable_hours',
         { col: 'work_date', asc: false }, byWorkDate(from, to)),
     listShifts: (from, to) =>
-      rows<Shift>('hr_shifts', 'id,employee_id,work_date,shift', { col: 'work_date', asc: true }, byWorkDate(from, to)),
+      rows<Shift>('hr_shifts', 'id,employee_id,work_date,shift_type_id', { col: 'work_date', asc: true }, byWorkDate(from, to)),
+    listShiftTypes: () =>
+      rows<ShiftTypeRow>('hr_shift_types', 'id,name,start_time,end_time,is_off,color,archived_at', { col: 'name', asc: true }).then(
+        (list) => list.map(shiftTypeOf),
+      ),
     listPublicHolidays: () =>
       rows<PublicHoliday>('hr_public_holidays', 'id,name,holiday_date,scope,state', { col: 'holiday_date', asc: true }),
     listPayrollRuns: () =>
@@ -515,6 +520,7 @@ const EMPTY_PEOPLE_DATA: PeopleData = {
   listAttendance: none,
   listTimesheet: none,
   listShifts: none,
+  listShiftTypes: none,
   listPublicHolidays: none,
   listPayrollRuns: none,
   listPayslips: none,

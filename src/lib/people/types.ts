@@ -25,7 +25,12 @@ export type AttendanceStatus = 'present' | 'late' | 'absent' | 'on_leave';
 export type Weekday = 'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat' | 'sun';
 /** Monday first, the order the database stores a work week in. */
 export const WEEKDAYS: readonly Weekday[] = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
+/** The kinds of the three default shift types every workspace starts with. */
 export type ShiftKind = 'morning' | 'night' | 'off';
+
+/** The fixed palette a shift type's colour comes from. No purple, violet, fuchsia or indigo. */
+export const SHIFT_COLORS = ['sky', 'blue', 'cyan', 'teal', 'emerald', 'lime', 'amber', 'orange', 'red', 'rose', 'slate', 'stone'] as const;
+export type ShiftColor = (typeof SHIFT_COLORS)[number];
 
 export type Department = { id: string; name: string; created_at: string };
 
@@ -194,7 +199,21 @@ export type TimesheetEntry = {
   billable_hours: number;
 };
 
-export type Shift = { id: string; employee_id: string; work_date: string; shift: ShiftKind };
+export type Shift = { id: string; employee_id: string; work_date: string; shift_type_id: string };
+
+/**
+ * A workspace's kind of shift. Times are `HH:MM` on Malaysia's clock, both or neither; an end at or before the start
+ * crosses midnight. An off type has none. An archived type stays on past shifts and cannot be picked again.
+ */
+export type ShiftType = {
+  id: string;
+  name: string;
+  start_time: string | null;
+  end_time: string | null;
+  is_off: boolean;
+  color: ShiftColor;
+  archived: boolean;
+};
 
 export type PublicHoliday = {
   id: string;
@@ -444,6 +463,8 @@ export type PeopleData = {
   listAttendance(fromDate: string, toDate: string): Promise<AttendanceDay[]>;
   listTimesheet(fromDate: string, toDate: string): Promise<TimesheetEntry[]>;
   listShifts(fromDate: string, toDate: string): Promise<Shift[]>;
+  /** Every shift type of the workspace, archived ones included, by name. */
+  listShiftTypes(): Promise<ShiftType[]>;
   listPublicHolidays(): Promise<PublicHoliday[]>;
   listPayrollRuns(): Promise<PayrollRun[]>;
   /** Every payslip the caller may read, or (with `employeeId`) that one employee's only. */

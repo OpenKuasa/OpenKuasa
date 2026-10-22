@@ -35,11 +35,15 @@ import {
   type RequestStatus,
   type Review,
   type Shift,
+  type ShiftType,
   type TimeOffRequest,
   type TimesheetEntry,
   type Training,
   type TrainingEnrolment,
 } from './types';
+
+/** The sample company's three default shift types. */
+export const SEED_SHIFT_TYPE = { morning: 'seed-shift-type-morning', night: 'seed-shift-type-night', off: 'seed-shift-type-off' } as const;
 
 const DEPARTMENTS = ['Sales', 'Operations', 'Marketing', 'Finance', 'Management'];
 
@@ -431,6 +435,12 @@ export function createSeedPeopleData(now: Date = new Date()): PeopleData {
   }
 
   const monday = weekStart(today);
+  // The three defaults every workspace starts with.
+  const shiftTypes: ShiftType[] = [
+    { id: SEED_SHIFT_TYPE.morning, name: 'Morning', start_time: '09:00', end_time: '18:00', is_off: false, color: 'sky', archived: false },
+    { id: SEED_SHIFT_TYPE.night, name: 'Night', start_time: '21:00', end_time: '06:00', is_off: false, color: 'blue', archived: false },
+    { id: SEED_SHIFT_TYPE.off, name: 'Off', start_time: null, end_time: null, is_off: true, color: 'stone', archived: false },
+  ];
   const shifts: Shift[] = PEOPLE.filter(([, , , dept]) => dept === 'Operations').flatMap(([n]) =>
     Array.from({ length: 7 }, (_, i): Shift => {
       const turn = (n + i) % 4;
@@ -438,7 +448,7 @@ export function createSeedPeopleData(now: Date = new Date()): PeopleData {
         id: `seed-shift-${n}-${i}`,
         employee_id: employeeId(n),
         work_date: addDays(monday, i),
-        shift: turn === 0 ? 'off' : turn === 1 ? 'night' : 'morning',
+        shift_type_id: turn === 0 ? SEED_SHIFT_TYPE.off : turn === 1 ? SEED_SHIFT_TYPE.night : SEED_SHIFT_TYPE.morning,
       };
     }),
   );
@@ -712,6 +722,7 @@ export function createSeedPeopleData(now: Date = new Date()): PeopleData {
     listAttendance: async (from, to) => attendance.filter((d) => between(d.work_date, from, to)),
     listTimesheet: async (from, to) => timesheet.filter((d) => between(d.work_date, from, to)),
     listShifts: async (from, to) => shifts.filter((s) => between(s.work_date, from, to)),
+    listShiftTypes: async () => [...shiftTypes].sort((a, b) => a.name.localeCompare(b.name)),
     listPublicHolidays: async () => holidays,
     listPayrollRuns: async () => runs,
     listPayslips: async (employeeId) =>

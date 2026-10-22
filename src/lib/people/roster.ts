@@ -6,7 +6,7 @@
  * sent and what is drawn.
  */
 import { addDays, isRealDate, weekStart } from './dates';
-import type { ShiftKind } from './types';
+import { SHIFT_COLORS, type ShiftColor, type ShiftType } from './types';
 
 const EARLIEST_WEEK = '2000-01-03'; // the first Monday of 2000
 const LATEST_WEEK = '2100-12-27';
@@ -52,14 +52,102 @@ export function weekHref(path: string, monday: string, current: string): string 
 }
 
 /* ---------------------------------------------------------------- */
+/* Shift types                                                       */
+/* ---------------------------------------------------------------- */
+
+export type ShiftTypeRow = {
+  id: string;
+  name: string;
+  start_time: string | null;
+  end_time: string | null;
+  is_off: boolean;
+  color: string;
+  archived_at: string | null;
+};
+
+/** A shift type row as the app holds it: times as `HH:MM`, an unknown colour as slate. */
+export function shiftTypeOf(row: ShiftTypeRow): ShiftType {
+  const hm = (t: string | null) => (t && /^\d{2}:\d{2}/.test(t) ? t.slice(0, 5) : null);
+  return {
+    id: row.id,
+    name: row.name,
+    start_time: hm(row.start_time),
+    end_time: hm(row.end_time),
+    is_off: row.is_off,
+    color: (SHIFT_COLORS as readonly string[]).includes(row.color) ? (row.color as ShiftColor) : 'slate',
+    archived: row.archived_at !== null && row.archived_at !== undefined,
+  };
+}
+
+/** The classes each palette colour draws with: a light fill and readable text, in both themes. */
+export const SHIFT_COLOR_CLASS: Record<ShiftColor, string> = {
+  sky: 'bg-sky-500/15 text-sky-700 dark:text-sky-300',
+  blue: 'bg-blue-500/15 text-blue-700 dark:text-blue-300',
+  cyan: 'bg-cyan-500/15 text-cyan-700 dark:text-cyan-300',
+  teal: 'bg-teal-500/15 text-teal-700 dark:text-teal-300',
+  emerald: 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300',
+  lime: 'bg-lime-500/15 text-lime-700 dark:text-lime-300',
+  amber: 'bg-amber-500/15 text-amber-700 dark:text-amber-300',
+  orange: 'bg-orange-500/15 text-orange-700 dark:text-orange-300',
+  red: 'bg-red-500/15 text-red-700 dark:text-red-300',
+  rose: 'bg-rose-500/15 text-rose-700 dark:text-rose-300',
+  slate: 'bg-slate-500/15 text-slate-700 dark:text-slate-300',
+  stone: 'bg-stone-500/15 text-stone-700 dark:text-stone-300',
+};
+
+export const SHIFT_COLOR_LABEL: Record<ShiftColor, string> = {
+  sky: 'Sky', blue: 'Blue', cyan: 'Cyan', teal: 'Teal', emerald: 'Emerald', lime: 'Lime',
+  amber: 'Amber', orange: 'Orange', red: 'Red', rose: 'Rose', slate: 'Slate', stone: 'Stone',
+};
+
+/** True when a shift ends at or before its start: it runs past midnight. */
+export const crossesMidnight = (start: string, end: string) => end <= start;
+
+/** `09:00–18:00`, `21:00–06:00 (overnight)`, or null for a type with no times. */
+export function shiftTimes(type: Pick<ShiftType, 'start_time' | 'end_time'>): string | null {
+  if (!type.start_time || !type.end_time) return null;
+  const span = `${type.start_time}–${type.end_time}`;
+  return crossesMidnight(type.start_time, type.end_time) ? `${span} (overnight)` : span;
+}
+
+/** A type as a picker lists it: its name and its times. */
+export function shiftTypeLabel(type: Pick<ShiftType, 'name' | 'start_time' | 'end_time'>): string {
+  const times = shiftTimes(type);
+  return times ? `${type.name} · ${times}` : type.name;
+}
+
+/** The form's fields for a type, as typed. */
+export type ShiftTypeDraft = { name: string; is_off: boolean; start_time: string; end_time: string; color: ShiftColor };
+
+/** What the save sends for a type, or the reason it cannot be sent. Empty times mean none. */
+export function toShiftTypeInput(
+  draft: ShiftTypeDraft,
+):
+  | { ok: true; input: { name: string; is_off: boolean; start_time: string | null; end_time: string | null; color: ShiftColor } }
+  | { ok: false; error: string } {
+  const name = draft.name.trim();
+  if (name === '') return { ok: false, error: 'Give the shift type a name.' };
+  if (name.length > 40) return { ok: false, error: 'Keep the name to 40 characters.' };
+  const start = draft.is_off ? '' : draft.start_time.trim();
+  const end = draft.is_off ? '' : draft.end_time.trim();
+  if ((start === '') !== (end === '')) return { ok: false, error: 'Give both a start and an end time, or neither.' };
+  const hm = /^([01]\d|2[0-3]):[0-5]\d$/;
+  if (start !== '' && (!hm.test(start) || !hm.test(end))) return { ok: false, error: 'Times must be times of day, as HH:MM.' };
+  return {
+    ok: true,
+    input: { name, is_off: draft.is_off, start_time: start || null, end_time: end || null, color: draft.color },
+  };
+}
+
+/* ---------------------------------------------------------------- */
 /* Roster grid                                                       */
 /* ---------------------------------------------------------------- */
 
 /** One cell: an employee on a date. */
 export const cellKey = (employeeId: string, date: string) => `${employeeId}|${date}`;
 
-/** What a cell holds: a shift, or null for none. */
-export type Cell = ShiftKind | null;
+/** What a cell holds: a shift type's id, or null for none. */
+export type Cell = string | null;
 
 /** Edits the person has made and not saved: cell key to the value they chose. */
 export type RosterEdits = Record<string, Cell>;
