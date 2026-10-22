@@ -11,6 +11,7 @@
  */
 
 import { kindOfTool, type ItemKind, type NameFinder, type RowFinder } from '@/lib/chat/change-titles';
+import { RECOMMENDATION_LABEL, ratingWords } from '@/lib/hire/interview-feedback';
 
 export type ChangeRow = {
   /** The argument this row shows, as a path into the input: `private.bank_account`. */
@@ -103,6 +104,21 @@ function seconds(value: number): string {
     }
   }
   return `${value} seconds`;
+}
+
+/** The changes whose top-level `rating` is a whole number out of 5: shown as "4 out of 5", as the screens say it. */
+const OUT_OF_FIVE = new Set(['saveInterviewFeedback', 'rateApplication']);
+
+/** A top-level value worded the way the screens word it, for the few tools that have such a word; else as `valueText` has it. */
+export function cardValueText(toolName: string, path: string[], value: unknown): string {
+  const key = path.length === 1 ? path[0] : null;
+  if (key === 'rating' && OUT_OF_FIVE.has(toolName) && typeof value === 'number' && Number.isInteger(value) && value >= 1 && value <= 5) {
+    return ratingWords(value);
+  }
+  if (key === 'recommendation' && toolName === 'saveInterviewFeedback' && typeof value === 'string' && Object.hasOwn(RECOMMENDATION_LABEL, value)) {
+    return RECOMMENDATION_LABEL[value as keyof typeof RECOMMENDATION_LABEL];
+  }
+  return valueText(path[path.length - 1] ?? '', value);
 }
 
 /** One value as the card shows it. A value is never left out: an empty one says so. */
@@ -264,9 +280,9 @@ export function changeRows(toolName: string, input: unknown, find?: NameFinder, 
         });
         continue;
       }
-      const row: ChangeRow = { key: at.join('.'), kind: 'field', label, to: valueText(key, inner) };
+      const row: ChangeRow = { key: at.join('.'), kind: 'field', label, to: cardValueText(toolName, at, inner) };
       const was = fromRow(current, at);
-      if (was !== undefined) row.from = valueText(key, was);
+      if (was !== undefined) row.from = cardValueText(toolName, at, was);
       rows.push(row);
     }
   };

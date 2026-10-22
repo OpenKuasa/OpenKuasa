@@ -195,14 +195,19 @@ describe('the Approve cards for feedback', () => {
     const rows = changeRows('saveInterviewFeedback', input, found);
     expect(rows.map((row) => [row.label, row.to])).toEqual([
       ['Interview', 'Aina Rahman (Sales Executive)'],
-      ['Rating', '4'],
-      ['Recommendation', 'advance'],
+      ['Rating', '4 out of 5'],
+      ['Recommendation', 'Advance'],
       ['Comments', 'c'.repeat(2000)],
       ['Also marks it completed', 'Yes'],
       ['Replaces existing feedback', 'Yes'],
       ['Why (shown here, not saved)', 'Because of the two enterprise deals.'],
     ]);
     expect(changeRows('clearInterviewFeedback', { id: IV }, found).map((row) => [row.label, row.to])).toEqual([['Interview', 'Aina Rahman (Sales Executive)']]);
+    // The application's rating is out of 5 too; a cleared one still says so.
+    expect(changeRows('rateApplication', { id: 'x', rating: 3 }).find((row) => row.key === 'rating')?.to).toBe('3 out of 5');
+    expect(changeRows('rateApplication', { id: 'x', rating: null }).find((row) => row.key === 'rating')?.to).toBe('(cleared)');
+    // Another tool's rating, or a nested one, is left as it was.
+    expect(changeRows('saveReview', { id: 'x', rating: 4 }).find((row) => row.key === 'rating')?.to).toBe('4');
     // The same label on the application rating's card: `basis` is one field wherever it is.
     expect(changeRows('rateApplication', { id: 'x', rating: 4, basis: 'Six years in sales.' }).map((row) => row.label)).toContain('Why (shown here, not saved)');
   });

@@ -12,7 +12,7 @@ import {
   peopleProduct,
   reachProduct,
 } from '@/lib/ai/products';
-import { CLEARED, EMPTY, changeHeading, changeRows, fieldLabel, unchanged, unnamed, valueText } from '@/lib/chat/change-rows';
+import { CLEARED, EMPTY, cardValueText, changeHeading, changeRows, fieldLabel, unchanged, unnamed, valueText } from '@/lib/chat/change-rows';
 import { approvalDetail, approvalTitle, kindOfTool, nameIn, rowIn } from '@/lib/chat/change-titles';
 import { createSeedHireData } from '@/lib/hire/seed';
 import { createSeedPeopleData } from '@/lib/people/seed';
@@ -110,7 +110,7 @@ describe('every change tool has a card that lists what it will change', () => {
       const row = byKey.get(leaf.path);
       expect(row, `${name}: no row for ${leaf.path}`).toBeDefined();
       // The row carries the value itself, in the words the card uses for it. A raw id no lookup named is never shown whole, only its short ref.
-      const shown = leaf.value === UUID ? unnamed(UUID) : valueText(leaf.key, leaf.value);
+      const shown = leaf.value === UUID ? unnamed(UUID) : cardValueText(name, leaf.path.split('.'), leaf.value);
       expect(row!.to, `${name}: ${leaf.path} shows a raw id`).not.toContain(UUID);
       expect(row!.to, `${name}: ${leaf.path}`).toBe(shown);
       expect(row!.label.trim(), `${name}: ${leaf.path} has no label`).not.toBe('');
