@@ -112,7 +112,7 @@ type Call = [string, ...unknown[]];
 function fakeCtx(data: unknown[], error: { message: string } | null = null) {
   const calls: Call[] = [];
   const chain: Record<string, unknown> = {};
-  for (const m of ['select', 'eq', 'like', 'ilike', 'gte', 'lt', 'or', 'order', 'limit']) {
+  for (const m of ['select', 'eq', 'like', 'ilike', 'gte', 'lte', 'lt', 'or', 'order', 'limit', 'range']) {
     chain[m] = (...args: unknown[]) => {
       calls.push([m, ...args]);
       return chain;
@@ -218,18 +218,80 @@ describe('listFinanceAudit', () => {
   });
 });
 
+/** A client whose answer is the `.range(from, to)` slice of `all`, as PostgREST pages; records each range asked. */
+function pagedCtx(all: unknown[]) {
+  const ranges: [number, number][] = [];
+  const client = {
+    from() {
+      let slice: [number, number] = [0, all.length - 1];
+      const chain: Record<string, unknown> = {};
+      for (const m of ['select', 'eq', 'like', 'gte', 'lte', 'order']) chain[m] = () => chain;
+      chain.range = (from: number, to: number) => {
+        slice = [from, to];
+        ranges.push(slice);
+        return chain;
+      };
+      chain.then = (resolve: (v: unknown) => unknown) =>
+        Promise.resolve({ data: all.slice(slice[0], slice[1] + 1), error: null }).then(resolve);
+      return chain;
+    },
+  };
+  return { ctx: { client, orgId: 'org1' } as unknown as FinanceWriteContext, ranges };
+}
+
+const summaryRow = (i: number) => ({ created_at: `2026-10-23T00:00:${String(i % 60).padStart(2, '0')}Z`, entity_type: 'finance_invoice', actor_name: 'A', event: 'posted' });
+
 describe('readAuditSummaryRows', () => {
-  it('reads finance rows of the last 31 days, capped at 5000', async () => {
+  it('reads finance rows of the last 31 days, newest first, a page of 1000 at a time', async () => {
     const { ctx, calls } = fakeCtx([{ created_at: '2026-10-23T00:00:00Z', entity_type: 'finance_invoice', actor_name: 'A', event: 'created' }]);
     const rows = await readAuditSummaryRows(ctx);
     expect(rows).toHaveLength(1);
     expect(calls).toContainEqual(['select', 'created_at, entity_type, actor_name, event:details->>event']);
     expect(calls).toContainEqual(['eq', 'org_id', 'org1']);
     expect(calls).toContainEqual(['like', 'entity_type', 'finance\\_%']);
-    expect(calls).toContainEqual(['limit', 5000]);
+    expect(calls).toContainEqual(['order', 'created_at', { ascending: false }]);
+    expect(calls).toContainEqual(['order', 'id', { ascending: false }]);
+    expect(calls).toContainEqual(['range', 0, 999]);
+    expect(calls.some((c) => c[0] === 'limit')).toBe(false);
     const gte = calls.find((c) => c[0] === 'gte')!;
     const ageDays = (Date.now() - Date.parse(gte[2] as string)) / 86_400_000;
     expect(ageDays).toBeGreaterThan(30.99);
     expect(ageDays).toBeLessThan(31.01);
+    // The window's end is fixed when the read starts.
+    const lte = calls.find((c) => c[0] === 'lte')!;
+    expect(lte[1]).toBe('created_at');
+    expect(Date.now() - Date.parse(lte[2] as string)).toBeLessThan(60_000);
+  });
+
+  it('reads a second page when the first is full, and stops at a short one', async () => {
+    const all = Array.from({ length: 1500 }, (_, i) => summaryRow(i));
+    const { ctx, ranges } = pagedCtx(all);
+    const rows = await readAuditSummaryRows(ctx);
+    expect(rows).toHaveLength(1500);
+    expect(ranges).toEqual([
+      [0, 999],
+      [1000, 1999],
+    ]);
+  });
+
+  it('reads one more page after exactly 1000 rows, and stops when it is empty', async () => {
+    const { ctx, ranges } = pagedCtx(Array.from({ length: 1000 }, (_, i) => summaryRow(i)));
+    expect(await readAuditSummaryRows(ctx)).toHaveLength(1000);
+    expect(ranges).toEqual([
+      [0, 999],
+      [1000, 1999],
+    ]);
+  });
+
+  it('stops at 5000 rows', async () => {
+    const { ctx, ranges } = pagedCtx(Array.from({ length: 6200 }, (_, i) => summaryRow(i)));
+    expect(await readAuditSummaryRows(ctx)).toHaveLength(5000);
+    expect(ranges).toHaveLength(5);
+    expect(ranges[4]).toEqual([4000, 4999]);
+  });
+
+  it('throws when a page cannot be read', async () => {
+    const { ctx } = fakeCtx([], { message: 'down' });
+    await expect(readAuditSummaryRows(ctx)).rejects.toBeTruthy();
   });
 });

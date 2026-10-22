@@ -91,8 +91,12 @@ export type AuditSummary = {
 };
 
 const DAY_MS = 86_400_000;
-const SUMMARY_DAYS = 30;
+/** How many days the KPI strip and the charts cover, whatever the table's filters. */
+export const AUDIT_SUMMARY_DAYS = 30;
+const SUMMARY_DAYS = AUDIT_SUMMARY_DAYS;
 const SUMMARY_ROW_CAP = 5000;
+/** The most rows the hosted API returns in one response (PostgREST max-rows); the summary reads page by page. */
+const SUMMARY_PAGE_SIZE = 1000;
 
 const ENTITY_VALUES = AUDIT_ENTITY_TYPES.map((t) => t.value) as [AuditEntityType, ...AuditEntityType[]];
 const PERIOD_VALUES = AUDIT_PERIODS.map((p) => p.value) as [AuditPeriod, ...AuditPeriod[]];
@@ -221,24 +225,42 @@ export async function listFinanceAudit(
 
 type SummaryRow = { created_at: string; entity_type: string; actor_name: string; event: string };
 
-/** The last 31 days of finance rows (just what the summary counts), at most 5000. */
+/**
+ * The last 31 days of finance rows (just what the summary counts), at most 5000. The hosted API answers at most 1000
+ * rows a request, so they are read in pages of 1000 until a short page or the cap. The window's end is fixed when the
+ * read starts, so a row logged meanwhile does not shift the later pages.
+ */
 export async function readAuditSummaryRows(ctx: FinanceWriteContext): Promise<SummaryRow[]> {
-  const since = new Date(Date.now() - (SUMMARY_DAYS + 1) * DAY_MS).toISOString();
-  const { data, error } = await ctx.client
-    .from('activity_log')
-    .select('created_at, entity_type, actor_name, event:details->>event')
-    .eq('org_id', ctx.orgId)
-    .like('entity_type', 'finance\\_%')
-    .gte('created_at', since)
-    .order('created_at', { ascending: false })
-    .limit(SUMMARY_ROW_CAP);
-  if (error) throw error;
-  return ((data ?? []) as Partial<SummaryRow>[]).map((r) => ({
-    created_at: r.created_at ?? '',
-    entity_type: r.entity_type ?? '',
-    actor_name: r.actor_name ?? '',
-    event: r.event ?? '',
-  }));
+  const now = Date.now();
+  const since = new Date(now - (SUMMARY_DAYS + 1) * DAY_MS).toISOString();
+  const until = new Date(now).toISOString();
+  const out: SummaryRow[] = [];
+  while (out.length < SUMMARY_ROW_CAP) {
+    const from = out.length;
+    const to = Math.min(from + SUMMARY_PAGE_SIZE, SUMMARY_ROW_CAP) - 1;
+    const { data, error } = await ctx.client
+      .from('activity_log')
+      .select('created_at, entity_type, actor_name, event:details->>event')
+      .eq('org_id', ctx.orgId)
+      .like('entity_type', 'finance\\_%')
+      .gte('created_at', since)
+      .lte('created_at', until)
+      .order('created_at', { ascending: false })
+      .order('id', { ascending: false })
+      .range(from, to);
+    if (error) throw error;
+    const page = (data ?? []) as Partial<SummaryRow>[];
+    for (const r of page) {
+      out.push({
+        created_at: r.created_at ?? '',
+        entity_type: r.entity_type ?? '',
+        actor_name: r.actor_name ?? '',
+        event: r.event ?? '',
+      });
+    }
+    if (page.length < to - from + 1) break;
+  }
+  return out;
 }
 
 /** Counts for the strip above the trail. Days are Malaysia days, so a late-evening row lands on the right one. */
