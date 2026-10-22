@@ -1,4 +1,6 @@
-import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { describe, expect, it, vi } from 'vitest';
 import {
   buildMyAttendance,
   buildOvertimeView,
@@ -6,9 +8,11 @@ import {
   buildTimesheet,
   clockButtonLabel,
   clockResultMessage,
+  knownWorkWeek,
   ownDayToday,
   workWeekFor,
 } from '@/lib/people/attendance';
+import { todayState } from '@/lib/people/attendance-forms';
 import { createSeedPeopleData } from '@/lib/people/seed';
 import {
   DEMO_EMPLOYEE_ID,
@@ -16,6 +20,7 @@ import {
   type OvertimeRecord,
   type PeopleViewer,
   type TimesheetEntry,
+  type Weekday,
 } from '@/lib/people/types';
 
 const NOW = new Date('2026-10-09T04:00:00Z'); // Friday
@@ -377,5 +382,53 @@ describe('the My Attendance screen rules', () => {
     expect(clockButtonLabel('out', false)).toBe('Clock out');
     expect(clockButtonLabel('in', true)).toBe('Clocking in…');
     expect(clockButtonLabel('out', true)).toBe('Clocking out…');
+  });
+});
+
+describe('My Attendance: the work week for a member', () => {
+  const SATURDAY = '2026-10-10';
+  const SELF: PeopleViewer = { employeeId: 'e1', isHr: false, isDemo: false };
+  const MON_FRI: Weekday[] = ['mon', 'tue', 'wed', 'thu', 'fri'];
+  const SIX_DAYS: Weekday[] = [...MON_FRI, 'sat'];
+  const noSettings = { getSettings: vi.fn(async () => { throw new Error('a member cannot read the settings'); }) };
+  /** What the Today card says on a Saturday with no clock-in, as the screen builds it. */
+  const saturday = async (read?: () => Promise<Weekday[] | null>) => {
+    const week = await knownWorkWeek(noSettings, false, read);
+    return todayState({ today: SATURDAY, day: null, workWeek: workWeekFor(week ? { work_week: week } : null), holidays: [], leave: [], employeeId: SELF.employeeId! });
+  };
+
+  it('a Saturday off is not a working day', async () => {
+    expect(await saturday(async () => MON_FRI)).toEqual({ kind: 'not_working_day', why: 'weekend' });
+  });
+
+  it('a six-day week makes Saturday a working day', async () => {
+    expect((await saturday(async () => SIX_DAYS)).kind).toBe('not_in');
+  });
+
+  it('never reads the settings for a member', async () => {
+    await saturday(async () => MON_FRI);
+    expect(noSettings.getSettings).not.toHaveBeenCalled();
+  });
+
+  it('a failed or empty read leaves the week unknown, so every day counts as before', async () => {
+    const quiet = vi.spyOn(console, 'error').mockImplementation(() => {});
+    expect((await saturday(async () => { throw new Error('hr_work_week failed: 42501'); })).kind).toBe('not_in');
+    expect(quiet).toHaveBeenCalledWith('[people/attendance] work week:', 'Error');
+    quiet.mockRestore();
+    expect((await saturday(async () => null)).kind).toBe('not_in');
+    expect((await saturday()).kind).toBe('not_in');
+  });
+
+  it('HR and the sample company read the settings and never the members\' read', async () => {
+    const read = vi.fn(async () => SIX_DAYS);
+    const week = await knownWorkWeek({ getSettings: async () => ({ ...(await data.getSettings()), work_week: MON_FRI }) }, true, read);
+    expect(week).toEqual(MON_FRI);
+    expect(read).not.toHaveBeenCalled();
+  });
+
+  it('the screen hands the members\' read to the loader', () => {
+    const screen = readFileSync(resolve('src/screens/people/my-attendance.tsx'), 'utf8');
+    expect(screen).toContain("import { readWorkWeek } from '@/lib/people/supabase';");
+    expect(screen).toMatch(/knownWorkWeek\([\s\S]*?readWorkWeek\(ctx\.client, orgId\)/);
   });
 });
