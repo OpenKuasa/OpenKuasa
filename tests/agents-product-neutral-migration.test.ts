@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
 
 const sql = readFileSync(
-  join(process.cwd(), 'supabase/migrations', '20261125120000_agents_product_neutral.sql'),
+  join(process.cwd(), 'supabase/migrations', '20261125130000_agents_product_neutral.sql'),
   'utf8',
 );
 
