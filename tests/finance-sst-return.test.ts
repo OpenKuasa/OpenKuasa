@@ -202,6 +202,14 @@ describe('buildSstReturn: voids', () => {
     expect(item(buildSstReturn('sales', NOV_DEC, [l], []).deductions, '13(a)')?.tax).toBe(0);
   });
 
+  it('does not bring an off-form line voided later back through 13(a)', () => {
+    const l = line({ ...base, sst_rate: 7, amount_myr: 1000, sst_amount_myr: 70, voided_on: '2026-11-01' });
+    expect(buildSstReturn('service', SEP_OCT, [l], []).offForm).toEqual({ count: 1, value: 1000, tax: 70 });
+    const nov = buildSstReturn('service', NOV_DEC, [l], []);
+    expect(item(nov.deductions, '13(a)')?.tax).toBe(0);
+    expect(nov.offForm).toEqual({ count: 0, value: 0, tax: 0 });
+  });
+
   it('counts a credit note voided later in its own period and lowers 13(a) of the void period', () => {
     const c = credit({
       credit_date: '2026-09-15',
