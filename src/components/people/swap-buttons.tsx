@@ -10,7 +10,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import type { CapResult } from '@/lib/people/capabilities';
-import { SWAP_REFUSALS } from '@/lib/people/swap-writes';
+import { SWAP_REFUSALS } from '@/lib/people/swap-refusals';
 
 const SMALL = 'h-7 px-2.5 text-xs';
 

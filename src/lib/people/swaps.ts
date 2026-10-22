@@ -181,7 +181,7 @@ export const RECENT_SWAPS = 10;
 export type MySwapRow = SwapRow & {
   /** The viewer is the colleague and it waits for their answer. */
   can_reply: boolean;
-  /** The viewer is one of the two and it is still open. */
+  /** The viewer is one of the two, it is still open, and they are not the colleague still asked to reply. */
   can_cancel: boolean;
   /** The viewer asked for it. */
   asked: boolean;
@@ -207,7 +207,8 @@ export function buildMySwaps(input: {
       return {
         ...row,
         can_reply: s.status === 'requested' && s.colleague_employee_id === me && !row.expired,
-        can_cancel: isOpen(s.status),
+        // A colleague still asked to reply declines rather than cancels.
+        can_cancel: isOpen(s.status) && !(s.status === 'requested' && s.colleague_employee_id === me && !row.expired),
         asked: s.requester_employee_id === me,
       };
     });

@@ -137,7 +137,7 @@ describe('buildMySwaps', () => {
     ];
     const model = buildMySwaps({ swaps, viewer: member, employees, types: TYPES, today: TODAY });
     expect(model.open.map((r) => [r.id, r.can_reply, r.can_cancel, r.asked])).toEqual([
-      ['incoming', true, true, false],
+      ['incoming', true, false, false],
       ['asked', false, true, true],
       ['agreed', false, true, false],
       ['stale', false, true, false],
