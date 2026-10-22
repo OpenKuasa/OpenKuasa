@@ -156,7 +156,7 @@ export function SstReturnBody({ ret, settings, companyName }: { ret: SstReturn; 
   const deductionsTotal = ret.deductions.reduce((s, d) => s + Math.round(d.tax * 100), 0) / 100;
   const notes = notReady ? [] : notesOf(ret);
   // The items the tile sums; a not-ready return has no items to name.
-  const deductionsHint = notReady ? 'this period' : service ? '13(a) to 13(d)' : '13(a) to 13(d) and 13A';
+  const deductionsHint = notReady ? 'this period' : service ? '13(a), 13(c) and 13(d)' : '13(a), 13(b), 13A and 13(d)';
   const partA = [
     { label: service ? 'Service tax no.' : 'Sales tax no.', value: registration },
     { label: 'Name', value: companyName },
