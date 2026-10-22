@@ -81,11 +81,11 @@ describe('the Supabase provider reads submissions', () => {
     expect(rows.map((r) => r.id)).toEqual(['s2', 's1']);
     expect(rows[0]).toEqual({
       id: 's2', form_id: ID, contact_id: 'c2', name: 'Person 2', email: 'p2@example.com',
-      phone: null, message: null, created_at: '2026-10-10T02:00:00Z',
+      phone: null, message: null, consent_text: null, consented_at: null, created_at: '2026-10-10T02:00:00Z',
     });
     expect(queries()).toEqual([
       {
-        table: 'form_submissions', op: 'select', columns: 'id,form_id,contact_id,payload,created_at',
+        table: 'form_submissions', op: 'select', columns: 'id,form_id,contact_id,payload,consent_text,consented_at,created_at',
         filters: { org_id: 'org1', form_id: ID }, order: ['created_at', { ascending: false }], limit: 20,
       },
     ]);

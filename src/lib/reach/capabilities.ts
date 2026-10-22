@@ -12,6 +12,7 @@ import type { AdSettings, Appointment, Campaign, Creative, Form, Lead } from './
 import {
   FORM_CATEGORY_MAX,
   FORM_COLUMNS,
+  FORM_CONSENT_MAX,
   FORM_MESSAGES,
   FORM_NAME_MAX,
   FORM_SLUG_INPUT_PATTERN,
@@ -484,6 +485,15 @@ const formChannel = z
   .enum(['whatsapp', 'facebook', 'instagram', 'tiktok'], { error: FORM_MESSAGES.channel })
   .nullable();
 const formId = z.string({ error: FORM_MESSAGES.gone }).uuid(FORM_MESSAGES.gone);
+/**
+ * The sentence a visitor ticks to agree. Counted per character, as the
+ * database counts it. Left out of a new form, the database's default is used.
+ */
+const formConsent = z
+  .string({ error: FORM_MESSAGES.consent })
+  .trim()
+  .min(1, FORM_MESSAGES.consent)
+  .refine((text) => [...text].length <= FORM_CONSENT_MAX, FORM_MESSAGES.consentTooLong);
 
 export const createFormInput = z.object({
   name: formName,
@@ -491,6 +501,7 @@ export const createFormInput = z.object({
   slug: formSlug.optional(),
   channel: formChannel.default(null),
   status: formStatus.default('draft'),
+  consent_text: formConsent.optional(),
 });
 export const updateFormInput = z.object({
   id: formId,
@@ -499,7 +510,15 @@ export const updateFormInput = z.object({
   slug: formSlug.optional(),
   channel: formChannel.optional(),
   status: formStatus.optional(),
+  consent_text: formConsent.optional(),
 });
+/**
+ * What Tuah's createForm and updateForm tools take: the same rules, without the
+ * consent sentence. The model is shown exactly what it was shown before the
+ * sentence existed, so a form it makes gets the database's default sentence.
+ */
+export const createFormToolInput = createFormInput.omit({ consent_text: true });
+export const updateFormToolInput = updateFormInput.omit({ consent_text: true });
 export const setFormStatusInput = z.object({ id: formId, status: formStatus });
 export const deleteFormInput = z.object({ id: formId });
 
@@ -529,6 +548,8 @@ export async function createForm(
       slug: slug.slug,
       channel: values.channel,
       status: values.status,
+      // Left out, the database gives the form its default sentence.
+      ...(values.consent_text !== undefined ? { consent_text: values.consent_text } : {}),
     })
     .select(FORM_COLUMNS)
     .single();

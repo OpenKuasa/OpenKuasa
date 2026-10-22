@@ -92,6 +92,11 @@ export type Form = {
   /** Where the form is mainly shared, when that is known. */
   channel: Channel | null;
   status: FormStatus;
+  /**
+   * The sentence a visitor ticks to agree before sending. `{workspace}` in it
+   * becomes the workspace's name wherever the form is shown.
+   */
+  consent_text: string;
   views_count: number;
   submissions_count: number;
   created_at: string;
@@ -108,6 +113,10 @@ export type FormSubmission = {
   email: string;
   phone: string | null;
   message: string | null;
+  /** The sentence the visitor agreed to, as shown to them. Null before consent was asked for. */
+  consent_text: string | null;
+  /** When they agreed; null exactly when `consent_text` is. */
+  consented_at: string | null;
   created_at: string;
 };
 

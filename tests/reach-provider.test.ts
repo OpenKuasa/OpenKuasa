@@ -40,7 +40,7 @@ describe('getReachData', () => {
     expect(await data.listForms()).toHaveLength(1);
     expect(asked.tables).toEqual(['forms']);
     expect(asked.columns[0].split(',').sort()).toEqual([
-      'category', 'channel', 'created_at', 'id', 'name', 'slug', 'status', 'submissions_count', 'updated_at', 'views_count',
+      'category', 'channel', 'consent_text', 'created_at', 'id', 'name', 'slug', 'status', 'submissions_count', 'updated_at', 'views_count',
     ]);
   });
 

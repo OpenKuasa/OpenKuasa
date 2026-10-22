@@ -305,6 +305,29 @@ describe('Tuah’s instructions when it leads the team', () => {
     expect(system).toContain('never ask the user for more details before trying');
     expect(system).toContain('only when the specialist reports back that something required is missing');
   });
+
+  it('says so when a specialist finds nothing, and never fills the gap from general knowledge', async () => {
+    const { tuahTeamSystem } = await import('@/lib/ai/agents/prompts');
+    // Asked about public holidays in a workspace with none, Tuah listed the months they "usually" fall in.
+    for (const canChange of [true, false]) {
+      const system = tuahTeamSystem([{ name: 'Lekiu', area: 'HR' }], canChange).toLowerCase();
+      expect(system).toContain('when a specialist finds nothing, say so and offer the next step.');
+      expect(system).toContain('never fill a gap from general knowledge or memory: no dates, months, names or figures');
+      expect(system).toContain("general advice never fills in for the workspace's data");
+      expect(system).toContain('if no public holidays are recorded, say so and offer to add them');
+      expect(system).toContain('point them to the official government gazette, without listing dates or months');
+    }
+  });
+
+  it('has every specialist stop at an empty lookup instead of answering from memory', async () => {
+    const { subAgentSystem } = await import('@/lib/ai/agents/prompts');
+    for (const product of ['people', 'finance', 'crm']) {
+      const system = subAgentSystem(product, false).toLowerCase();
+      expect(system).toContain('if a lookup returns nothing, report that there is none yet, and stop there.');
+      expect(system).toContain('never fill a gap from general knowledge or memory');
+      expect(system).toContain('public holidays, for example, are only the ones recorded for this workspace');
+    }
+  });
 });
 
 describe('reading a team conversation back', () => {

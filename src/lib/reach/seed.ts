@@ -25,6 +25,7 @@ import type {
   LeadStage,
   ReachData,
 } from './types';
+import { DEFAULT_FORM_CONSENT } from './forms';
 
 /** Small, fast, seeded PRNG (mulberry32) — deterministic shuffles for a stable seed. */
 function mulberry32(seed: number): () => number {
@@ -187,6 +188,7 @@ export function seedForms(): Form[] {
     id: `form_${i + 1}`,
     ...r,
     channel: null,
+    consent_text: DEFAULT_FORM_CONSENT,
     created_at: `${created}T04:00:00.000Z`,
     updated_at: `${created}T04:00:00.000Z`,
   }));

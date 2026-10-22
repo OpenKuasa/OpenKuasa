@@ -63,6 +63,7 @@ export const SUBMISSION_MESSAGES = {
   closed: 'This form is not accepting responses.',
   throttled: 'This form is receiving a lot of responses right now. Try again in a minute.',
   failed: 'Your response could not be sent. Please try again.',
+  consent: 'Please tick the box to agree before sending.',
 } as const;
 
 /** What the four fields hold, as typed. */
@@ -73,10 +74,39 @@ export type SubmissionValues = {
   message: string;
 };
 export type SubmissionField = keyof SubmissionValues;
-export type SubmissionErrors = Partial<Record<SubmissionField, string>>;
+/** Problems are reported beside the four fields and beside the consent box. */
+export type SubmissionErrors = Partial<Record<SubmissionField | 'consent', string>>;
 
 /** The order the fields appear in, which is the order problems are reported in. */
 export const SUBMISSION_FIELDS: readonly SubmissionField[] = ['name', 'email', 'phone', 'message'];
+/** Every place a problem can be shown, in page order: the fields, then the consent box. */
+export const SUBMISSION_PROBLEM_ORDER: readonly (SubmissionField | 'consent')[] = [
+  ...SUBMISSION_FIELDS,
+  'consent',
+];
+
+/** The name of the consent box. A ticked native box posts "on". */
+export const CONSENT_FIELD = 'consent';
+
+/**
+ * The problems the public form shows, from the server's last answer and what
+ * the visitor has done with the consent box since:
+ * - `blocked`: the browser just stopped a send because the box was unticked,
+ *   so only that is shown (the server's answer is about an earlier send);
+ * - `tickedSince`: the box has been ticked since the server answered, so the
+ *   server's complaint about the box is out of date and is dropped. Its other
+ *   problems stay until the next send.
+ */
+export function shownSubmissionErrors(
+  server: SubmissionErrors | undefined,
+  { blocked, tickedSince }: { blocked: boolean; tickedSince: boolean },
+): SubmissionErrors | undefined {
+  if (blocked) return { consent: SUBMISSION_MESSAGES.consent };
+  if (!server || !tickedSince || !server.consent) return server;
+  const { consent: _stale, ...rest } = server;
+  void _stale;
+  return Object.keys(rest).length > 0 ? rest : undefined;
+}
 
 /** A checked submission, ready to send. */
 export type SubmissionInput = {
@@ -85,6 +115,9 @@ export type SubmissionInput = {
   phone: string | null;
   message: string | null;
 };
+
+/** What is sent to the database: a checked submission and whether the box was ticked. */
+export type SubmissionToSend = SubmissionInput & { consent: boolean };
 
 export type ParsedSubmission =
   | { ok: true; input: SubmissionInput }
@@ -152,6 +185,7 @@ const STATUS_ERRORS: Record<string, SubmissionErrors> = {
   email_too_long: { email: SUBMISSION_MESSAGES.emailTooLong },
   phone_too_long: { phone: SUBMISSION_MESSAGES.phoneTooLong },
   message_too_long: { message: SUBMISSION_MESSAGES.messageTooLong },
+  consent_required: { consent: SUBMISSION_MESSAGES.consent },
 };
 
 /** Reads the one word `submit_public_form` answers with. */
@@ -170,7 +204,8 @@ export function submissionOutcome(status: unknown): SubmissionOutcome {
 /* ---- stored submissions ---------------------------------------------- */
 
 /** The columns of `public.form_submissions` the app reads. */
-export const FORM_SUBMISSION_COLUMNS = 'id,form_id,contact_id,payload,created_at';
+export const FORM_SUBMISSION_COLUMNS =
+  'id,form_id,contact_id,payload,consent_text,consented_at,created_at';
 
 /** How many of a form's submissions the Lead Forms screen lists. */
 export const SUBMISSIONS_SHOWN = 20;
@@ -180,6 +215,8 @@ export type FormSubmissionRow = {
   form_id: string;
   contact_id: string | null;
   payload: unknown;
+  consent_text?: string | null;
+  consented_at?: string | null;
   created_at: string;
 };
 
@@ -199,6 +236,9 @@ export function mapFormSubmission(row: FormSubmissionRow): FormSubmission {
     email: text('email') ?? '',
     phone: text('phone'),
     message: text('message'),
+    // Kept only as a pair: one without the other is not shown as consent.
+    consent_text: row.consent_text && row.consented_at ? row.consent_text : null,
+    consented_at: row.consent_text && row.consented_at ? row.consented_at : null,
     created_at: row.created_at,
   };
 }

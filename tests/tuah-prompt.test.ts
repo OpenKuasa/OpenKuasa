@@ -17,6 +17,14 @@ describe('TUAH_SYSTEM', () => {
     expect(t).not.toContain('you cannot create, edit or delete anything');
   });
 
+  it('stops at an empty lookup and never fills it from general knowledge, holidays included', () => {
+    expect(t).toContain('if a tool returns nothing, say there is none yet instead of guessing, and offer the next step.');
+    expect(t).toContain('never fill a gap from general knowledge or memory: no dates, months, names or figures');
+    expect(t).toContain("general advice never fills in for the workspace's data");
+    expect(t).toContain('if no public holidays are recorded, say so and offer to add them');
+    expect(t).toContain('point them to the official government gazette, without listing dates or months');
+  });
+
   it('sends marketing questions to the tools and forbids invented figures', () => {
     expect(t).toContain('always call a tool');
     expect(t).toContain('never invent');

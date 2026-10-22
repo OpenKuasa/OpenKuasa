@@ -7,9 +7,10 @@ import { ScreenContainer } from '@/components/screen/screen-container';
 import { Button } from '@/components/ui/button';
 import { LiveDot } from '@/components/ui/live-dot';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { attendanceWindowStart, buildMyAttendance, clockButtonLabel, ownDayToday, workWeekFor } from '@/lib/people/attendance';
+import { attendanceWindowStart, buildMyAttendance, clockButtonLabel, knownWorkWeek, ownDayToday, workWeekFor } from '@/lib/people/attendance';
 import { clockAction, todayLine, todayState, type TodayState } from '@/lib/people/attendance-forms';
 import { timeInMalaysia, todayInMalaysia } from '@/lib/people/dates';
+import { readWorkWeek } from '@/lib/people/supabase';
 import { LOAD_FAILED, Muted, NotLinkedCard, StatusPill, loadPeople } from './parts';
 import { DEMO_SIGN_UP_NOTE } from './my-requests';
 
@@ -25,20 +26,21 @@ export default async function MyAttendanceScreen() {
       const model = buildMyAttendance({ days: [], leave: [], balances: [], viewer: ctx.viewer, today });
       return { model, state: { kind: 'not_linked' } as TodayState };
     }
-    // Only HR (and the sample company) may read the work week; `workWeekFor` says what anyone else gets.
-    const knowsWeek = ctx.viewer.isHr || ctx.viewer.isDemo;
-    const [days, leave, balances, holidays, settings] = await Promise.all([
+    // Only HR (and the sample company) read the settings; anyone else reads the week through the members' function.
+    const readsSettings = ctx.viewer.isHr || ctx.viewer.isDemo;
+    const orgId = ctx.orgId;
+    const [days, leave, balances, holidays, week] = await Promise.all([
       data.listAttendance(attendanceWindowStart(today), today),
       data.listLeaveRequests(),
       data.listLeaveBalances(Number(today.slice(0, 4))),
       data.listPublicHolidays(),
-      knowsWeek ? data.getSettings() : Promise.resolve(null),
+      knownWorkWeek(data, readsSettings, orgId ? () => readWorkWeek(ctx.client, orgId) : undefined),
     ]);
     const model = buildMyAttendance({ days, leave, balances, viewer: ctx.viewer, today });
     const state = todayState({
       today,
       day: ownDayToday(days, ctx.viewer, today),
-      workWeek: workWeekFor(settings),
+      workWeek: workWeekFor(week ? { work_week: week } : null),
       holidays,
       leave,
       employeeId: ctx.viewer.employeeId,

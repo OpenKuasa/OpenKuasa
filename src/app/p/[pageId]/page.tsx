@@ -9,7 +9,11 @@ import { PublicLeadForm } from '@/components/reach/public-lead-form';
 import { hasSupabaseEnv } from '@/lib/auth/viewer';
 import { DEFAULT_BUTTON_LABEL } from '@/lib/crm/landing-pages';
 import { getPublicChatbot } from '@/lib/crm/public-chatbot';
-import { countLandingPageView, getPublicLandingPage } from '@/lib/crm/public-landing-pages';
+import {
+  countLandingPageView,
+  getPublicLandingPage,
+  landingPageConsentText,
+} from '@/lib/crm/public-landing-pages';
 import { createAnonymousClient } from '@/lib/reach/public-forms';
 import { createClient } from '@/lib/supabase/server';
 import { submitLandingPageAction } from './actions';
@@ -54,7 +58,11 @@ export default async function PublicLandingPage({ params }: Props) {
   if (!found) notFound();
   const { id, page } = found;
 
-  if (!page.available) {
+  // The sentence a visitor ticks to agree, from the page's form. Without it the
+  // form cannot be agreed to, so the page is shown as not available.
+  const consentText = page.available ? await landingPageConsentText(id) : null;
+
+  if (!page.available || !consentText) {
     return (
       <PublicFormShell>
         <PublicFormNotice title="Page not available">
@@ -99,6 +107,7 @@ export default async function PublicLandingPage({ params }: Props) {
         <section className="rounded-xl border bg-card p-6 text-card-foreground shadow-sm sm:p-8">
           <PublicLeadForm
             action={submitLandingPageAction.bind(null, id)}
+            consentText={consentText}
             submitLabel={page.buttonLabel || DEFAULT_BUTTON_LABEL}
           />
         </section>

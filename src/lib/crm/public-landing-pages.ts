@@ -10,6 +10,7 @@
  */
 import 'server-only';
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { createAnonymousClient, getPublicForm } from '@/lib/reach/public-forms';
 import { formViewCounts } from '@/lib/security/limits';
 import { serviceClient } from '@/lib/supabase/service';
 
@@ -79,6 +80,18 @@ export async function landingPageFormId(pageId: string): Promise<string | null> 
     logged('the page\'s form could not be looked up', error);
     return null;
   }
+}
+
+/**
+ * The consent sentence of the form an available page shows, the workspace's
+ * name filled in, or null when the page or its form is not taking responses.
+ * The form is looked up by the server; only the sentence reaches the browser.
+ */
+export async function landingPageConsentText(pageId: string): Promise<string | null> {
+  const formId = await landingPageFormId(pageId);
+  if (!formId) return null;
+  const form = await getPublicForm(createAnonymousClient(), formId);
+  return form?.accepting ? form.consentText : null;
 }
 
 function logged(what: string, error: unknown) {

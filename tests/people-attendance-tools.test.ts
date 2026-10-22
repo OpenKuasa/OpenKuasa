@@ -229,11 +229,48 @@ describe('getMyAttendanceToday', () => {
     expect(sat.state).toBe('not_in');
   });
 
-  it('a member cannot read the settings, so the week is unknown to them: any day may be a working day and the database refuses the rest', async () => {
+  it('a member whose week cannot be read: any day may be a working day and the database refuses the rest', async () => {
+    const quiet = vi.spyOn(console, 'error').mockImplementation(() => {});
     const spy = vi.fn(async () => settings());
     const result = await ask(dataWith({ ...noRows, getSettings: spy }), MEMBER_VIEWER, self(), SATURDAY);
     expect(result.state).toBe('not_in');
+    expect(result.working_day).toBe('unknown');
     expect(spy).not.toHaveBeenCalled();
+    quiet.mockRestore();
+  });
+
+  describe("a member reads the workspace's week through hr_work_week", () => {
+    const withWeek = (week: unknown) => {
+      const rpc = vi.fn(async () => ({ data: week, error: null }));
+      return { rpc, write: { ...self(), ctx: { client: { rpc } as never, orgId: 'org-1' } } };
+    };
+
+    it('a Saturday off is not a working day, and the settings are never read', async () => {
+      const { rpc, write } = withWeek(['mon', 'tue', 'wed', 'thu', 'fri']);
+      const spy = vi.fn(async () => settings());
+      const result = await ask(dataWith({ ...noRows, getSettings: spy }), MEMBER_VIEWER, write, SATURDAY);
+      expect(result).toMatchObject({ state: 'not_working_day', why: 'weekend', summary: 'Today is not a working day.', can_clock: null });
+      expect(result).not.toHaveProperty('working_day');
+      expect(rpc).toHaveBeenCalledWith('hr_work_week', { p_org: 'org-1' });
+      expect(spy).not.toHaveBeenCalled();
+    });
+
+    it('a six-day week makes Saturday a working day', async () => {
+      const { write } = withWeek(['mon', 'tue', 'wed', 'thu', 'fri', 'sat']);
+      const result = await ask(dataWith(noRows), MEMBER_VIEWER, write, SATURDAY);
+      expect(result).toMatchObject({ state: 'not_in', can_clock: 'in' });
+      expect(result).not.toHaveProperty('working_day');
+    });
+
+    it('a refused or empty read leaves the week unknown', async () => {
+      const quiet = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const rpc = vi.fn(async () => ({ data: null, error: { code: '42501' } }));
+      const refused = await ask(dataWith(noRows), MEMBER_VIEWER, { ...self(), ctx: { client: { rpc } as never, orgId: 'org-1' } }, SATURDAY);
+      expect(refused).toMatchObject({ state: 'not_in', working_day: 'unknown' });
+      quiet.mockRestore();
+      const empty = await ask(dataWith(noRows), MEMBER_VIEWER, withWeek(null).write, SATURDAY);
+      expect(empty).toMatchObject({ state: 'not_in', working_day: 'unknown' });
+    });
   });
 
   it('a lookup that fails says so plainly', async () => {
@@ -401,11 +438,13 @@ describe('the owner tools', () => {
     expect(result).toEqual({ ok: true, data: { id: 'attendance-settings', work_week: ['mon'], work_start_time: '08:30', late_grace_minutes: 10 } });
   });
 
-  it('a member is told the work week is unknown to them; an owner is not', async () => {
+  it('a member whose week cannot be read is told it is unknown; an owner is not', async () => {
+    const quiet = vi.spyOn(console, 'error').mockImplementation(() => {});
     const member = await run('getMyAttendanceToday', {}, MEMBER_VIEWER, self(), dataWith(noRows));
     expect(member.working_day).toBe('unknown');
     const owner = await run('getMyAttendanceToday', {}, HR_LINKED, hr(ME), dataWith(noRows));
     expect(owner).not.toHaveProperty('working_day');
+    quiet.mockRestore();
   });
 
   it('the holiday and flagged-day lists say how many there are beside the rows shown', async () => {

@@ -60,15 +60,17 @@ const { getPublicForm, recordFormView, submitPublicForm, createAnonymousClient }
 const { submitPublicFormAction } = await import('@/app/f/[formId]/actions');
 
 const client = () => fakeClient() as never;
-const input = { name: 'Siti Aisyah', email: 'siti@example.com', phone: null, message: 'Hi' };
+const input = { name: 'Siti Aisyah', email: 'siti@example.com', phone: null, message: 'Hi', consent: true };
 
 function formData(fields: Record<string, string>) {
   const data = new FormData();
   for (const [key, value] of Object.entries(fields)) data.set(key, value);
   return data;
 }
+/** A filled-in form with the consent box ticked: a ticked native box posts "on". */
 const filled = (over: Record<string, string> = {}) =>
-  formData({ name: 'Siti Aisyah', email: 'Siti@Example.com', phone: '', message: 'Hi', ...over });
+  formData({ name: 'Siti Aisyah', email: 'Siti@Example.com', phone: '', message: 'Hi', consent: 'on', ...over });
+const CONSENT_MESSAGE = 'Please tick the box to agree before sending.';
 
 let logged: ReturnType<typeof vi.spyOn>;
 beforeEach(() => {
@@ -90,11 +92,15 @@ afterEach(() => {
 describe('getPublicForm', () => {
   it('asks the one function made for it, by form id', async () => {
     ctl.answers.get_public_form = {
-      data: [{ form_name: 'Raya Promo', org_name: 'Kedai Sdn Bhd', accepting: true }],
+      data: [{
+        form_name: 'Raya Promo', org_name: 'Kedai Sdn Bhd', accepting: true,
+        consent_text: 'I agree that Kedai Sdn Bhd may keep these details and contact me about my enquiry.',
+      }],
       error: null,
     };
     expect(await getPublicForm(client(), ID)).toEqual({
       accepting: true, name: 'Raya Promo', orgName: 'Kedai Sdn Bhd',
+      consentText: 'I agree that Kedai Sdn Bhd may keep these details and contact me about my enquiry.',
     });
     expect(ctl.calls).toEqual([{ fn: 'get_public_form', args: { p_form_id: ID } }]);
   });
@@ -108,6 +114,16 @@ describe('getPublicForm', () => {
     // Even if the database were to answer with names for a closed form.
     ctl.answers.get_public_form = { data: [{ form_name: 'Secret', org_name: 'Secret Org', accepting: false }], error: null };
     expect(await getPublicForm(client(), ID)).toEqual({ accepting: false });
+  });
+
+  it('does not offer a form whose consent sentence is missing, since it cannot be agreed to', async () => {
+    for (const consent_text of [null, '', '   ']) {
+      ctl.answers.get_public_form = {
+        data: [{ form_name: 'Raya Promo', org_name: 'Kedai Sdn Bhd', accepting: true, consent_text }],
+        error: null,
+      };
+      expect(await getPublicForm(client(), ID)).toEqual({ accepting: false });
+    }
   });
 
   it('is null for an unknown form, and for a lookup that fails', async () => {
@@ -171,17 +187,25 @@ describe('submitPublicForm', () => {
         fn: 'submit_public_form',
         args: {
           p_form_id: ID, p_name: 'Siti Aisyah', p_email: 'siti@example.com',
-          p_phone: null, p_message: 'Hi', p_honeypot: '',
+          p_phone: null, p_message: 'Hi', p_honeypot: '', p_consent: true,
         },
       },
     ]);
   });
 
   it('reads the word the database answers with', async () => {
-    for (const [word, kind] of [['closed', 'closed'], ['not_found', 'not_found'], ['throttled', 'throttled'], ['invalid_email', 'invalid'], ['???', 'failed']]) {
+    for (const [word, kind] of [['closed', 'closed'], ['not_found', 'not_found'], ['throttled', 'throttled'], ['invalid_email', 'invalid'], ['consent_required', 'invalid'], ['???', 'failed']]) {
       ctl.answers.submit_public_form = { data: word, error: null };
       expect((await submitPublicForm(client(), ID, input)).kind, word).toBe(kind);
     }
+  });
+
+  it('sends an unticked box as it is, for the database to refuse', async () => {
+    ctl.answers.submit_public_form = { data: 'consent_required', error: null };
+    expect(await submitPublicForm(client(), ID, { ...input, consent: false })).toEqual({
+      kind: 'invalid', errors: { consent: 'Please tick the box to agree before sending.' },
+    });
+    expect(ctl.calls[0]).toMatchObject({ args: { p_consent: false } });
   });
 
   it('is a failure, not a success, when the call errors', async () => {
@@ -204,7 +228,48 @@ describe('submitPublicFormAction', () => {
     expect(ctl.calls).toHaveLength(1);
     expect(ctl.calls[0].args).toMatchObject({
       p_form_id: ID, p_name: 'Siti Aisyah', p_email: 'siti@example.com', p_phone: null, p_message: 'Hi',
+      p_consent: true,
     });
+  });
+
+  it('does not send a form whose consent box was left unticked, and keeps what was typed', async () => {
+    for (const consent of [undefined, '', 'off', 'true', 'yes']) {
+      const data = filled();
+      if (consent === undefined) data.delete('consent');
+      else data.set('consent', consent);
+      expect(await submitPublicFormAction(ID, undefined, data), String(consent)).toEqual({
+        errors: { consent: CONSENT_MESSAGE },
+        values: { name: 'Siti Aisyah', email: 'Siti@Example.com', phone: '', message: 'Hi' },
+        consented: false,
+      });
+    }
+    expect(ctl.calls).toHaveLength(0);
+    expect(ctl.serviceCalls).toBe(0);
+    // Refused before the per-client limit, so it uses none of the visitor's allowance.
+    expect(ctl.limitAsked).toBe(0);
+  });
+
+  it('reports the unticked box beside the other problems, all at once', async () => {
+    const state = await submitPublicFormAction(ID, undefined, formData({ name: '', email: 'x' }));
+    expect(state?.errors).toEqual({
+      name: 'Enter your name.',
+      email: 'Enter an email address like name@example.com.',
+      consent: CONSENT_MESSAGE,
+    });
+    expect(state?.consented).toBe(false);
+    expect(ctl.calls).toHaveLength(0);
+  });
+
+  it('keeps the ticked box when another field was refused', async () => {
+    const state = await submitPublicFormAction(ID, undefined, filled({ name: '' }));
+    expect(state).toMatchObject({ errors: { name: 'Enter your name.' }, consented: true });
+  });
+
+  it('puts the database\'s consent refusal beside the box', async () => {
+    ctl.answers.submit_public_form = { data: 'consent_required', error: null };
+    const state = await submitPublicFormAction(ID, undefined, filled());
+    expect(state?.errors).toEqual({ consent: CONSENT_MESSAGE });
+    expect(state?.done).toBeUndefined();
   });
 
   it('sends it as the server itself, after asking the per-client limit once', async () => {
@@ -222,6 +287,7 @@ describe('submitPublicFormAction', () => {
     expect(state).toEqual({
       error: 'Too many attempts from your network. Please try again in 4 minutes.',
       values: { name: 'Siti Aisyah', email: 'Siti@Example.com', phone: '', message: 'Hi' },
+      consented: true,
     });
     expect(ctl.calls).toHaveLength(0);
     expect(ctl.serviceCalls).toBe(0);
@@ -256,9 +322,10 @@ describe('submitPublicFormAction', () => {
 
   it('gives back what was typed with a message beside each wrong field, without calling the database', async () => {
     const typed = { name: '', email: 'not-an-email', phone: '012', message: 'Hello' };
-    expect(await submitPublicFormAction(ID, undefined, formData(typed))).toEqual({
+    expect(await submitPublicFormAction(ID, undefined, formData({ ...typed, consent: 'on' }))).toEqual({
       errors: { name: 'Enter your name.', email: 'Enter an email address like name@example.com.' },
       values: typed,
+      consented: true,
     });
     expect(ctl.calls).toHaveLength(0);
     // A post that was never going to be sent does not use up the client's allowance.
@@ -267,7 +334,9 @@ describe('submitPublicFormAction', () => {
 
   it('treats a missing field as empty rather than failing', async () => {
     const state = await submitPublicFormAction(ID, undefined, new FormData());
-    expect(state?.errors).toEqual({ name: 'Enter your name.', email: 'Enter your email address.' });
+    expect(state?.errors).toEqual({
+      name: 'Enter your name.', email: 'Enter your email address.', consent: CONSENT_MESSAGE,
+    });
     expect(state?.values).toEqual({ name: '', email: '', phone: '', message: '' });
   });
 

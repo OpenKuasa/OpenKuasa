@@ -175,12 +175,29 @@ describe('mapFormSubmission', () => {
   const row = { id: 's1', form_id: 'f1', contact_id: 'c1', created_at: '2026-10-10T01:00:00Z' };
   it('reads the four fields out of the payload', () => {
     expect(mapFormSubmission({ ...row, payload: { name: 'Siti', email: 'siti@example.com', phone: '012', message: 'Hi', extra: 'ignored' } }))
-      .toEqual({ ...row, name: 'Siti', email: 'siti@example.com', phone: '012', message: 'Hi' });
+      .toEqual({
+        ...row, name: 'Siti', email: 'siti@example.com', phone: '012', message: 'Hi',
+        consent_text: null, consented_at: null,
+      });
+  });
+  it('reads what was agreed to, and when', () => {
+    const agreed = { consent_text: 'I agree that Kedai may keep these details.', consented_at: '2026-10-10T01:00:00Z' };
+    expect(mapFormSubmission({ ...row, payload: {}, ...agreed })).toMatchObject(agreed);
+  });
+  it('shows no consent unless both the wording and the time are there', () => {
+    for (const half of [
+      { consent_text: 'Words only', consented_at: null },
+      { consent_text: null, consented_at: '2026-10-10T01:00:00Z' },
+      { consent_text: '', consented_at: '2026-10-10T01:00:00Z' },
+    ]) {
+      expect(mapFormSubmission({ ...row, payload: {}, ...half })).toMatchObject({ consent_text: null, consented_at: null });
+    }
   });
   it('copes with a payload that is missing, empty or the wrong shape', () => {
     for (const payload of [null, undefined, 'text', 5, [], {}, { name: 5, email: null, phone: '', message: '  ' }]) {
       expect(mapFormSubmission({ ...row, contact_id: null, payload })).toEqual({
         ...row, contact_id: null, name: '', email: '', phone: null, message: null,
+        consent_text: null, consented_at: null,
       });
     }
   });

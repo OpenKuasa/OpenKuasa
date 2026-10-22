@@ -782,4 +782,15 @@ describe('LEKIU_SYSTEM, the three kinds of asker', () => {
   it('never mentions the old manager flag', () => {
     expect(LEKIU_SYSTEM).not.toContain('is_manager');
   });
+  it('stops at an empty lookup and never fills it from general knowledge, holidays included', () => {
+    expect(t).toContain('when a lookup finds nothing, say so and offer the next step.');
+    expect(t).toContain('never fill a gap from general knowledge or memory: no dates, months, names or figures');
+    expect(t).toContain('public holidays, for example, are only the ones recorded for this workspace');
+    expect(t).toContain('if no public holidays are recorded, say so and offer to add them');
+    expect(t).toContain('an owner or admin can add them on the public holidays screen');
+    expect(t).toContain('point them to the official government gazette, without listing dates or months');
+    // The rule is fixed text in the cached prompt, before the dated TODAY block.
+    const now = new Date('2026-10-22T02:00:00Z');
+    expect(lekiuSystem(now).startsWith(LEKIU_SYSTEM)).toBe(true);
+  });
 });

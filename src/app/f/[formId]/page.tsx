@@ -69,7 +69,10 @@ export default async function PublicFormPage({ params }: Props) {
         <p className="text-sm text-muted-foreground">{form.orgName}</p>
         <h1 className="text-2xl font-bold tracking-tight break-words">{form.name}</h1>
       </header>
-      <PublicLeadForm action={submitPublicFormAction.bind(null, id)} />
+      <PublicLeadForm
+        action={submitPublicFormAction.bind(null, id)}
+        consentText={form.consentText}
+      />
     </PublicFormShell>
   );
 }
