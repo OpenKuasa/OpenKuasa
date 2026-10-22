@@ -19,7 +19,7 @@ export async function workspaceSpendCents(
   const { data, error } = await client.rpc('agent_spend_cents', {
     p_org_id: orgId,
     p_since: sinceIso,
-    ...(agentKey ? { p_agent_key: agentKey } : {}),
+    ...(agentKey !== undefined ? { p_agent_key: agentKey } : {}),
   });
   if (error || typeof data !== 'number' || !Number.isFinite(data)) {
     throw new Error('spend query failed');

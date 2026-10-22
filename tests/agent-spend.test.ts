@@ -25,6 +25,16 @@ describe('workspaceSpendCents', () => {
     });
   });
 
+  test('an empty agent key is still passed through', async () => {
+    const { client, rpc } = fake({ data: 0, error: null });
+    await workspaceSpendCents(client, 'o', 's', '');
+    expect(rpc).toHaveBeenCalledWith('agent_spend_cents', {
+      p_org_id: 'o',
+      p_since: 's',
+      p_agent_key: '',
+    });
+  });
+
   test('non-number data throws', async () => {
     const { client } = fake({ data: null, error: null });
     await expect(workspaceSpendCents(client, 'o', 's')).rejects.toThrow('spend query failed');
