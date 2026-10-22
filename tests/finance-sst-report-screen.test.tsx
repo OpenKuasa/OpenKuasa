@@ -162,6 +162,12 @@ describe('the SST Report return (#222 stage 2)', () => {
     expect(text).toContain('1 Jul – 31 Aug 2026');
   });
 
+  it('says "their" for more than one line the form has no item for', async () => {
+    state.settings = async () => SAVED;
+    state.rows = async () => ({ lines: [line({ id: 'a', sst_rate: 7 }), line({ id: 'b', sst_rate: 7 })], credits: [] });
+    expect(await render()).toContain('2 lines (RM 2,000.00) are at a rate with no item on this return. Fix their rate or tax type before you file.');
+  });
+
   it('lists lines the form has no item for in a note', async () => {
     state.settings = async () => SAVED;
     state.rows = async () => ({
@@ -169,7 +175,7 @@ describe('the SST Report return (#222 stage 2)', () => {
       credits: [],
     });
     const text = await render();
-    expect(text).toContain('Not on the form: 1 line (RM 1,000.00) is at a rate with no item on this return. Fix their rate or tax type before you file.');
+    expect(text).toContain('Not on the form: 1 line (RM 1,000.00) is at a rate with no item on this return. Fix its rate or tax type before you file.');
     expect(text).toContain('Not on the form: 1 line (RM 50.00) has no SST tax type. Set one before you file.');
   });
 

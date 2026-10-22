@@ -75,7 +75,7 @@ function FormRow({ line, strong }: { line: { item: string; label: string; value?
       <span className="w-16 shrink-0 font-mono text-xs text-muted-foreground">{line.item}</span>
       <span className="min-w-0 flex-1">
         {line.label}
-        {line.typed ? <span className="ml-1.5 text-xs text-muted-foreground">(typed in)</span> : null}
+        {line.typed ? <span className="ml-1.5 text-xs text-muted-foreground">(typed in, coming later)</span> : null}
       </span>
       {line.value !== undefined ? (
         <span className="hidden shrink-0 text-right tabular-nums text-muted-foreground sm:block sm:w-32">
@@ -98,13 +98,16 @@ const shown = (l: SstFormLine) => ({
 
 const lines = (n: number) => (n === 1 ? '1 line' : `${n} lines`);
 
-/** The "Not on the form" notes of a return: lines with no form item, and a 13(a) below zero. */
+/**
+ * The "Not on the form" notes of a return: lines with no form item, a 13(a) below zero, tax given back in 13(a)
+ * for invoices voided this period, and an item 14 below zero.
+ */
 function notesOf(ret: SstReturn): string[] {
   const notes: string[] = [];
   const one = (n: number) => n === 1;
   if (ret.offForm.count > 0) {
     notes.push(
-      `Not on the form: ${lines(ret.offForm.count)} (${rm(ret.offForm.value)}) ${one(ret.offForm.count) ? 'is' : 'are'} at a rate with no item on this return. Fix their rate or tax type before you file.`,
+      `Not on the form: ${lines(ret.offForm.count)} (${rm(ret.offForm.value)}) ${one(ret.offForm.count) ? 'is' : 'are'} at a rate with no item on this return. Fix ${one(ret.offForm.count) ? 'its' : 'their'} rate or tax type before you file.`,
     );
   }
   if (ret.untyped.count > 0) {
@@ -114,6 +117,14 @@ function notesOf(ret: SstReturn): string[] {
   }
   if (ret.deductions.some((d) => d.item === '13(a)' && d.tax < 0)) {
     notes.push('Not on the form: 13(a) is below zero because a credit note counted in an earlier return was voided this period.');
+  }
+  if (ret.voidedTax > 0) {
+    notes.push(`Not on the form: 13(a) includes ${rm(ret.voidedTax)} of tax on invoices from earlier returns that were voided this period.`);
+  }
+  if (ret.item14 < 0) {
+    notes.push(
+      "Not on the form: item 14 is below zero because this period's deductions are more than its tax. Check with Customs (JKDM) how to claim it before you file.",
+    );
   }
   return notes;
 }
