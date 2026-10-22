@@ -19,6 +19,10 @@ const WEEKDAY_HEADINGS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 /** How many entries a day cell shows before '+N more'. */
 const CELL_ITEMS = 3;
 
+/**
+ * One source for each kind's colours: the grid chips, the Upcoming dots and the legend all read from here.
+ * Lekiu's primary is blue, so no other kind uses a blue hue.
+ */
 const KINDS: Record<PeopleCalendarKind, { label: string; chip: string; dot: string }> = {
   leave: { label: 'Leave', chip: 'bg-primary/10 text-primary border-primary/40', dot: 'bg-primary' },
   'time-off': {
@@ -28,15 +32,19 @@ const KINDS: Record<PeopleCalendarKind, { label: string; chip: string; dot: stri
   },
   holiday: {
     label: 'Public holiday',
-    chip: 'bg-blue-500/10 text-blue-700 dark:text-blue-400 border-blue-500/50',
-    dot: 'bg-blue-500',
+    chip: 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border-emerald-500/50',
+    dot: 'bg-emerald-500',
   },
   training: {
     label: 'Training',
     chip: 'bg-slate-500/10 text-slate-700 dark:text-slate-300 border-slate-500/50',
     dot: 'bg-slate-500',
   },
-  birthday: { label: 'Birthday', chip: 'bg-muted text-foreground border-border', dot: 'bg-muted-foreground' },
+  birthday: {
+    label: 'Birthday',
+    chip: 'bg-rose-500/10 text-rose-700 dark:text-rose-300 border-rose-500/40',
+    dot: 'bg-rose-400',
+  },
   anniversary: {
     label: 'Work anniversary',
     chip: 'bg-muted text-muted-foreground border-border',
