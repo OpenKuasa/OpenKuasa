@@ -243,7 +243,7 @@ describe('the typed-in figures on the SST Report (#222 stage 5)', () => {
     '13(c) Approved service tax deduction (RM)',
     '13(d) Bad debt relief (approved) (RM)',
   ];
-  const SALES_LABELS = ['13(b) Sales tax deduction (RM)', '13A Adjustment to the sales tax deduction (RM)', '13(d) Bad debt relief (approved) (RM)'];
+  const SALES_LABELS = ['13(b) Sales tax deduction (RM)', '13A Adjustment under sales tax deduction (RM)', '13(d) Bad debt relief (approved) (RM)'];
 
   it('reads the figures once, and each listed period counts its own', async () => {
     state.settings = async () => SAVED;
@@ -303,6 +303,19 @@ describe('the typed-in figures on the SST Report (#222 stage 5)', () => {
     for (const l of SALES_LABELS) expect(text).toContain(l);
     expect(text).not.toContain('11(e) Credit and charge cards (number)');
     expect(text).not.toContain('13(c) Approved service tax deduction (RM)');
+  });
+
+  it('labels 13A as the form does and says what it is, tied to its box', async () => {
+    state.settings = async () => SAVED;
+    const out = await html({ tax: 'sales' });
+    const hint = 'An approved sales tax deduction from an earlier period that was more than that period’s tax, carried forward. Copy it from MySST.';
+    expect(textOf(out)).toContain(hint);
+    expect(textOf(out)).not.toContain('Adjustment to the sales tax deduction');
+    // The 13A box points screen readers at the hint; no other box has one.
+    const described = [...out.matchAll(/aria-describedby="([^"]+)"/g)].map((m) => m[1]).filter((v) => v.endsWith('-hint'));
+    expect(described).toHaveLength(1);
+    expect(described[0]).toMatch(/adjustment_13a-hint$/);
+    expect(out).toContain(`id="${described[0]}"`);
   });
 
   it('gives a member the figures as text, with no box and no Save', async () => {

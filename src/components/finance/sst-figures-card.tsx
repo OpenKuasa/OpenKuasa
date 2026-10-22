@@ -14,7 +14,7 @@ import { type SstReturnType, type SstTypedFigures, sstCards } from '@/lib/financ
 export type SaveSstFigures = (input: unknown) => Promise<FinResult<null>>;
 
 type BoxKey = 'cards_11e' | 'deduction_13b' | 'deduction_13c' | 'bad_debt_13d' | 'adjustment_13a';
-type Box = { key: BoxKey; figure: keyof SstTypedFigures; label: string; cards?: boolean };
+type Box = { key: BoxKey; figure: keyof SstTypedFigures; label: string; cards?: boolean; hint?: string };
 
 const BAD_DEBT: Box = { key: 'bad_debt_13d', figure: 'badDebt13d', label: '13(d) Bad debt relief (approved) (RM)' };
 
@@ -27,7 +27,13 @@ const BOXES: Record<SstReturnType, Box[]> = {
   ],
   sales: [
     { key: 'deduction_13b', figure: 'deduction13b', label: '13(b) Sales tax deduction (RM)' },
-    { key: 'adjustment_13a', figure: 'adjustment13a', label: '13A Adjustment to the sales tax deduction (RM)' },
+    {
+      key: 'adjustment_13a',
+      figure: 'adjustment13a',
+      label: '13A Adjustment under sales tax deduction (RM)',
+      // What the form means by it (SST-02, 2 Oct 2026; Customs' guide to filling it, 31 May 2026).
+      hint: 'An approved sales tax deduction from an earlier period that was more than that period’s tax, carried forward. Copy it from MySST.',
+    },
     BAD_DEBT,
   ],
 };
@@ -155,8 +161,14 @@ function FiguresForm({
               autoComplete="off"
               placeholder={b.cards ? '0' : '0.00'}
               disabled={locked}
+              aria-describedby={b.hint ? `${id}-${b.key}-hint` : undefined}
               onChange={(e) => edit(b.key, e.target.value)}
             />
+            {b.hint ? (
+              <p id={`${id}-${b.key}-hint`} className="text-xs text-muted-foreground">
+                {b.hint}
+              </p>
+            ) : null}
           </div>
         ))}
       </div>
