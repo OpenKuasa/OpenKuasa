@@ -1,7 +1,7 @@
 /**
  * The reads and writes behind the SST Report's return (#222 stage 2): the invoice-line and credit-note rows a
  * return for one span needs, in the shapes sst-return.ts builds from, and marking a return as filed
- * (finance_sst_returns, 20261124140000_bendahara_sst_returns.sql).
+ * (finance_sst_returns, 20261125090300_bendahara_sst_returns.sql).
  *
  * Reading is every member's. Marking and unmarking are an owner's or admin's (42501 otherwise). The table has
  * no update grant, so marking is a plain insert: a period already marked answers ok and keeps its first date.

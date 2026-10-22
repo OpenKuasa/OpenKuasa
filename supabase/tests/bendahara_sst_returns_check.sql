@@ -1,5 +1,5 @@
 -- Bendahara SST returns check (SST stage 2). Run it after
--- 20261124140000_bendahara_sst_returns.sql, in the same transaction for a
+-- 20261125090300_bendahara_sst_returns.sql, in the same transaction for a
 -- dry run, or by itself once applied. It leaves nothing behind either way:
 -- the block always ends with RAISE, so every row and the helper function
 -- below are rolled back. Read the message:

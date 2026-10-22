@@ -14,7 +14,7 @@ import { listSstFiled, markSstReturnFiled, readSstRows, unmarkSstReturnFiled } f
 import { todayInMalaysia } from '@/lib/people/dates';
 
 // The rows an SST-02 return is built from, read from the hosted database (#222 stage 2) through the app's own
-// data layer, and marking a return filed (20261124140000_bendahara_sst_returns.sql). Every workspace is made
+// data layer, and marking a return filed (20261125090300_bendahara_sst_returns.sql). Every workspace is made
 // through tests/helpers/live-workspaces.ts, which deletes what it creates. It writes no rate (finance_fx_rates
 // is shared): the USD invoice's rate is typed by hand, from Reuters, as the FX tests do.
 
