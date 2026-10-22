@@ -9,7 +9,7 @@ import {
 } from '@/app/(app)/hire/actions';
 import { DELETION_NOTICE_ID } from '@/lib/hire/delete-dialog-state';
 import {
-  CLEAR_BODY, KEEP_FEEDBACK, ROW_MENU_WORDS, clearLabel, clearTitle, isDestructive, modeOf, reopenRefusal, rowMenuWithFeedback,
+  CLEAR_BODY, KEEP_FEEDBACK, ROW_MENU_WORDS, clearLabel, clearTitle, clearingLine, isDestructive, modeOf, reopenRefusal, rowMenuWithFeedback,
   type FeedbackMode, type RowMenuItem,
 } from '@/lib/hire/feedback-dialog-state';
 import {
@@ -205,6 +205,11 @@ export function InterviewRowMenu({ row }: { row: InterviewRow }) {
   const [panel, setPanel] = useState<'invitation' | 'cancel' | 'clear_feedback' | null>(null);
   /** The feedback form of this row: closed, or open to add, to edit, or to mark completed with feedback. */
   const [feedback, setFeedback] = useState<{ mode: FeedbackMode; row: InterviewRow } | null>(null);
+  /**
+   * The feedback the clear confirm shows, held as it was when the confirm opened: the clear sends its saved time, so
+   * feedback someone else saves meanwhile is refused, not cleared unseen.
+   */
+  const [clearing, setClearing] = useState<InterviewRow['feedback'] | null>(null);
   /** The row's invitation: not asked for, being fetched, or showing. */
   const [handover, setHandover] = useState<HandoverState>('idle');
   /** What the invitation panel shows, as the server made it. */
@@ -316,7 +321,10 @@ export function InterviewRowMenu({ row }: { row: InterviewRow }) {
             change.clearError();
             // The row as it is now: the form sends its `updatedAt`, so a later change by someone else is refused, not replaced.
             if (next === 'edit') openInterview({ mode: 'change', row, focusId: triggerId });
-            else if (next === 'cancel' || next === 'clear_feedback') setPanel(next);
+            else if (next === 'cancel' || next === 'clear_feedback') {
+              if (next === 'clear_feedback') setClearing(row.feedback ?? null);
+              setPanel(next);
+            }
             // The feedback form takes the row as it is now: an edit sends its feedback's saved time, so a later change by someone else is refused.
             // The row is held as it was when the form opened, however often the screen behind it is fetched again.
             else {
@@ -442,6 +450,7 @@ export function InterviewRowMenu({ row }: { row: InterviewRow }) {
           >
             <AlertDialog.Title className="text-base font-semibold break-words">{clearTitle(row.name)}</AlertDialog.Title>
             <AlertDialog.Description className="mt-1 text-sm break-words text-muted-foreground">{CLEAR_BODY}</AlertDialog.Description>
+            {clearingLine(clearing) ? <p className="mt-2 text-sm break-words">{clearingLine(clearing)}</p> : null}
             {change.error ? <p role="alert" className={cn(ALERT_CLASS, 'mt-3')}>{change.error}</p> : null}
             <div className="mt-5 flex flex-wrap items-center justify-between gap-3">
               <AlertDialog.Cancel asChild>
@@ -462,7 +471,7 @@ export function InterviewRowMenu({ row }: { row: InterviewRow }) {
                     if (change.pending || change.inFlight.current) return;
                     busy.current = true;
                     change.send(
-                      () => clearInterviewFeedbackAction({ id: row.id }),
+                      () => clearInterviewFeedbackAction({ id: row.id }, clearing?.recorded_at),
                       () => setPanel(null),
                       () => {
                         busy.current = false;

@@ -10,7 +10,7 @@ import type { InterviewFeedbackChange } from './capabilities';
 import { MENU_WORDS, menuGroups, rowMenu } from './interview-dialog-state';
 import {
   FEEDBACK_INPUT_MESSAGES, FEEDBACK_LIMITS, FEEDBACK_NOT_LOADED, FEEDBACK_SAVE_FAILED, RECOMMENDATIONS, feedbackBlocksReopen, feedbackMenuFor, feedbackMessage,
-  ratingWords, type Feedback, type FeedbackMenuItem, type Recommendation,
+  feedbackSummary, ratingWords, type Feedback, type FeedbackMenuItem, type Recommendation,
 } from './interview-feedback';
 import { clock12, longDate } from './interview-time';
 import { INTERVIEW_NOT_READ_BACK, interviewMessage, type InterviewMenuItem } from './interviews';
@@ -282,6 +282,18 @@ export function reopenRefusal(row: Pick<InterviewRow, 'statusKey' | 'feedback'>)
 
 export const clearTitle = (name: string): string => `Clear the feedback on the interview with ${name}?`;
 export const CLEAR_BODY = 'The rating, the recommendation and the comments are removed. The interview stays completed. This can\'t be undone.';
+/** How much of the comments the clear confirm shows: enough to recognise them. */
+export const COMMENTS_ON_CLEAR = 80;
+/**
+ * "Feedback to clear: 4 out of 5 · Advance · “Strong on key accounts…”": what the clear confirm will remove, from the
+ * row the confirm was opened on. The comments on one line, cut. Null when the row has no feedback to show.
+ */
+export function clearingLine(feedback: Feedback | null | undefined): string | null {
+  if (!feedback) return null;
+  const text = (feedback.comments ?? '').replace(/\s+/g, ' ').trim();
+  const comments = !text ? 'No comments' : text.length > COMMENTS_ON_CLEAR ? `“${text.slice(0, COMMENTS_ON_CLEAR).trimEnd()}…”` : `“${text}”`;
+  return `Feedback to clear: ${feedbackSummary(feedback)} · ${comments}`;
+}
 export const KEEP_FEEDBACK = 'Keep feedback';
 export const clearLabel = (busy: boolean): string => (busy ? 'Clearing…' : 'Clear feedback');
 

@@ -1,7 +1,7 @@
 // tests/hire-feedback-dialog.test.ts
 import { describe, expect, it } from 'vitest';
 import {
-  CLEAR_BODY, COMMENTS_HELP, FEEDBACK_CLEARED_MEANWHILE, FEEDBACK_MENU_WORDS, KEEP_FEEDBACK, LOAD_CURRENT_FEEDBACK, LOAD_CURRENT_FEEDBACK_HELP, RATINGS, RATING_HELP,
+  CLEAR_BODY, COMMENTS_HELP, clearingLine, FEEDBACK_CLEARED_MEANWHILE, FEEDBACK_MENU_WORDS, KEEP_FEEDBACK, LOAD_CURRENT_FEEDBACK, LOAD_CURRENT_FEEDBACK_HELP, RATINGS, RATING_HELP,
   RECOMMENDATION_HELP, ROW_MENU_WORDS, charactersLeft, clearLabel, clearTitle, countAnnouncement, countShown, countText, currentFeedbackResult, emptyFeedback,
   feedbackDialogDescription, feedbackDialogTitle, feedbackDiscardTitle, feedbackFieldId, feedbackFocusIdAfter, feedbackGone, feedbackNotice, feedbackProblems,
   feedbackRefreshAfter, feedbackRefusalWord, feedbackResult, feedbackSubmission, feedbackSubmitLabel, firstWrongFeedbackField, isDestructive, isFeedbackDirty, modeOf,
@@ -151,6 +151,21 @@ describe('the dialog\'s words', () => {
     expect(RECOMMENDATION_HELP).toBe('A note for whoever decides. It does not move or reject the application.');
     expect(COMMENTS_HELP).toBe('Optional. What the interview showed that bears on the job.');
     expect(ratingSpoken(4)).toBe('4 out of 5');
+  });
+  it('the clear confirm says what will be cleared: the rating, the recommendation and the start of the comments', () => {
+    const at = '2026-10-21T02:05:40.123456+00:00';
+    expect(clearingLine({ rating: 4, recommendation: 'advance', comments: 'Strong on key accounts.\nClear about targets.', recorded_at: at }))
+      .toBe('Feedback to clear: 4 out of 5 · Advance · “Strong on key accounts. Clear about targets.”');
+    expect(clearingLine({ rating: 2, recommendation: 'reject', comments: null, recorded_at: at })).toBe('Feedback to clear: 2 out of 5 · Reject · No comments');
+    const long = `${'Talked through every account in detail. '.repeat(5)}End.`;
+    const shown = clearingLine({ rating: 3, recommendation: 'hold', comments: long, recorded_at: at })!;
+    expect(shown.startsWith('Feedback to clear: 3 out of 5 · Hold · “Talked through every account in detail.')).toBe(true);
+    expect(shown.endsWith('…”')).toBe(true);
+    expect(shown).not.toContain('End.');
+    expect(shown.length).toBeLessThan(160);
+    // A row read without feedback (cleared meanwhile) has nothing to show: the confirm keeps its own sentence.
+    expect(clearingLine(null)).toBeNull();
+    expect(clearingLine(undefined)).toBeNull();
   });
   it('the clear confirm', () => {
     expect(clearTitle('Aina Rahman')).toBe('Clear the feedback on the interview with Aina Rahman?');

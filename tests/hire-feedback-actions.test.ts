@@ -131,6 +131,15 @@ describe('what the actions hand on and fetch again', () => {
       expect(ctl.calls[0].rest, JSON.stringify(seen)).toEqual([undefined]);
     }
   });
+  it('a clear passes on the version the confirm showed in the same way', async () => {
+    await clearInterviewFeedbackAction({ id: IV }, SEEN);
+    expect(ctl.calls[0].rest).toEqual([SEEN]);
+    for (const seen of [undefined, null, '', 7, { at: SEEN }]) {
+      ctl.calls = [];
+      await clearInterviewFeedbackAction({ id: IV }, seen);
+      expect(ctl.calls[0].rest, JSON.stringify(seen)).toEqual([undefined]);
+    }
+  });
   it('loading the current feedback changes nothing, so nothing is fetched again', async () => {
     ctl.result = { ok: true, data: { id: IV, status: 'completed', feedback: null } };
     expect(await getInterviewFeedbackAction({ id: IV })).toEqual(ctl.result);

@@ -644,9 +644,14 @@ export async function saveInterviewFeedbackAction(input: unknown, seen: unknown)
   return feedbackChange((ctx) => saveInterviewFeedback(ctx, input as never, opened));
 }
 
-/** Clearing the feedback on one interview. The interview stays completed. */
-export async function clearInterviewFeedbackAction(input: unknown): Promise<CapResult<InterviewFeedbackChange>> {
-  return feedbackChange((ctx) => clearInterviewFeedback(ctx, input as never));
+/**
+ * Clearing the feedback on one interview. The interview stays completed. `seen` is the time the feedback the confirm
+ * showed was last saved; the database clears nothing when the feedback has been saved again since. Anything but a
+ * non-empty string is not passed on.
+ */
+export async function clearInterviewFeedbackAction(input: unknown, seen?: unknown): Promise<CapResult<InterviewFeedbackChange>> {
+  const shown = typeof seen === 'string' && seen !== '' ? seen : undefined;
+  return feedbackChange((ctx) => clearInterviewFeedback(ctx, input as never, shown));
 }
 
 /**
