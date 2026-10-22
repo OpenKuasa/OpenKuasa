@@ -7,6 +7,7 @@ import {
   PEOPLE_WRITE_TOOL_NAMES,
   REACH_WRITE_TOOL_NAMES,
   crmProduct,
+  financeProduct,
   hireProduct,
   peopleProduct,
   reachProduct,
@@ -138,6 +139,32 @@ describe('every change tool has a card that lists what it will change', () => {
   });
 });
 
+/** The finance change tools whose cards name a refund, a payment or the invoice a refund is for. */
+const FINANCE_TOOLS: Record<string, Tool> = financeProduct({ client: {} as never, orgId: 'org1', canWrite: true }).write;
+const FINANCE_NAMED = [
+  'recordRefund',
+  'markRefundPaid',
+  'voidRefund',
+  'deleteRefund',
+  'markPaymentPaid',
+  'voidPayment',
+  'voidPaymentIn',
+  'deleteScheduledPayment',
+];
+
+describe('finance change tools name the row, never show its id', () => {
+  it.each(FINANCE_NAMED)('%s: every argument is a row, and no row shows a raw id', (name) => {
+    const tool = FINANCE_TOOLS[name];
+    expect(tool, `${name} is not a finance write tool`).toBeDefined();
+    const json = z.toJSONSchema(tool.inputSchema as z.ZodType, { io: 'input', unrepresentable: 'any' }) as Json;
+    const input = sample(json, name) as Json;
+    const rows = changeRows(name, input);
+    for (const row of rows) expect(row.to, `${name}: ${row.key} shows a raw id`).not.toContain(UUID);
+    expect(rows.map((r) => r.key).sort()).toEqual(leaves(input).map((l) => l.path).sort());
+    expect(rows.every((r) => r.label !== 'Record')).toBe(true);
+  });
+});
+
 describe('the rows of a change', () => {
   const CONTACT = '33333333-3333-4333-8333-333333333333';
   const STAGE = '44444444-4444-4444-8444-444444444444';
@@ -224,9 +251,113 @@ describe('the rows of a change', () => {
     ['decideOvertime', 'overtime'],
     ['cancelOvertime', 'overtime'],
     ['removeHoliday', 'holiday'],
+    ['updateAppointment', 'appointment'],
+    ['setAppointmentStatus', 'appointment'],
+    ['deleteAppointment', 'appointment'],
+    ['markRefundPaid', 'refund'],
+    ['voidRefund', 'refund'],
+    ['deleteRefund', 'refund'],
+    ['markPaymentPaid', 'payment-out'],
+    ['voidPayment', 'payment-out'],
+    ['deleteScheduledPayment', 'payment-out'],
+    ['voidPaymentIn', 'payment-in'],
+    ['promoteLeadToContact', 'lead'],
   ])('%s: its card knows the kind of row it is about (%s)', (name, kind) => {
     expect(kindOfTool(name)).toBe(kind);
     expect(changeRows(name, { id: UUID })[0].label).not.toBe('Record');
+  });
+
+  it('names an appointment by who, what and when, from the upcoming appointments lookup', () => {
+    const APPT = '77777777-7777-4777-8777-777777777777';
+    // The shape getUpcomingAppointments returns.
+    const appts = [
+      {
+        tool: 'getUpcomingAppointments',
+        output: [
+          { id: APPT, contact_name: 'Aina', kind: 'consultation', via: 'Zoom', status: 'scheduled', scheduled_at: '2026-10-28T07:00:00.000Z', malaysia_time: '28 Oct 2026, 3:00 pm' },
+        ],
+      },
+    ];
+    const input = { id: APPT, status: 'completed' };
+    const rows = changeRows('setAppointmentStatus', input, nameIn(appts), rowIn(appts));
+    expect(rows[0]).toEqual({ key: 'id', kind: 'record', label: 'Appointment', to: 'Aina, consultation, Wed 28 Oct 3:00 pm' });
+    expect(approvalTitle('setAppointmentStatus', input, nameIn(appts))).toBe('Mark appointment “Aina, consultation, Wed 28 Oct 3:00 pm” as completed?');
+    expect(changeRows('deleteAppointment', { id: APPT }, nameIn(appts))[0].to).toBe('Aina, consultation, Wed 28 Oct 3:00 pm');
+    // A change's result is the appointment as it now is, so a later card believes it.
+    const moved = [...appts, { tool: 'updateAppointment', output: { ok: true, data: { id: APPT, contact_name: 'Aina', kind: 'consultation', scheduled_at: '2026-10-29T01:30:00.000Z' } } }];
+    expect(changeRows('updateAppointment', { id: APPT, via: 'Phone' }, nameIn(moved))[0].to).toBe('Aina, consultation, Thu 29 Oct 9:30 am');
+    expect(input.id).toBe(APPT);
+  });
+
+  it('names a refund or a payment by its number, who and the whole amount, keyed on its transaction id', () => {
+    const TXN = '88888888-8888-4888-8888-888888888888';
+    const INV = '88888888-8888-4888-8888-888888888881';
+    const ACC = '88888888-8888-4888-8888-888888888882';
+    const common = { txn_date: '2026-10-20', method: 'bank_transfer', reference: null, account_id: ACC, account_name: 'Maybank', currency: 'MYR', transaction_currency: 'MYR' };
+    // The shapes listRefunds, listPaymentsIn and listPaymentsOut return: rows keyed on allocation_id, the transaction's id beside it.
+    const refunds = {
+      tool: 'listRefunds',
+      output: [{ ...common, allocation_id: 'a1', transaction_id: TXN, number: 'RF-0012', amount: 120, transaction_amount: 120, status: 'pending', reason: 'overpayment', notes: null, invoice_id: INV, invoice_no: 'INV-0001', credit_note_id: null, credit_note_no: null, customer_id: 'c1', customer_name: 'Acme Sdn Bhd' }],
+    };
+    const paymentsIn = {
+      tool: 'listPaymentsIn',
+      // One payment that pays two invoices: two rows, one transaction.
+      output: [
+        { ...common, allocation_id: 'b1', transaction_id: TXN, number: 'RCPT-0003', amount: 1000, transaction_amount: 1500, status: 'posted', invoice_id: INV, invoice_no: 'INV-0001', customer_name: 'Acme Sdn Bhd' },
+        { ...common, allocation_id: 'b2', transaction_id: TXN, number: 'RCPT-0003', amount: 500, transaction_amount: 1500, status: 'posted', invoice_id: 'i2', invoice_no: 'INV-0002', customer_name: 'Acme Sdn Bhd' },
+      ],
+    };
+    const paymentsOut = {
+      tool: 'listPaymentsOut',
+      output: [{ ...common, allocation_id: 'c1', transaction_id: TXN, number: null, amount: 80, transaction_amount: 80, status: 'scheduled', bill_id: 'b1', bill_no: 'BILL-9', supplier_name: 'Kedai Ali', currency: 'USD', transaction_currency: 'USD' }],
+    };
+    const only = (r: object) => nameIn([r as never]);
+    expect(changeRows('voidRefund', { id: TXN }, only(refunds))[0]).toEqual({ key: 'id', kind: 'record', label: 'Refund', to: 'RF-0012 to Acme Sdn Bhd, RM 120.00' });
+    expect(changeRows('voidPaymentIn', { id: TXN }, only(paymentsIn))[0].to).toBe('RCPT-0003 from Acme Sdn Bhd, RM 1,500.00');
+    expect(changeRows('markPaymentPaid', { id: TXN, paid_on: '2026-10-21' }, only(paymentsOut))[0].to).toBe('Payment to Kedai Ali, USD 80.00');
+    // A refund's lookup never names a payment, and the other way round.
+    expect(changeRows('voidPayment', { id: TXN }, only(refunds))[0].to).toBe(unnamed(TXN));
+    expect(changeRows('deleteRefund', { id: TXN }, only(paymentsIn))[0].to).toBe(unnamed(TXN));
+  });
+
+  it('a recorded refund names the invoice it is for', () => {
+    const INV = '88888888-8888-4888-8888-888888888881';
+    const invoices = [{ tool: 'listInvoices', output: [{ id: INV, invoice_no: 'INV-0001', customer_name: 'Acme Sdn Bhd' }] }];
+    const rows = changeRows('recordRefund', { invoice_id: INV, credit_note_id: null, account_id: UUID, amount: '120.00' }, nameIn(invoices));
+    expect(rows.slice(0, 2)).toEqual([
+      { key: 'invoice_id', kind: 'record', label: 'Invoice', to: 'INV-0001' },
+      { key: 'credit_note_id', kind: 'field', label: 'Credit note', to: CLEARED },
+    ]);
+  });
+
+  it('an acknowledgement request names the document or letter by its title and whose it is', () => {
+    const DOC = '99999999-9999-4999-8999-999999999991';
+    const LETTER = '99999999-9999-4999-8999-999999999992';
+    const lookups = [
+      { tool: 'listDocuments', output: { documents: [{ id: DOC, employee_id: EMPLOYEE, employee: 'Faiz Hakim', title: 'Passport', doc_type: 'identity', uploaded_by: 'HR', ack_requested: false }] } },
+      { tool: 'listLetters', output: { letters: [{ id: LETTER, employee_id: EMPLOYEE, employee: 'Faiz Hakim', letter_type: 'warning', title: 'Amaran', body: 'Dear Faiz', status: 'draft', ack_requested: false }] } },
+    ];
+    expect(changeRows('requestAcknowledgement', { document_id: DOC, requested: true }, nameIn(lookups))[0]).toEqual({
+      key: 'document_id', kind: 'record', label: 'Document', to: 'Passport (Faiz Hakim)',
+    });
+    expect(changeRows('requestAcknowledgement', { letter_id: LETTER, requested: false }, nameIn(lookups))[0].to).toBe('Amaran (Faiz Hakim)');
+  });
+
+  it('a course change names the course and the person from the courses lookup', () => {
+    const COURSE = '99999999-9999-4999-8999-999999999993';
+    const courses = [
+      { tool: 'listTrainings', output: { trainings: [{ id: COURSE, title: 'Safety Briefing', category: 'Safety', starts_on: '2026-11-10', ends_on: '2026-11-10', status: 'upcoming', enrolled: 1, completed_count: 0, people: [{ employee_id: EMPLOYEE, name: 'Faiz Hakim', completed: false }] }] } },
+    ];
+    for (const name of ['enrolInTraining', 'withdrawFromTraining', 'setTrainingCompleted']) {
+      const rows = changeRows(name, { training_id: COURSE, employee_id: EMPLOYEE }, nameIn(courses));
+      expect(rows.map((r) => [r.label, r.to])).toEqual([['Course', 'Safety Briefing'], ['Employee', 'Faiz Hakim']]);
+    }
+  });
+
+  it('promoting a lead names the lead, not a contact', () => {
+    const LEAD = '99999999-9999-4999-8999-999999999994';
+    const leads = [{ tool: 'listContacts', output: [{ id: LEAD, name: 'Siti Nur', stage: 'won' }] }];
+    expect(changeRows('promoteLeadToContact', { id: LEAD }, nameIn(leads))[0]).toEqual({ key: 'id', kind: 'record', label: 'Lead', to: 'Siti Nur' });
   });
 
   it('a name from a record is one line of plain text, kept apart from every other row', () => {
