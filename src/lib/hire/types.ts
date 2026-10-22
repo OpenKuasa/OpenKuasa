@@ -213,9 +213,13 @@ export type HireData = {
   searchCandidates?(query: CandidateSearch): Promise<CandidateSearchResult>;
 };
 
-/** A lookup of candidates by name. `inPool`: only talent pool members; `poolStatus`: only that pool status. */
-export type CandidateSearch = { name: string; inPool?: boolean; poolStatus?: Exclude<PoolStatus, 'none'> };
-/** At most CANDIDATE_SEARCH_LIMIT rows, newest first. `more` when there were more matches than that. */
+/**
+ * A lookup of candidates by name. `inPool`: only talent pool members; `poolStatus`: only that pool status. `limit`:
+ * how many rows to keep (CANDIDATE_SEARCH_LIMIT when left out, at most HIRE_READ_CAP), for a caller that narrows the
+ * rows further in memory.
+ */
+export type CandidateSearch = { name: string; inPool?: boolean; poolStatus?: Exclude<PoolStatus, 'none'>; limit?: number };
+/** At most the lookup's limit of rows, newest first. `more` when there were more matches than that. */
 export type CandidateSearchResult = { rows: Candidate[]; more: boolean };
 
 /** A candidate or an application as an approval card may need to describe it, to tell it from another of the same name. */
