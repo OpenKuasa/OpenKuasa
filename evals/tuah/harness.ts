@@ -12,11 +12,15 @@ import { readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import type { ModelMessage } from 'ai';
-import { runTuah } from '@/lib/ai/agents/orchestrator';
-import { getCurrentOrg } from '@/lib/auth/current-org';
+import { runTuah, type PeopleAccess } from '@/lib/ai/agents/orchestrator';
+import { peopleWriteFor } from '@/lib/ai/people-tools';
+import { getCurrentOrg, type OrgRole } from '@/lib/auth/current-org';
 import { collectNames, type KnownNames } from '@/lib/chat/change-titles';
 import { APPLY_TOOL, ASK_PREFIX, isDelegation, type Proposal } from '@/lib/chat/delegation';
 import { createSupabaseHireData } from '@/lib/hire/supabase';
+import { deleteEmployee } from '@/lib/people/capabilities';
+import { createSupabasePeopleData } from '@/lib/people/supabase';
+import { getPeopleViewer } from '@/lib/people/viewer';
 import type { Application, Candidate, Interview, Job } from '@/lib/hire/types';
 import { createSupabaseReachData } from '@/lib/reach/supabase';
 
@@ -130,6 +134,12 @@ export class Conversation {
      * row or file is written anywhere. Without a CV, Lekir gets no CV reader.
      */
     private hire?: { applications?: Application[]; cv?: Uint8Array; candidates?: Candidate[]; jobs?: Job[]; interviews?: Interview[] },
+    /**
+     * `hr`: give Tuah the workspace's HR (Lekiu), built as the chat route builds it. Off by default: every case
+     * written before the HR cases ran without HR, unlike production, and turning it on changes what Tuah is told
+     * about its team, so it stays off for them until a full run with HR on is chosen.
+     */
+    private options: { hr?: boolean } = {},
   ) {}
 
   async ask(text: string): Promise<Turn> {
@@ -160,6 +170,7 @@ export class Conversation {
     const extra = this.hire;
     const extraApplications = extra?.applications ?? [];
     const extraCv = extra?.cv;
+    const people = this.options.hr ? await this.peopleAccess(canWrite) : null;
     const result = runTuah(
       this.messages,
       {
@@ -213,7 +224,8 @@ export class Conversation {
         origin: 'https://example.test',
         write: canWrite ? { ctx: { client, orgId }, canWrite: true } : undefined,
       },
-      null, // people (position 9) — HR is not exercised in this eval
+      // people (position 9): only for a case that asks for HR (`options.hr`); see the constructor.
+      people,
       // finance (position 10). `team` (position 7) is set, so finance writes go through the team-mode applyGate
       // and the id-existence gate before they run; a non-viewer may write.
       canWrite ? { client, orgId, canWrite: true } : { client, orgId, canWrite: false },
@@ -272,6 +284,17 @@ export class Conversation {
     if (process.env.EVAL_DEBUG) console.log('said:', JSON.stringify(turn.text));
     return turn;
   }
+
+  /**
+   * The workspace's HR as `/api/chat` builds it: the caller's own session reads the rows, the viewer decides the
+   * tier, and someone who may only look gets no change tools. No receipt: no case files a claim.
+   */
+  private async peopleAccess(canWrite: boolean): Promise<PeopleAccess> {
+    const { client, orgId, userId, role } = this.workspace;
+    const viewer = await getPeopleViewer(client, { orgId, role: role as OrgRole });
+    const write = canWrite ? peopleWriteFor(viewer, { client, orgId }, null, userId) : undefined;
+    return { data: createSupabasePeopleData(client, orgId), viewer, write };
+  }
 }
 
 /** One thing a case checked, and whether it held. */
@@ -308,6 +331,22 @@ export async function cleanUp({ client, orgId }: Workspace): Promise<void> {
   await client.from('hire_jobs').delete().eq('org_id', orgId).ilike('title', like);
   await client.from('hire_settings').update({ careers_enabled: false, require_cv: false, require_cover_letter: false, ask_portfolio: false, ask_expected_salary: false }).eq('org_id', orgId);
   await client.from('forms').delete().eq('org_id', orgId).ilike('name', like);
+
+  // --- HR (Lekiu) -----------------------------------------------------------
+  // KEEP IN STEP with the HR cases' seeds. Staff first (a department cannot go while staff point at it), each one
+  // through hr_delete_employee as the app deletes them; they are found by their tagged work email. Then the
+  // departments, by their tagged name. A failure is reported, not swallowed, and never stops the rest.
+  const { data: taggedStaff } = await client.from('hr_employees').select('id').eq('org_id', orgId).ilike('work_email', like);
+  for (const { id } of (taggedStaff ?? []) as { id: string }[]) {
+    try {
+      const removed = await deleteEmployee({ client, orgId }, { id });
+      if (!removed.ok) console.warn(`cleanUp: HR employee ${id} not removed: ${removed.error}`);
+    } catch (error) {
+      console.warn(`cleanUp: HR employee ${id} not removed: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+  const departments = await client.from('hr_departments').delete().eq('org_id', orgId).ilike('name', like);
+  if (departments?.error) console.warn(`cleanUp: HR departments not removed: ${departments.error.message}`);
 
   // --- Finance (Bendahara) ------------------------------------------------
   // KEEP IN STEP with the finance cases' seeds (Task 12) — a seeded table missing here leaks rows into prod.
