@@ -111,11 +111,16 @@ export function rosterCardTitle(toolName: string, i: Record<string, unknown>, fi
     case 'setShifts': {
       const cells = Array.isArray(i.cells) ? (i.cells as Record<string, unknown>[]).filter((c) => c && typeof c === 'object') : [];
       const ids = [...new Set(cells.map((c) => c.employee_id).filter((v): v is string => typeof v === 'string'))];
-      const names = ids.map((id) => find(id, 'employee') ?? 'an employee not in the list above');
+      const named = ids.map((id) => find(id, 'employee'));
+      const names = named.map((n) => n ?? 'an employee not in the list above');
       const first = cells.map((c) => c.work_date).find((d): d is string => typeof d === 'string' && isRealDate(d));
       const week = first ? ` for the week of ${weekWords(first)}` : '';
       const clearing = cells.length > 0 && cells.every((c) => c.shift_type_id === null || c.shift_type_id === undefined);
-      if (ids.length === 1) return `${clearing ? 'Clear' : 'Set'} ${names[0]}'s shifts${week}?`;
+      if (ids.length === 1) {
+        return named[0]
+          ? `${clearing ? 'Clear' : 'Set'} ${named[0]}'s shifts${week}?`
+          : `${clearing ? 'Clear' : 'Set'} the shifts of an employee not in the list above${week}?`;
+      }
       if (ids.length === 0) return `Change the roster${week}?`;
       return `${clearing ? 'Clear' : 'Set'} shifts for ${peopleWords(names)}${week}?`;
     }
