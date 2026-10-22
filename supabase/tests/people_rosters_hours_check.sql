@@ -1,6 +1,6 @@
--- Rosters and hours (hr_save_roster, hr_save_hours, the manager read branch on
--- hr_shifts and hr_timesheet_entries) access check. Leaves nothing behind: the
--- block always ends with RAISE, so every row and helper below is rolled back.
+-- Rosters, hours and shift types (hr_save_roster, hr_save_hours, hr_save_shift_type, hr_archive_shift_type,
+-- hr_ensure_shift_types, the manager read branch on hr_shifts and hr_timesheet_entries) access check. Leaves
+-- nothing behind: the block always ends with RAISE, so every row and helper below is rolled back.
 -- Read the message:
 --   PEOPLE_ROSTERS_HOURS_CHECK PASSED ...   or   PEOPLE_ROSTERS_HOURS_CHECK FAILED (n): <what went wrong>
 -- Not in minutes :00 to :02 of an hour (it plants two employees in the demo,
@@ -19,12 +19,16 @@ declare
   e_own uuid := gen_random_uuid(); e_mgr uuid := gen_random_uuid(); e_rep uuid := gen_random_uuid(); e_peer uuid := gen_random_uuid();
   e_ina uuid := gen_random_uuid(); e_mfa uuid := gen_random_uuid(); e_unl uuid := gen_random_uuid(); e_old uuid := gen_random_uuid();
   e_oth uuid := gen_random_uuid(); de1 uuid := gen_random_uuid(); de2 uuid := gen_random_uuid();
+  fresh uuid := gen_random_uuid(); fresh2 uuid := gen_random_uuid(); fown uuid := gen_random_uuid();   -- workspaces with no shift types yet
+  t_m uuid; t_n uuid; t_o uuid; t_oth uuid; t_early uuid; t_new uuid; t_demo uuid;
   wk date := date '2030-01-07';          -- a Monday
   today date := (now() at time zone 'Asia/Kuala_Lumpur')::date;
   mon date;                               -- this week's Monday in Malaysia
   q text; a text; i int; ctx text; fails text[] := '{}';
   roster_fn text := 'public.hr_save_roster(uuid,date,jsonb)';
   hours_fn text := 'public.hr_save_hours(uuid,date,numeric,numeric)';
+  type_fns text[] := array['public.hr_save_shift_type(uuid,uuid,text,time without time zone,time without time zone,boolean,text)',
+    'public.hr_archive_shift_type(uuid,boolean)', 'public.hr_ensure_shift_types(uuid)'];
   t text;
 begin
   begin
@@ -54,6 +58,35 @@ begin
   select count(*) into i from pg_constraint k where k.conrelid = 'public.hr_timesheet_entries'::regclass and k.contype = 'c'
     and replace(pg_get_constraintdef(k.oid), ' ', '') like '%billable_hours<=hours%';
   if i < 1 then fails := fails || 'hr_timesheet_entries has no check that billable hours are at most the hours'::text; end if;
+  -- Shift types: three definer functions, a table every member reads and nobody writes directly, and every
+  -- shift pointing at one (the old text column kept, no longer required).
+  select count(*) into i from pg_proc p where p.oid = any(array(select to_regprocedure(x) from unnest(type_fns) x))
+    and p.prosecdef and p.prorettype = 'jsonb'::regtype and p.proconfig @> array['search_path=public']
+    and has_function_privilege('authenticated', p.oid, 'execute')
+    and not has_function_privilege('anon', p.oid, 'execute') and not has_function_privilege('public', p.oid, 'execute');
+  if i <> 3 then fails := fails || format('%s of 3 shift type functions are definer functions returning jsonb for signed-in users only', i); end if;
+  if to_regclass('public.hr_shift_types') is null then
+    fails := fails || 'hr_shift_types does not exist'::text;
+  else
+    if has_table_privilege('authenticated', 'public.hr_shift_types', 'INSERT, UPDATE, DELETE, TRUNCATE')
+       or has_any_column_privilege('authenticated', 'public.hr_shift_types', 'INSERT, UPDATE')
+       or has_table_privilege('anon', 'public.hr_shift_types', 'SELECT, INSERT, UPDATE, DELETE, TRUNCATE')
+       or not has_table_privilege('authenticated', 'public.hr_shift_types', 'SELECT') then
+      fails := fails || 'hr_shift_types should be read by signed-in users and written by none'::text;
+    end if;
+    select count(*) into i from pg_policies p where p.schemaname = 'public' and p.tablename = 'hr_shift_types';
+    if i <> 2 or (select p.qual from pg_policies p where p.schemaname = 'public' and p.tablename = 'hr_shift_types' and p.policyname = 'hr_shift_types_select')
+       not like '%is_org_member(org_id)%' then
+      fails := fails || format('hr_shift_types should have its two policies (%s) and a members'' read rule', i);
+    end if;
+  end if;
+  select count(*) into i from information_schema.columns c where c.table_schema = 'public' and c.table_name = 'hr_shifts'
+    and ((c.column_name = 'shift_type_id' and c.is_nullable = 'NO') or (c.column_name = 'shift' and c.is_nullable = 'YES'));
+  if i <> 2 then fails := fails || 'hr_shifts should have a required shift_type_id and an optional shift'::text; end if;
+  select count(*) into i from public.hr_shifts s where not exists (select 1 from public.hr_shift_types t where t.id = s.shift_type_id and t.org_id = s.org_id);
+  if i <> 0 then fails := fails || format('%s existing shifts point at no type of their own workspace', i); end if;
+  select count(*) into i from public.hr_shifts s join public.hr_shift_types t on t.id = s.shift_type_id where s.shift is distinct from t.default_kind;
+  if i <> 0 then fails := fails || format('%s existing shifts have an old kind that is not their type''s', i); end if;
   -- Any private hr_ helper stays closed.
   select count(*) into i from pg_proc p join pg_namespace ns on ns.oid = p.pronamespace
   where ns.nspname = 'private' and p.proname like 'hr\_%'
@@ -62,6 +95,8 @@ begin
   if cardinality(fails) > 0 then raise exception 'the catalogue is not as expected, so nothing else was tried'; end if;
 
   -- ---- helpers ----------------------------------------------------------------------------
+  create temp table rh_ctx (org uuid) on commit drop;
+  insert into rh_ctx values (org);
   execute $f$
     create function pg_temp.g(who uuid, q text, extra jsonb default '{}') returns text language plpgsql as $b$
     declare r jsonb; got text; n int;
@@ -92,7 +127,17 @@ begin
   $f$;
   execute $f$
     create function pg_temp.cell(e uuid, d date, k text) returns jsonb language sql as $b$
-      select jsonb_build_object('employee_id', e, 'work_date', d, 'shift', k)
+      -- k: a default kind (that type of the employee's workspace, else of the main one), a type id, null to
+      -- clear, or any other word for a type that does not exist.
+      select jsonb_build_object('employee_id', e, 'work_date', d, 'shift_type_id',
+        case
+          when k is null then null
+          when k in ('morning', 'night', 'off') then (
+            select t.id from public.hr_shift_types t
+            where t.default_kind = k and t.org_id = coalesce((select x.org_id from public.hr_employees x where x.id = e), (select c.org from rh_ctx c)))
+          when k ~ '^[0-9a-f-]{36}$' then k::uuid
+          else gen_random_uuid()
+        end)
     $b$
   $f$;
   execute $f$
@@ -102,7 +147,8 @@ begin
   $f$;
   execute $f$
     create function pg_temp.shift_of(e uuid, d date) returns text language sql as $b$
-      select coalesce((select s.shift from public.hr_shifts s where s.employee_id = e and s.work_date = d), '-')
+      select coalesce((select coalesce(t.default_kind, t.name) from public.hr_shifts s join public.hr_shift_types t on t.id = s.shift_type_id
+        where s.employee_id = e and s.work_date = d), '-')
     $b$
   $f$;
   execute $f$
@@ -132,6 +178,16 @@ begin
     (e_unl, org, 'R07', 'Roster Unlinked', null, 'active'), (e_old, org, 'R08', 'Roster Old', null, 'inactive'),
     (e_oth, oth, 'O01', 'Other Person', null, 'active');
   update public.hr_employees set reports_to = e_mgr where id = e_rep;
+  insert into auth.users (id, instance_id, aud, role, email, encrypted_password, email_confirmed_at, created_at, updated_at, raw_app_meta_data, raw_user_meta_data, is_anonymous)
+  values (fown, '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', fown || '@rosters-check.openkuasa-test.dev', '', now(), now(), now(), '{}'::jsonb, '{}'::jsonb, false);
+  insert into public.orgs (id, name) values (fresh, 'Rosters Fresh Sdn Bhd'), (fresh2, 'Rosters Fresh Two Sdn Bhd');
+  insert into public.org_members (org_id, user_id, role) values (fresh, fown, 'owner'), (fresh2, fown, 'owner');
+  perform private.hr_ensure_shift_types(org);
+  perform private.hr_ensure_shift_types(oth);
+  select t.id into t_m from public.hr_shift_types t where t.org_id = org and t.default_kind = 'morning';
+  select t.id into t_n from public.hr_shift_types t where t.org_id = org and t.default_kind = 'night';
+  select t.id into t_o from public.hr_shift_types t where t.org_id = org and t.default_kind = 'off';
+  select t.id into t_oth from public.hr_shift_types t where t.org_id = oth and t.default_kind = 'morning';
   if demo is not null then
     insert into public.org_members (org_id, user_id, role) values (demo, da, 'admin'), (demo, dm, 'member');
     insert into public.hr_employees (id, org_id, employee_no, name, user_id, status) values
@@ -146,6 +202,9 @@ begin
   if a is distinct from 'morningnightoffmorning' then fails := fails || format('after the owner''s save the four cells read %s', a); end if;
   select count(*) into i from public.hr_shifts s where s.employee_id in (e_peer, e_rep, e_unl) and s.org_id = org;
   if i <> 4 then fails := fails || format('the owner''s save wrote %s rows, wanted 4', i); end if;
+  select count(*) into i from public.hr_shifts s join public.hr_shift_types t on t.id = s.shift_type_id
+  where s.org_id = org and s.shift is not distinct from t.default_kind;
+  if i <> 4 then fails := fails || format('%s of 4 saved shifts carry their type''s kind in the old column', i); end if;
   q := pg_temp.roster(org, wk, jsonb_build_array(pg_temp.cell(e_peer, wk, 'night'), pg_temp.cell(e_peer, wk + 2, null),
     pg_temp.cell(e_rep, wk + 1, 'night'), pg_temp.cell(e_peer, wk + 3, null)));
   fails := fails || pg_temp.t(adm, 'an admin changes one, clears one, leaves one as it was and clears an empty one', q, '={"week":"2030-01-07","saved":1,"removed":1}');
@@ -177,11 +236,13 @@ begin
     || pg_temp.t(own, 'no week', pg_temp.roster(org, null, '[]'), 'ROSTER_BAD_INPUT')
     || pg_temp.t(own, 'a day after the week', pg_temp.roster(org, wk, jsonb_build_array(pg_temp.cell(e_peer, wk + 7, 'off'))), 'ROSTER_BAD_INPUT')
     || pg_temp.t(own, 'a day before the week', pg_temp.roster(org, wk, jsonb_build_array(pg_temp.cell(e_peer, wk - 1, 'off'))), 'ROSTER_BAD_INPUT')
-    || pg_temp.t(own, 'a shift that is not one of the three', pg_temp.roster(org, wk, jsonb_build_array(pg_temp.cell(e_peer, wk, 'evening'))), 'ROSTER_BAD_INPUT')
+    || pg_temp.t(own, 'a shift type that does not exist', pg_temp.roster(org, wk, jsonb_build_array(pg_temp.cell(e_peer, wk, 'evening'))), 'ROSTER_BAD_SHIFT_TYPE')
+    || pg_temp.t(own, 'another workspace''s shift type', pg_temp.roster(org, wk, jsonb_build_array(pg_temp.cell(e_peer, wk, t_oth::text))), 'ROSTER_BAD_SHIFT_TYPE')
+    || pg_temp.t(own, 'a type id that is not a uuid', pg_temp.roster(org, wk, format('[{"employee_id":"%s","work_date":"2030-01-07","shift_type_id":"x"}]', e_peer)::jsonb), 'ROSTER_BAD_INPUT')
     || pg_temp.t(own, 'the same cell twice', pg_temp.roster(org, wk, jsonb_build_array(pg_temp.cell(e_peer, wk, 'off'), pg_temp.cell(e_peer, wk, 'night'))), 'ROSTER_BAD_INPUT')
-    || pg_temp.t(own, 'a cell with no shift key', pg_temp.roster(org, wk, jsonb_build_array(jsonb_build_object('employee_id', e_peer, 'work_date', wk))), 'ROSTER_BAD_INPUT')
-    || pg_temp.t(own, 'an id that is not a uuid', pg_temp.roster(org, wk, '[{"employee_id":"nope","work_date":"2030-01-07","shift":"off"}]'), 'ROSTER_BAD_INPUT')
-    || pg_temp.t(own, 'a date that is not a date', pg_temp.roster(org, wk, format('[{"employee_id":"%s","work_date":"2030-02-30","shift":"off"}]', e_peer)::jsonb), 'ROSTER_BAD_INPUT')
+    || pg_temp.t(own, 'a cell with no shift type key', pg_temp.roster(org, wk, jsonb_build_array(jsonb_build_object('employee_id', e_peer, 'work_date', wk, 'shift', 'off'))), 'ROSTER_BAD_INPUT')
+    || pg_temp.t(own, 'an id that is not a uuid', pg_temp.roster(org, wk, '[{"employee_id":"nope","work_date":"2030-01-07","shift_type_id":null}]'), 'ROSTER_BAD_INPUT')
+    || pg_temp.t(own, 'a date that is not a date', pg_temp.roster(org, wk, format('[{"employee_id":"%s","work_date":"2030-02-30","shift_type_id":null}]', e_peer)::jsonb), 'ROSTER_BAD_INPUT')
     || pg_temp.t(own, 'cells that are not a list', pg_temp.roster(org, wk, '{"a":1}'), 'ROSTER_BAD_INPUT')
     || pg_temp.t(own, 'a cell that is not an object', pg_temp.roster(org, wk, '[1]'), 'ROSTER_BAD_INPUT')
     || pg_temp.t(own, 'an employee of another workspace', pg_temp.roster(org, wk, jsonb_build_array(pg_temp.cell(e_oth, wk, 'off'))), 'ROSTER_BAD_EMPLOYEE')
@@ -266,6 +327,100 @@ begin
     || pg_temp.t(peer, 'a member reads no one else''s shifts', format('(select count(*) from public.hr_shifts s where s.employee_id = %L)', e_rep), '=0')
     || pg_temp.t(outs, 'an outsider reads nothing', format('(select count(*) from public.hr_timesheet_entries x where x.org_id = %L)', org), '=0')
     || pg_temp.t(adm, 'an admin reads every shift in the workspace', format('(select count(*) from public.hr_shifts s where s.org_id = %L)', org), '=4');
+
+  -- ---- 9. shift types -------------------------------------------------------------------------
+  -- The defaults: three, made once, and only for a workspace with no types.
+  select string_agg(t.name || ' ' || coalesce(to_char(t.start_time, 'HH24:MI'), '-') || ' ' || coalesce(to_char(t.end_time, 'HH24:MI'), '-') || ' ' || t.is_off::text, ', ' order by t.default_kind)
+    into a from public.hr_shift_types t where t.org_id = org;
+  if a is distinct from 'Morning 09:00 18:00 false, Night 21:00 06:00 false, Off - - true' then fails := fails || format('the default types read %s', a); end if;
+  fails := fails
+    || pg_temp.t(own, 'the defaults are not added twice', format('public.hr_ensure_shift_types(%L)', org), '={"added":0}')
+    || pg_temp.t(fown, 'a new workspace''s owner gets the three defaults', format('public.hr_ensure_shift_types(%L)', fresh2), '={"added":3}')
+    || pg_temp.t(fown, 'once', format('public.hr_ensure_shift_types(%L)', fresh2), '={"added":0}')
+    -- A workspace whose first type is a custom one gets the defaults with it.
+    || pg_temp.t(fown, 'a first custom type', format('public.hr_save_shift_type(%L, null, %L, null, null, false, %L)', fresh, 'Custom', 'rose'), '*')
+    || pg_temp.t(fown, 'comes with the three defaults', format('(select count(*) from public.hr_shift_types t where t.org_id = %L)', fresh), '=4')
+    || pg_temp.t(fown, 'which are then not added again', format('public.hr_ensure_shift_types(%L)', fresh), '={"added":0}')
+    || pg_temp.t(peer, 'a member cannot ask for them', format('public.hr_ensure_shift_types(%L)', org), 'SHIFT_TYPE_NOT_ALLOWED');
+
+  -- Owners and admins add, change and archive types; times may cross midnight.
+  fails := fails || pg_temp.t(own, 'the owner adds a type, its name trimmed', format('public.hr_save_shift_type(%L, null, %L, %L, %L, false, %L)', org, ' Split ', '07:00', '11:00', 'teal'), '*');
+  fails := fails || pg_temp.t(own, 'and it is there', format('(select count(*) from public.hr_shift_types t where t.org_id = %L and t.name = %L and t.color = %L)', org, 'Split', 'teal'), '=1');
+  select t.id into t_early from public.hr_shift_types t where t.org_id = org and t.name = 'Split';
+  fails := fails
+    || pg_temp.t(adm, 'an admin adds a shift that crosses midnight', format('public.hr_save_shift_type(%L, null, %L, %L, %L, false, %L)', org, 'Graveyard', '22:00', '06:00', 'slate'), '*')
+    || pg_temp.t(adm, 'and one with no times', format('public.hr_save_shift_type(%L, null, %L, null, null, false, %L)', org, 'Training', 'amber'), '*')
+    || pg_temp.t(adm, 'and another off type', format('public.hr_save_shift_type(%L, null, %L, null, null, true, %L)', org, 'Rest day', 'stone'), '*')
+    || pg_temp.t(own, 'the owner renames a type and changes its times',
+         format('public.hr_save_shift_type(%L, %L, %L, %L, %L, false, %L)', org, t_early, 'Early', '06:00', '14:00', 'sky'),
+         format('={"id":"%s","name":"Early","start_time":"06:00:00","end_time":"14:00:00","is_off":false,"color":"sky","archived":false}', t_early))
+    || pg_temp.t(own, 'and renames a default', format('public.hr_save_shift_type(%L, %L, %L, %L, %L, false, %L)', org, t_n, 'Late', '21:00', '06:00', 'blue'), '*')
+    || pg_temp.t(adm, 'a name already in use, whatever its capitals and spaces', format('public.hr_save_shift_type(%L, null, %L, null, null, false, %L)', org, ' early ', 'sky'), 'SHIFT_TYPE_EXISTS')
+    || pg_temp.t(adm, 'renaming onto another type''s name', format('public.hr_save_shift_type(%L, %L, %L, null, null, true, %L)', org, t_o, 'Morning', 'stone'), 'SHIFT_TYPE_EXISTS')
+    || pg_temp.t(adm, 'an off type with times', format('public.hr_save_shift_type(%L, null, %L, %L, %L, true, %L)', org, 'Odd', '09:00', '17:00', 'stone'), 'SHIFT_TYPE_BAD_INPUT')
+    || pg_temp.t(adm, 'a start with no end', format('public.hr_save_shift_type(%L, null, %L, %L, null, false, %L)', org, 'Odd', '09:00', 'stone'), 'SHIFT_TYPE_BAD_INPUT')
+    || pg_temp.t(adm, 'a colour not in the palette', format('public.hr_save_shift_type(%L, null, %L, null, null, false, %L)', org, 'Odd', 'purple'), 'SHIFT_TYPE_BAD_INPUT')
+    || pg_temp.t(adm, 'violet is not in it either', format('public.hr_save_shift_type(%L, null, %L, null, null, false, %L)', org, 'Odd', 'violet'), 'SHIFT_TYPE_BAD_INPUT')
+    || pg_temp.t(adm, 'an empty name', format('public.hr_save_shift_type(%L, null, %L, null, null, false, %L)', org, '  ', 'sky'), 'SHIFT_TYPE_BAD_INPUT')
+    || pg_temp.t(adm, 'a name over 40 characters', format('public.hr_save_shift_type(%L, null, %L, null, null, false, %L)', org, repeat('n', 41), 'sky'), 'SHIFT_TYPE_BAD_INPUT')
+    || pg_temp.t(adm, 'another workspace''s type, named through this one', format('public.hr_save_shift_type(%L, %L, %L, null, null, false, %L)', org, t_oth, 'Mine now', 'sky'), 'SHIFT_TYPE_NOT_FOUND');
+  select count(*) into i from public.hr_shift_types t where t.org_id = org and t.name = 'Graveyard' and t.end_time < t.start_time;
+  if i <> 1 then fails := fails || 'the cross-midnight type was not kept with its end before its start'::text; end if;
+  if (select t.default_kind from public.hr_shift_types t where t.id = t_n) is distinct from 'night' then fails := fails || 'renaming a default lost its kind'::text; end if;
+
+  -- Nobody else.
+  fails := fails
+    || pg_temp.t(peer, 'a member cannot add a type', format('public.hr_save_shift_type(%L, null, %L, null, null, false, %L)', org, 'Mine', 'sky'), 'SHIFT_TYPE_NOT_ALLOWED')
+    || pg_temp.t(mgr, 'a manager cannot add a type', format('public.hr_save_shift_type(%L, null, %L, null, null, false, %L)', org, 'Mine', 'sky'), 'SHIFT_TYPE_NOT_ALLOWED')
+    || pg_temp.t(peer, 'a member cannot rename one', format('public.hr_save_shift_type(%L, %L, %L, null, null, false, %L)', org, t_m, 'Mine', 'sky'), 'SHIFT_TYPE_NOT_ALLOWED')
+    || pg_temp.t(outs, 'another workspace''s owner cannot add one here', format('public.hr_save_shift_type(%L, null, %L, null, null, false, %L)', org, 'Mine', 'sky'), 'SHIFT_TYPE_NOT_ALLOWED')
+    || pg_temp.t(null, 'no session cannot', format('public.hr_save_shift_type(%L, null, %L, null, null, false, %L)', org, 'Mine', 'sky'), 'SHIFT_TYPE_NOT_ALLOWED')
+    || pg_temp.t(amfa, 'an admin who owes a second factor cannot', format('public.hr_save_shift_type(%L, null, %L, null, null, false, %L)', org, 'Mine', 'sky'), 'SHIFT_TYPE_NOT_ALLOWED')
+    || pg_temp.t(peer, 'a member cannot archive one', format('public.hr_archive_shift_type(%L, true)', t_m), 'SHIFT_TYPE_NOT_FOUND')
+    || pg_temp.t(outs, 'nor can an outsider', format('public.hr_archive_shift_type(%L, true)', t_m), 'SHIFT_TYPE_NOT_FOUND')
+    || pg_temp.t(own, 'an id that is no type', format('public.hr_archive_shift_type(%L, true)', gen_random_uuid()), 'SHIFT_TYPE_NOT_FOUND')
+    || pg_temp.t(peer, 'a member cannot write the table directly', format('insert into public.hr_shift_types (org_id, name) values (%L, ''Mine'')', org), 'denied')
+    || pg_temp.t(own, 'nor can the owner', format('update public.hr_shift_types set name = ''Mine'' where id = %L', t_m), 'denied');
+
+  -- Everyone in the workspace reads the types; nobody outside it.
+  select count(*) into i from public.hr_shift_types t where t.org_id = org;
+  fails := fails
+    || pg_temp.t(peer, 'a member reads every type of the workspace', format('(select count(*) from public.hr_shift_types t where t.org_id = %L)', org), format('=%s', i))
+    || pg_temp.t(mgr, 'a manager too', format('(select count(*) from public.hr_shift_types t where t.org_id = %L)', org), format('=%s', i))
+    || pg_temp.t(outs, 'an outsider reads none', format('(select count(*) from public.hr_shift_types t where t.org_id = %L)', org), '=0');
+
+  -- Archiving: the past row keeps the type; a new save cannot pick it; it cannot be changed; its name is free again.
+  fails := fails || pg_temp.t(own, 'a shift on the Early type, before it is archived', pg_temp.roster(org, wk, jsonb_build_array(pg_temp.cell(e_mgr, wk, t_early::text))), '*');
+  fails := fails
+    || pg_temp.t(adm, 'an admin archives Early', format('public.hr_archive_shift_type(%L, true)', t_early), '*')
+    || pg_temp.t(own, 'an archived type cannot be used in a new save', pg_temp.roster(org, wk, jsonb_build_array(pg_temp.cell(e_mgr, wk + 1, t_early::text))), 'ROSTER_ARCHIVED_SHIFT_TYPE')
+    || pg_temp.t(own, 'nor set again on the cell that has it', pg_temp.roster(org, wk, jsonb_build_array(pg_temp.cell(e_mgr, wk, t_early::text))), 'ROSTER_ARCHIVED_SHIFT_TYPE')
+    || pg_temp.t(own, 'an archived type cannot be changed', format('public.hr_save_shift_type(%L, %L, %L, null, null, false, %L)', org, t_early, 'Earlier', 'sky'), 'SHIFT_TYPE_ARCHIVED')
+    || pg_temp.t(own, 'its name is free for a new type', format('public.hr_save_shift_type(%L, null, %L, %L, %L, false, %L)', org, 'Early', '05:00', '13:00', 'lime'), '*');
+  if pg_temp.shift_of(e_mgr, wk) <> 'Early' then fails := fails || format('the past shift lost its archived type: %s', pg_temp.shift_of(e_mgr, wk)); end if;
+  select t.id into t_new from public.hr_shift_types t where t.org_id = org and t.name = 'Early' and t.archived_at is null;
+  fails := fails
+    || pg_temp.t(own, 'the old one cannot come back while the name is taken', format('public.hr_archive_shift_type(%L, false)', t_early), 'SHIFT_TYPE_EXISTS')
+    || pg_temp.t(own, 'a custom type leaves the old column empty', pg_temp.roster(org, wk, jsonb_build_array(pg_temp.cell(e_mgr, wk + 1, t_new::text))), '*');
+  if (select s.shift from public.hr_shifts s where s.employee_id = e_mgr and s.work_date = wk + 1) is not null then
+    fails := fails || 'a custom type wrote a kind into the old column'::text;
+  end if;
+  fails := fails
+    || pg_temp.t(own, 'archiving the new one', format('public.hr_archive_shift_type(%L, true)', t_new), '*')
+    || pg_temp.t(own, 'lets the old one come back', format('public.hr_archive_shift_type(%L, false)', t_early), format('={"id":"%s","name":"Early","start_time":"06:00:00","end_time":"14:00:00","is_off":false,"color":"sky","archived":false}', t_early));
+
+  -- The demo is read only.
+  if demo is not null then
+    select t.id into t_demo from public.hr_shift_types t where t.org_id = demo order by t.created_at limit 1;
+    fails := fails
+      || pg_temp.t(da, 'an admin in the demo cannot add a type', format('public.hr_save_shift_type(%L, null, %L, null, null, false, %L)', demo, 'Demo', 'sky'), 'SHIFT_TYPE_NOT_ALLOWED')
+      || pg_temp.t(da, 'nor ask for the defaults', format('public.hr_ensure_shift_types(%L)', demo), 'SHIFT_TYPE_NOT_ALLOWED');
+    if t_demo is not null then
+      fails := fails
+        || pg_temp.t(da, 'nor archive one', format('public.hr_archive_shift_type(%L, true)', t_demo), 'SHIFT_TYPE_NOT_ALLOWED')
+        || pg_temp.t(dm, 'a demo member reads the demo''s types', format('(select count(*) > 0 from public.hr_shift_types t where t.org_id = %L)', demo), '=true');
+    end if;
+  end if;
 
   exception when others then
     get stacked diagnostics ctx = pg_exception_context;
