@@ -101,8 +101,11 @@ import {
 import { fxSstRate } from '@/lib/finance/sst-rate';
 import { SST_NEEDS_SIGN_OFF, saveSstSettings, sstSettingsInput } from '@/lib/finance/sst';
 import {
+  SST_FIGURES_NEEDS_SIGN_OFF,
   SST_RETURN_NEEDS_SIGN_OFF,
   markSstReturnFiled,
+  saveSstFigures,
+  sstFiguresInput,
   sstReturnInput,
   unmarkSstReturnFiled,
 } from '@/lib/finance/sst-return-data';
@@ -1291,4 +1294,16 @@ export async function unmarkSstReturnFiledAction(input: unknown): Promise<FinRes
     const result = await unmarkSstReturnFiled(ctx, parsed);
     return result.ok ? { ok: true, data: null } : result;
   }, SST_RETURN_SIGN_OFF);
+}
+
+/* ------------------------------------------------------------------ SST typed-in figures (#222 stage 5) */
+
+const SST_FIGURES_SIGN_OFF = { signOff: true, signOffError: SST_FIGURES_NEEDS_SIGN_OFF } as const;
+
+/** Saves the figures typed in for one SST return. An owner or admin only; refused while the return is marked filed. */
+export async function saveSstFiguresAction(input: unknown): Promise<FinResult<null>> {
+  return run(SST_SETTINGS_PATHS, sstFiguresInput, input, async (ctx, parsed) => {
+    const result = await saveSstFigures(ctx, parsed);
+    return result.ok ? { ok: true, data: null } : result;
+  }, SST_FIGURES_SIGN_OFF);
 }
