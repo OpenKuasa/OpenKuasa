@@ -16,8 +16,17 @@ import { createHash, randomUUID } from 'node:crypto';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { errorCodeOf } from '@/lib/ai/call-log';
 
-/** A change as the server kept it. `input` is null once it has been settled or has lapsed. */
-export type StoredChange = { id: string; product: string; action: string; input: unknown };
+/**
+ * Values the server read when it proposed a change and binds to it, such as the version of the row the card showed.
+ * Never from the model: a gate puts them on the record, and only the record hands them back when the change runs.
+ */
+export type Bound = Record<string, unknown>;
+
+/**
+ * A change as the server kept it. `input` is null once it has been settled or has lapsed. `bound` is there only when
+ * the server bound something to it (`NewProposal.bound`).
+ */
+export type StoredChange = { id: string; product: string; action: string; input: unknown; bound?: Bound };
 
 export type NewProposal = {
   /** Chosen by the caller, so it can be reserved before the write is awaited. */
@@ -27,6 +36,8 @@ export type NewProposal = {
   product: string;
   action: string;
   input: unknown;
+  /** What the server read when it proposed the change and binds to it. Kept beside the arguments, never hashed with them. */
+  bound?: Bound;
 };
 
 /** How a waiting change is found: by its own id, or by the call that proposed it and exactly what that call carried. */
@@ -68,6 +79,30 @@ export function inputHash(input: unknown): string {
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+/**
+ * Where a binding sits in a kept change's arguments: the table has one column for them. No tool argument has this
+ * name, and one the arguments bring themselves is dropped when the change is kept (`keptInput`), so only the server
+ * ever puts a binding there.
+ */
+const BOUND_KEY = '$bound';
+const isPlainObject = (value: unknown): value is Record<string, unknown> =>
+  !!value && typeof value === 'object' && !Array.isArray(value);
+
+/** The arguments as they are kept: any binding they brought themselves dropped, the server's own added. Null when a binding cannot be kept. */
+function keptInput(input: unknown, bound: Bound | undefined): { input: unknown } | null {
+  if (!isPlainObject(input)) return bound ? null : { input };
+  const rest = { ...input };
+  delete rest[BOUND_KEY];
+  return { input: bound ? { ...rest, [BOUND_KEY]: bound } : rest };
+}
+
+/** A kept row as the rest of the app sees it: the arguments without the binding, and the binding apart. */
+function splitBound(row: StoredChange): StoredChange {
+  if (!isPlainObject(row.input) || !(BOUND_KEY in row.input)) return row;
+  const { [BOUND_KEY]: bound, ...input } = row.input;
+  return isPlainObject(bound) ? { ...row, input, bound } : { ...row, input };
+}
+
 /** A store that keeps nothing: every change is refused before it is shown, and nothing can be approved. */
 export const noProposalStore: ProposalStore = {
   record: async () => null,
@@ -99,6 +134,8 @@ export function supabaseProposalStore(service: () => SupabaseClient, scope: Scop
   return {
     async record(proposal) {
       const id = proposal.id ?? randomUUID();
+      const kept = keptInput(proposal.input ?? null, proposal.bound);
+      if (!kept) return null;
       try {
         const { error } = await service().rpc('record_chat_proposal', {
           p_id: id,
@@ -108,7 +145,8 @@ export function supabaseProposalStore(service: () => SupabaseClient, scope: Scop
           p_tool_call_id: proposal.toolCallId ?? null,
           p_product: proposal.product,
           p_action: proposal.action,
-          p_input: proposal.input ?? null,
+          p_input: kept.input,
+          // The arguments as the model sent them: an approval carries those back, and finds the record by them.
           p_input_hash: inputHash(proposal.input),
         });
         if (error) {
@@ -137,7 +175,7 @@ export function supabaseProposalStore(service: () => SupabaseClient, scope: Scop
           failed('read', error);
           return known;
         }
-        for (const row of (data ?? []) as StoredChange[]) known.set(row.id, row);
+        for (const row of (data ?? []) as StoredChange[]) known.set(row.id, splitBound(row));
       } catch (error) {
         failed('read', error);
       }
@@ -157,7 +195,7 @@ export function supabaseProposalStore(service: () => SupabaseClient, scope: Scop
           return null;
         }
         const row = (Array.isArray(data) ? data[0] : data) as StoredChange | null | undefined;
-        return row && typeof row.id === 'string' ? row : null;
+        return row && typeof row.id === 'string' ? splitBound(row) : null;
       } catch (error) {
         failed('take', error);
         return null;
@@ -200,6 +238,9 @@ type MemoryRow = StoredChange & {
  */
 export function memoryProposalStore(now: () => number = Date.now): ProposalStore & { rows: MemoryRow[] } {
   const rows: MemoryRow[] = [];
+  const stored = (row: MemoryRow): StoredChange => ({
+    id: row.id, product: row.product, action: row.action, input: row.input, ...(row.bound ? { bound: row.bound } : {}),
+  });
   const waiting = (ref: ProposalRef) =>
     rows
       .filter((row) => row.status === 'pending' && row.expiresAt > now())
@@ -210,13 +251,16 @@ export function memoryProposalStore(now: () => number = Date.now): ProposalStore
     async record(proposal) {
       const id = proposal.id ?? randomUUID();
       if (rows.some((row) => row.id === id)) return null;
+      const kept = keptInput(proposal.input ?? null, undefined);
+      if (!kept || (proposal.bound && !isPlainObject(proposal.input))) return null;
       rows.push({
         id,
         toolCallId: proposal.toolCallId ?? null,
         product: proposal.product,
         action: proposal.action,
         // Kept as it was when proposed: a later change to the caller's object must not reach it.
-        input: structuredClone(proposal.input ?? null),
+        input: structuredClone(kept.input),
+        ...(proposal.bound ? { bound: structuredClone(proposal.bound) } : {}),
         hash: inputHash(proposal.input),
         status: 'pending',
         expiresAt: now() + PROPOSAL_TTL_MS,
@@ -225,15 +269,16 @@ export function memoryProposalStore(now: () => number = Date.now): ProposalStore
     },
     async peek(ids) {
       return new Map(
-        rows.filter((row) => ids.includes(row.id)).map((row) => [row.id, { id: row.id, product: row.product, action: row.action, input: row.input }]),
+        rows.filter((row) => ids.includes(row.id)).map((row) => [row.id, stored(row)]),
       );
     },
     async claim(ref) {
       const row = waiting(ref);
       if (!row) return null;
-      const taken = { id: row.id, product: row.product, action: row.action, input: row.input };
+      const taken = stored(row);
       row.status = 'approved';
       row.input = null;
+      delete row.bound;
       return taken;
     },
     async reject(refs) {
@@ -242,6 +287,7 @@ export function memoryProposalStore(now: () => number = Date.now): ProposalStore
         if (!row) continue;
         row.status = 'rejected';
         row.input = null;
+        delete row.bound;
       }
     },
   };

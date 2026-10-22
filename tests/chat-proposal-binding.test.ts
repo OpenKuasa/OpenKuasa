@@ -339,6 +339,43 @@ describe('the record itself', () => {
     expect(db.filters).toEqual([['user_id', USER], ['org_id', ORG], ['id', [ID]]]);
   });
 
+  it('keeps what the server bound beside the arguments, hashed without it, and hands it back apart from them', async () => {
+    const bound = { feedback_at: '2026-10-07T02:05:40.123456+00:00' };
+    const kept = { id: CAMPAIGN, $bound: bound };
+    const db = service({ data: [{ id: ID, product: 'hire', action: 'clearInterviewFeedback', input: kept }], error: null });
+    const store = supabaseProposalStore(db.client, scope);
+    expect(await store.record({ id: ID, toolCallId: 't1', product: 'hire', action: 'clearInterviewFeedback', input: { id: CAMPAIGN }, bound })).toBe(ID);
+    // Kept with the arguments; the hash is of what the model sent, so the approval that carries it back still finds the record.
+    expect(db.calls[0].args).toMatchObject({ p_input: kept, p_input_hash: inputHash({ id: CAMPAIGN }) });
+    expect(await store.claim({ toolCallId: 't1', input: { id: CAMPAIGN } })).toEqual({
+      id: ID, product: 'hire', action: 'clearInterviewFeedback', input: { id: CAMPAIGN }, bound,
+    });
+    expect((await store.peek([ID])).get(ID)).toEqual({ id: ID, product: 'hire', action: 'clearInterviewFeedback', input: { id: CAMPAIGN }, bound });
+  });
+
+  it('never keeps a binding the arguments brought themselves: only the server binds', async () => {
+    const db = service({ data: null, error: null });
+    const store = supabaseProposalStore(db.client, scope);
+    const forged = { id: CAMPAIGN, $bound: { feedback_at: '2020-01-01T00:00:00Z' } };
+    await store.record({ id: ID, toolCallId: 't1', product: 'hire', action: 'clearInterviewFeedback', input: forged });
+    expect(db.calls[0].args).toMatchObject({ p_input: { id: CAMPAIGN }, p_input_hash: inputHash(forged) });
+    const memory = memoryProposalStore();
+    await memory.record({ toolCallId: 't1', product: 'hire', action: 'clearInterviewFeedback', input: forged });
+    expect(await memory.claim({ toolCallId: 't1', input: forged })).toEqual(expect.objectContaining({ input: { id: CAMPAIGN } }));
+    expect((await memory.peek([memory.rows[0].id])).get(memory.rows[0].id)).not.toHaveProperty('bound');
+    // A binding that cannot be kept beside its arguments is no record at all.
+    expect(await store.record({ product: 'hire', action: 'clearInterviewFeedback', input: 'not an object', bound: { feedback_at: null } })).toBeNull();
+  });
+
+  it('the memory store keeps a binding and hands it back once, on the take', async () => {
+    const memory = memoryProposalStore();
+    const bound = { feedback_at: null };
+    const id = await memory.record({ toolCallId: 't1', product: 'hire', action: 'saveInterviewFeedback', input: { id: CAMPAIGN }, bound });
+    expect((await memory.peek([id!])).get(id!)).toEqual({ id, product: 'hire', action: 'saveInterviewFeedback', input: { id: CAMPAIGN }, bound });
+    expect(await memory.claim({ toolCallId: 't1', input: { id: CAMPAIGN } })).toEqual({ id, product: 'hire', action: 'saveInterviewFeedback', input: { id: CAMPAIGN }, bound });
+    expect(await memory.claim({ toolCallId: 't1', input: { id: CAMPAIGN } })).toBeNull();
+  });
+
   it('keeps nothing and approves nothing when the table is not there or a call fails', async () => {
     vi.spyOn(console, 'error').mockImplementation(() => {});
     const missing = supabaseProposalStore(service({ data: null, error: { code: '42P01', message: 'relation "public.chat_proposals" does not exist' } }).client, scope);
