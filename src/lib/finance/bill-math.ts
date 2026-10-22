@@ -20,8 +20,8 @@ export type LineNumbers = {
   discount_amount?: number | null;
   /**
    * This line's share of a discount on the whole document, in ringgit (sales
-   * only; 0 or unset otherwise). It comes off the line after its own discount,
-   * before rounding: amount = round(v - share, 2), SST on (v - share).
+   * only; 0 or unset otherwise). It comes off the line after its own discount:
+   * amount = round(v, 2) - share, and the SST is on greatest(v - share, 0), unrounded.
    */
   doc_discount_share?: number;
 };
@@ -43,11 +43,6 @@ function units(value: number, places: number): bigint {
 /** Divides and rounds half up, as Postgres rounds a numeric. Both numbers are 0 or more. */
 function divideRounded(value: bigint, by: bigint): bigint {
   return (value + by / BigInt(2)) / by;
-}
-
-/** Rounds half away from zero, as Postgres rounds a numeric; a share can take a line a fraction of a sen below 0. */
-function roundSigned(value: bigint, by: bigint): bigint {
-  return value < BigInt(0) ? -divideRounded(-value, by) : divideRounded(value, by);
 }
 
 /**
@@ -78,14 +73,19 @@ function lineNet(line: LineNumbers): { net: bigint; perSen: bigint } {
   return { net: product, perSen: BigInt(100_000) };
 }
 
-/** amount = round(v - share, 2) and sst = round((v - share) * rate / 100, 2), in sen. */
+/**
+ * amount = round(v, 2) - share and sst = round(greatest(v - share, 0) * rate / 100, 2), in sen.
+ * The share is at most round(v, 2), so the amount never drops below 0, and the
+ * amounts after the shares add up to exactly Σ net - D.
+ */
 function lineSenWithShare(line: LineNumbers, shareSen: bigint): { amount: bigint; sst: bigint } {
   const { net, perSen } = lineNet(line);
-  const value = net - shareSen * perSen;
+  let value = net - shareSen * perSen;
+  if (value < BigInt(0)) value = BigInt(0); // v on a half sen, with its whole rounded net as its share
   const rate = units(roundRate(line.sst_rate), 2); // percent, in 10^-2
   return {
-    amount: roundSigned(value, perSen),
-    sst: roundSigned(value * rate, perSen * BigInt(10_000)),
+    amount: divideRounded(net, perSen) - shareSen,
+    sst: divideRounded(value * rate, perSen * BigInt(10_000)),
   };
 }
 

@@ -159,4 +159,27 @@ describe('the document discount split (properties)', () => {
     // And after a fixed line discount: 1 x 0.1 less 0.05 is 0.05 exactly; a share of 0.01 leaves 0.04.
     expect(lineAmounts({ quantity: 1, unit_price: 0.1, sst_rate: 10, discount_amount: 0.05, doc_discount_share: 0.01 })).toEqual({ amount: 0.04, sst: 0 });
   });
+
+  it('a line on a half sen that takes its whole net as its share ends at 0.00, never -0.01', () => {
+    // 0.5 x 0.01 = 0.005 (net 0.01) and 10.00, both @ 10%; a fixed 6.00 (Σ net 10.01).
+    // Floors 0 / 5.99, remainders 600 / 401 (in 1/1001 sen): the leftover sen goes to the small line.
+    const lines: LineNumbers[] = [
+      { quantity: 0.5, unit_price: 0.01, sst_rate: 10 },
+      { quantity: 1, unit_price: 10, sst_rate: 10 },
+    ];
+    const d = { pct: null, amount: 6 };
+    const split = docDiscountSen(lines, d);
+    expect(split.shares).toEqual([BigInt(1), BigInt(599)]);
+    const after = lines.map((line, i) => lineSen({ ...line, doc_discount_share: Number(split.shares[i]) / 100 }));
+    expect(after).toEqual([
+      { amount: BigInt(0), sst: BigInt(0) },
+      { amount: BigInt(401), sst: BigInt(40) },
+    ]);
+    const amounts = after.reduce((a, b) => a + b.amount, BigInt(0));
+    const ssts = after.reduce((a, b) => a + b.sst, BigInt(0));
+    expect(amounts).toBe(BigInt(1001) - split.discount);
+    const totals = documentTotals(lines, d);
+    expect(totals).toEqual({ subtotal: 10.01, discount: 6, sst: 0.4, total: 4.41 });
+    expect(Math.round(totals.total * 100)).toBe(Number(amounts + ssts));
+  });
 });
