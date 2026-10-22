@@ -29,15 +29,16 @@ describe('the workspace\'s daily cap on public applications', () => {
       "if not (select q.allowed from private.rate_limit_consume('org_apply_day', p_org_id::text, 300, 86400) q) then",
     ]);
     expect(nowLines.filter((line) => !wasLines.includes(line))).toEqual([
-      'c_org_day_cap constant integer := 500;',
+      'c_org_day_cap constant integer := 300;',
       "perform pg_advisory_xact_lock(hashtextextended('hire_apply_day:' || p_org_id::text, 0));",
       'if (select count(*) from public.hire_applications a',
-      "where a.org_id = p_org_id and a.consented_at > now() - interval '24 hours') >= c_org_day_cap then",
+      "where a.org_id = p_org_id and a.applied_at > now() - interval '24 hours'",
+      'and a.consented_at is not null) >= c_org_day_cap then',
       "return 'day_full';",
     ]);
     // Same count too, so nothing else was dropped or doubled: two lines out (the old check and its
-    // `return 'throttled';`, which other checks still use), five in.
-    expect(nowLines.length).toBe(wasLines.length - 2 + 5);
+    // `return 'throttled';`, which other checks still use), six in.
+    expect(nowLines.length).toBe(wasLines.length - 2 + 6);
   });
 
   test('keeps the argument list, the answer type and how it runs', () => {
@@ -56,8 +57,20 @@ describe('the workspace\'s daily cap on public applications', () => {
   });
 
   test('counts only applications the applicant sent: hand-added ones carry no consent date', () => {
-    expect(now).toContain('a.consented_at > now()');
+    expect(now).toContain('a.consented_at is not null');
     expect(now).not.toMatch(/a\.source\s*=/);
+  });
+
+  test('bounds the count by applied_at, so the (org_id, applied_at) index serves it', () => {
+    expect(read('20261013090000_hire_foundation.sql')).toContain(
+      'create index hire_applications_org_applied_idx on public.hire_applications (org_id, applied_at desc);',
+    );
+    expect(now).toContain("a.org_id = p_org_id and a.applied_at > now() - interval '24 hours'");
+  });
+
+  test('says in its header that repeats do not count and deletions free room', () => {
+    expect(sql).toMatch(/repeat application[\s\S]*does not count/);
+    expect(sql).toMatch(/deleting[\s\S]*frees room/i);
   });
 
   test('stays the server\'s alone', () => {

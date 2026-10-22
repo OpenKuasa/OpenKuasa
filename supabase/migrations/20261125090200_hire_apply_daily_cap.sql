@@ -1,5 +1,5 @@
 -- supabase/migrations/20261125090200_hire_apply_daily_cap.sql
--- A workspace takes at most 500 public applications in any 24 hours.
+-- A workspace takes at most 300 public applications in any 24 hours.
 --
 -- `submit_public_application` already refused a workspace's 301st application
 -- of a fixed day (`private.rate_limit_consume('org_apply_day', ..., 300, 86400)`,
@@ -8,11 +8,14 @@
 -- again in a minute. That check is replaced, at the same place, by:
 --
 --   * a rolling 24 hours instead of a day that starts at midnight UTC;
---   * 500, the owner's number, as one named constant (`c_org_day_cap`);
+--   * the same number, 300 (the owner's choice), now one named constant
+--     (`c_org_day_cap`);
 --   * counted from `hire_applications` rows with a consent date (what the
 --     applicant sent; a member's hand-added application has none), as the
---     job's limit counts its rows, so a repeat or a deleted application does
---     not use up the day;
+--     job's limit counts its rows. So a repeat application (same email and
+--     job, where nothing new is inserted) does not count toward the day cap;
+--     repeats are limited only by the job's 30 a minute. And deleting
+--     applications frees room under the cap;
 --   * a word of its own, 'day_full', so the page can say the company is not
 --     taking more applications today.
 --
@@ -63,7 +66,7 @@ declare
   v_known_name text;
   v_application_id uuid;
   v_announced integer;                                                          -- added
-  c_org_day_cap constant integer := 500;                                        -- day cap
+  c_org_day_cap constant integer := 300;                                        -- day cap
   r record;
 begin
   -- A field no person can see was filled in: say thanks and keep nothing.
@@ -143,8 +146,12 @@ begin
   -- function). The workspace's lock makes applications to its different jobs
   -- take turns here, so the count cannot be raced past the cap.
   perform pg_advisory_xact_lock(hashtextextended('hire_apply_day:' || p_org_id::text, 0));
+  -- applied_at is set to now() on insert and never changed (no grant or function
+  -- updates it), so for an application the applicant sent it equals consented_at;
+  -- bounding by it lets hire_applications_org_applied_idx serve the count.
   if (select count(*) from public.hire_applications a
-       where a.org_id = p_org_id and a.consented_at > now() - interval '24 hours') >= c_org_day_cap then
+       where a.org_id = p_org_id and a.applied_at > now() - interval '24 hours'
+         and a.consented_at is not null) >= c_org_day_cap then
     return 'day_full';
   end if;
   -- From here the submission is accepted, whether or not it turns out to be a repeat.
