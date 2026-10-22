@@ -90,6 +90,8 @@ export const APPLY_MESSAGES = {
   consent: 'Tick the box to agree before sending.',
   closed: 'This role is no longer taking applications.',
   throttled: 'Lots of people are applying right now. Please try again in a minute.',
+  /** The workspace has taken its applications for the day (the database's 'day_full'). */
+  dayFull: "This company isn't taking more applications today. Please try again tomorrow.",
   failed: "Something went wrong on our side. Your application wasn't sent. Please try again.",
   /** The post got no answer, so nobody knows whether it arrived: this one does not say "wasn't sent". */
   unreachable:

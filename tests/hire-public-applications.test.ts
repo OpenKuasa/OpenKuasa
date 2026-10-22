@@ -45,6 +45,13 @@ describe('applyOutcome', () => {
     expect(applyOutcome('closed')).toEqual({ kind: 'closed' });
     expect(applyOutcome('not_found')).toEqual({ kind: 'closed' });
     expect(applyOutcome('throttled')).toEqual({ kind: 'throttled' });
+    expect(applyOutcome('day_full')).toEqual({ kind: 'dayFull' });
+  });
+  it('tells a visitor turned away for the day to come back tomorrow, not in a minute', () => {
+    expect(APPLY_MESSAGES.dayFull).toMatch(/today/);
+    expect(APPLY_MESSAGES.dayFull).toMatch(/tomorrow/);
+    expect(APPLY_MESSAGES.dayFull).not.toMatch(/minute/);
+    expect(APPLY_MESSAGES.dayFull).not.toBe(APPLY_MESSAGES.throttled);
   });
   it('reads a repeat application as a duplicate and a refused file path as a failure', () => {
     expect(applyOutcome('ok_duplicate')).toEqual({ kind: 'duplicate' });

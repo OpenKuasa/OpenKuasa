@@ -35,6 +35,8 @@ export type ApplyOutcome =
   | { kind: 'duplicate' }
   | { kind: 'closed' }
   | { kind: 'throttled' }
+  /** The workspace has taken all the applications it takes in a day. */
+  | { kind: 'dayFull' }
   | { kind: 'invalid'; errors: ApplyErrors }
   | { kind: 'failed' };
 
@@ -66,6 +68,7 @@ export function applyOutcome(word: unknown): ApplyOutcome {
   if (word === 'ok_duplicate') return { kind: 'duplicate' };
   if (word === 'closed' || word === 'not_found') return { kind: 'closed' };
   if (word === 'throttled') return { kind: 'throttled' };
+  if (word === 'day_full') return { kind: 'dayFull' };
   const entry = typeof word === 'string' && Object.hasOwn(WORD_ERRORS, word) ? WORD_ERRORS[word] : undefined;
   return entry ? { kind: 'invalid', errors: { [entry[0]]: APPLY_MESSAGES[entry[1]] } } : { kind: 'failed' };
 }

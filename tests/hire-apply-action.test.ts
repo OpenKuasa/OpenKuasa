@@ -310,6 +310,11 @@ describe('what the sender answers', () => {
     expect(await applyAction(ORG, JOB, undefined, post())).toEqual({ error: APPLY_MESSAGES.throttled, values: VALUES });
   });
 
+  it('dayFull: the not-today message, with what was typed', async () => {
+    mocks.submitPublicApplication.mockResolvedValue({ kind: 'dayFull' });
+    expect(await applyAction(ORG, JOB, undefined, post())).toEqual({ error: APPLY_MESSAGES.dayFull, values: VALUES });
+  });
+
   it('invalid: the field problems, with what was typed', async () => {
     const errors = { email: APPLY_MESSAGES.emailInvalid };
     mocks.submitPublicApplication.mockResolvedValue({ kind: 'invalid', errors });
@@ -667,6 +672,7 @@ describe('a stored PDF whose application is not taken', () => {
   it.each([
     ['closed', { kind: 'closed' }, { closed: true }],
     ['throttled', { kind: 'throttled' }, { error: APPLY_MESSAGES.throttled, values: VALUES, fileDropped: true }],
+    ['dayFull', { kind: 'dayFull' }, { error: APPLY_MESSAGES.dayFull, values: VALUES, fileDropped: true }],
     ['invalid', { kind: 'invalid', errors: { email: APPLY_MESSAGES.emailInvalid } },
       { errors: { email: APPLY_MESSAGES.emailInvalid }, values: VALUES, fileDropped: true }],
     ['failed', { kind: 'failed' }, { error: APPLY_MESSAGES.failed, values: VALUES, fileDropped: true }],

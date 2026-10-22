@@ -100,6 +100,8 @@ function answerFor(outcome: ApplyOutcome, values: ApplyValues, dropped: { fileDr
       return { closed: true };
     case 'throttled':
       return { error: APPLY_MESSAGES.throttled, values, ...dropped };
+    case 'dayFull':
+      return { error: APPLY_MESSAGES.dayFull, values, ...dropped };
     case 'invalid':
       return { errors: outcome.errors, values, ...dropped };
     default:
