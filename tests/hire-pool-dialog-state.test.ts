@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   CHOOSE_A_JOB, NO_JOBS, PICKER_LOADING, PICKER_ROWS, REMOVE_BODY, SHORTLISTED_NOTE, addInput, addLabel, addName, addToPoolInput,
   addedLabel, boardPoolLine, boxSent, changeResult, followAddress, fromOutside, searchBox, jobOption, moveBody, moveInput, moveLabel, moveTitle, nextAddFocus, personLine,
-  pickerFrom, pickerOpenAfter, pickerView, removeInput, removeLabel, removeTitle, searchHref, shortlistedNote, statusChangeInput,
+  pickerFrom, pickerOpenAfter, pickerShows, pickerView, removeInput, removeLabel, removeTitle, searchHref, shortlistedNote, statusChangeInput,
 } from '@/lib/hire/pool-dialog-state';
 
 const A = '11111111-1111-4111-8111-111111111111';
@@ -78,6 +78,13 @@ describe('the picker', () => {
     expect(pickerView([], false, '')).toEqual({ rows: [], line: null, empty: 'Everyone on file is already in the talent pool.' });
     expect(pickerView([], false, '   ')).toEqual({ rows: [], line: null, empty: 'Everyone on file is already in the talent pool.' });
     expect(pickerView([], false, ' nobody ')).toEqual({ rows: [], line: null, empty: 'No one outside the pool matches “nobody”.' });
+  });
+  it('shows "Searching…" in place of a failure once a new search is on its way', () => {
+    const failed = { state: 'failed', error: 'The list could not be loaded. Check your connection and try again.' } as const;
+    expect(pickerShows(failed, false)).toBe('failed');
+    expect(pickerShows(failed, true)).toBe('searching');
+    expect(pickerShows(PICKER_LOADING, true)).toBe('loading');
+    expect(pickerShows({ state: 'ready', people: [], more: false, query: '' }, true)).toBe('list');
   });
   it('puts headline and place on one line', () => {
     expect(personLine(people[0])).toBe('Warehouse Supervisor · Klang');

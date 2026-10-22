@@ -14,7 +14,7 @@ import {
 import {
   CHOOSE_A_JOB, NO_JOBS, PICKER_LOADING, REMOVE_BODY, addInput, addLabel, addName, addToPoolInput, addedLabel, boxSent,
   changeResult, followAddress, fromOutside, searchBox, jobOption, moveBody, moveInput, moveLabel, moveTitle, nextAddFocus, personLine, pickerFrom, pickerView, removeInput,
-  pickerOpenAfter, removeLabel, removeTitle, searchHref, shortlistedNote, statusChangeInput, type PickerState, type PoolJob,
+  pickerOpenAfter, pickerShows, removeLabel, removeTitle, searchHref, shortlistedNote, statusChangeInput, type PickerState, type PoolJob,
 } from '@/lib/hire/pool-dialog-state';
 import { cn } from '@/lib/utils';
 import { DeleteDialog, announceDeletion, claimResult, useNewest } from '@/screens/hire/delete-dialog';
@@ -348,6 +348,7 @@ function PickerBody({
   }
 
   const view = state.state === 'ready' ? pickerView(state.people, state.more, state.query) : null;
+  const shows = pickerShows(state, searching);
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-3">
       <div className="flex flex-col gap-1">
@@ -377,14 +378,21 @@ function PickerBody({
           autoComplete="off"
           maxLength={POOL_SEARCH_MAX}
           className={FIELD_CLASS}
-          onChange={(event) => setQuery(event.target.value)}
+          onChange={(event) => {
+            setQuery(event.target.value);
+            // A new search is on its way: after a failure, "Searching…" takes the failure's place at once.
+            setSearching(true);
+          }}
         />
       </div>
       <div className="min-h-24 flex-1 overflow-y-auto rounded-md border">
-        {state.state === 'loading' ? (
+        {shows === 'loading' ? (
           <p role="status" className="p-3 text-sm text-muted-foreground">Loading people…</p>
         ) : null}
-        {state.state === 'failed' ? (
+        {shows === 'searching' ? (
+          <p role="status" className="p-3 text-sm text-muted-foreground">Searching…</p>
+        ) : null}
+        {shows === 'failed' && state.state === 'failed' ? (
           <div className="flex flex-col items-start gap-2 p-3">
             <p role="alert" className={ALERT_CLASS}>{state.error}</p>
             <Button

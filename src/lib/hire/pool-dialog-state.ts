@@ -74,6 +74,16 @@ export function pickerFrom(result: unknown, query: string): PickerState {
 }
 
 /**
+ * What the picker's list area draws: "Loading people…", "Searching…", the failure with its Try again, or the list.
+ * Once a new search is on its way after a failure, it says "Searching…" in place of the failure.
+ */
+export function pickerShows(state: PickerState, searching: boolean): 'loading' | 'searching' | 'failed' | 'list' {
+  if (state.state === 'loading') return 'loading';
+  if (state.state === 'failed') return searching ? 'searching' : 'failed';
+  return 'list';
+}
+
+/**
  * What the picker's list shows for the server's answer to `query`: the rows (the server already matched the name;
  * nothing is filtered here), the line under them, or the one sentence that replaces them.
  */
