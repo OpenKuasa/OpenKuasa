@@ -83,9 +83,10 @@ begin
      and not has_function_privilege('service_role', p.oid, 'execute');
   if n <> 1 then fails := array_append(fails, 'finance_expense_stamp is not a caller-run function closed to the API roles'); end if;
   -- Two triggers, in this order: the guard answers before the stamp writes.
+  -- finance_expenses_audit: 20261125120000 (audit trail).
   select string_agg(tgname, ',' order by tgname) into t from pg_trigger
    where not tgisinternal and tgrelid = 'public.finance_expenses'::regclass;
-  if t is distinct from 'finance_expense_guard,finance_expense_stamp' then
+  if t is distinct from 'finance_expense_guard,finance_expense_stamp,finance_expenses_audit' then
     fails := fails || format('triggers on finance_expenses are: %s', t);
   end if;
   select pg_get_triggerdef(oid) into t from pg_trigger

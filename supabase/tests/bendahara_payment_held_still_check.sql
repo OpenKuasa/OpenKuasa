@@ -116,17 +116,18 @@ begin
      and prosrc ~ 'tg_op = ''DELETE'' and not exists \(select 1 from public\.orgs o where o\.id = old\.org_id\) then\s+return old;';
   if n <> 1 then fails := array_append(fails, 'the split guard does not let the rows of a workspace that is being deleted go'); end if;
   -- Every trigger on payments, in name order, which is the order BEFORE ROW triggers fire in.
+  -- finance_transactions_audit: 20261125120000 (audit trail).
   select string_agg(tgname, ',' order by tgname) into t from pg_trigger
    where not tgisinternal and tgrelid = 'public.finance_transactions'::regclass and tgenabled = 'O';
   if t is distinct from 'finance_transaction_guard,finance_transaction_insert_guard,finance_transaction_sign_off,finance_transaction_still,'
-       || 'finance_transaction_to_currency,finance_transaction_to_ringgit,finance_transaction_unmatch,finance_transfer_id_guard,finance_transfer_pair_delete,finance_transfer_pair_insert,'
+       || 'finance_transaction_to_currency,finance_transaction_to_ringgit,finance_transaction_unmatch,finance_transactions_audit,finance_transfer_id_guard,finance_transfer_pair_delete,finance_transfer_pair_insert,'
        || 'finance_transfer_pair_update,finance_use_account_insert,finance_use_account_update,finance_void_stamp' then
     fails := fails || format('triggers on finance_transactions are: %s', t);
   end if;
   select string_agg(tgname, ',' order by tgname) into t from pg_trigger
    where not tgisinternal and tgrelid = 'public.finance_allocations'::regclass and tgenabled = 'O';
-  -- finance_allocation_less_contra: 20261119100000 (contra entries).
-  if t is distinct from 'finance_allocation_currency,finance_allocation_guard,finance_allocation_less_contra,finance_allocation_still' then fails := fails || format('triggers on finance_allocations are: %s', t); end if;
+  -- finance_allocation_less_contra: 20261119100000 (contra entries); finance_allocation_guard_credit: 20261123110000.
+  if t is distinct from 'finance_allocation_currency,finance_allocation_guard,finance_allocation_guard_credit,finance_allocation_less_contra,finance_allocation_still' then fails := fails || format('triggers on finance_allocations are: %s', t); end if;
   select pg_get_triggerdef(oid) into t from pg_trigger
    where tgrelid = 'public.finance_transactions'::regclass and tgname = 'finance_transaction_still';
   if t is distinct from 'CREATE TRIGGER finance_transaction_still BEFORE UPDATE ON public.finance_transactions FOR EACH ROW '

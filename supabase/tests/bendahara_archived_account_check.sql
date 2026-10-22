@@ -84,10 +84,11 @@ begin
   select string_agg(p.proname, ',' order by p.proname) into t from pg_proc p where p.prosrc like '%FIN37%';
   if t is distinct from 'finance_transaction_account_guard' then fails := fails || format('FIN37 is raised by: %s', t); end if;
   -- Every trigger on payments, in name order, which is the order BEFORE ROW triggers fire in.
+  -- finance_transactions_audit: 20261125120000 (audit trail).
   select string_agg(tgname, ',' order by tgname) into t from pg_trigger
    where not tgisinternal and tgrelid = 'public.finance_transactions'::regclass and tgenabled = 'O';
   if t is distinct from 'finance_transaction_guard,finance_transaction_insert_guard,finance_transaction_sign_off,finance_transaction_still,'
-       || 'finance_transaction_to_currency,finance_transaction_to_ringgit,finance_transaction_unmatch,finance_transfer_id_guard,finance_transfer_pair_delete,finance_transfer_pair_insert,'
+       || 'finance_transaction_to_currency,finance_transaction_to_ringgit,finance_transaction_unmatch,finance_transactions_audit,finance_transfer_id_guard,finance_transfer_pair_delete,finance_transfer_pair_insert,'
        || 'finance_transfer_pair_update,finance_use_account_insert,finance_use_account_update,finance_void_stamp' then
     fails := fails || format('triggers on finance_transactions are: %s', t);
   end if;

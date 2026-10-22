@@ -87,9 +87,10 @@ begin
   execute 'grant execute on function public.bendahara_check_entry(uuid, text) to authenticated';
 
   -- ---- structure ------------------------------------------------------------
+  -- finance_transactions_audit: 20261125120000 (audit trail).
   select string_agg(tgname, ',' order by tgname) into t from pg_trigger
    where tgrelid = 'public.finance_transactions'::regclass and not tgisinternal and tgenabled = 'O';
-  if t !~ 'finance_transaction_still,finance_transaction_to_currency,finance_transaction_to_ringgit,finance_transaction_unmatch,finance_transfer_id_guard' then
+  if t !~ 'finance_transaction_still,finance_transaction_to_currency,finance_transaction_to_ringgit,finance_transaction_unmatch,finance_transactions_audit,finance_transfer_id_guard' then
     fails := fails || format('triggers on finance_transactions are: %s', t);
   end if;
   select count(*) into n from pg_proc p join pg_namespace s on s.oid = p.pronamespace

@@ -129,9 +129,10 @@ begin
   execute 'grant execute on function public.bendahara_check_receivable(uuid) to authenticated';
 
   -- ---- structure ------------------------------------------------------------
+  -- finance_credit_notes_audit: 20261125120000 (audit trail).
   select string_agg(tgname, ',' order by tgname) into t from pg_trigger
    where tgrelid = 'public.finance_credit_notes'::regclass and not tgisinternal and tgenabled = 'O';
-  if t is distinct from 'finance_credit_note_guard,finance_credit_note_sign_off,finance_credit_note_to_ringgit,finance_void_stamp' then
+  if t is distinct from 'finance_credit_note_guard,finance_credit_note_sign_off,finance_credit_note_to_ringgit,finance_credit_notes_audit,finance_void_stamp' then
     fails := fails || format('triggers on finance_credit_notes are: %s', t);
   end if;
   select string_agg(attname, ',' order by attnum) into t from pg_attribute
