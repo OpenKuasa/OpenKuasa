@@ -30,7 +30,7 @@ declare
   owner_claims text;
   cust uuid;
   i2 uuid; q2 uuid; q6 uuid; q7 uuid; i3 uuid; i4 uuid; i5 uuid; i6 uuid; i7 uuid; i8 uuid; i9 uuid; q9 uuid; ie uuid;
-  i11 uuid; q12 uuid; i12 uuid;
+  i11 uuid; q12 uuid; i12 uuid; i13 uuid;
   n integer;
   t text;
   t2 text;
@@ -370,6 +370,24 @@ begin
   select subtotal, sst into r from public.finance_invoice_totals where id = i12;
   if r.subtotal is distinct from 135.01 or r.sst is distinct from 9.90 then
     fails := fails || format('12: the converted invoice''s totals read %s + %s, not 135.01 + 9.90', r.subtotal, r.sst);
+  end if;
+
+  -- ==== 13: the early check reads the json at the columns' scales ================================
+  -- A line discount of 9.995 is stored as 10.00 (numeric(14,2)), so the line nets 20 - 10.00 = 10.00,
+  -- not round(20 - 9.995, 2) = 10.01. A fixed discount of 10.00 takes all of it: FIN62 from the function
+  -- (no "set constraints all immediate"). 9.99 leaves 0.01, and the stored figures agree.
+  fails := fails || public.bendahara_check_try('13: a fixed discount equal to a net worked out at the stored scale', 'FIN62',
+    format('select public.finance_save_invoice(%L, %L::jsonb, %L::jsonb)', org,
+      jsonb_build_object('customer_id', cust, 'invoice_date', current_date, 'due_date', current_date + 30,
+        'notes', 'case 13', 'doc_discount_amount', 10),
+      '[{"description":"A","quantity":1,"unit_price":20,"sst_rate":0,"discount_amount":9.995}]'));
+  i13 := public.finance_save_invoice(org, jsonb_build_object('customer_id', cust, 'invoice_date', current_date,
+    'due_date', current_date + 30, 'notes', 'case 13', 'doc_discount_amount', 9.99),
+    '[{"description":"A","quantity":1,"unit_price":20,"sst_rate":0,"discount_amount":9.995}]');
+  select discount_amount || ':' || doc_discount_share || ':' || amount into t
+    from public.finance_invoice_lines where invoice_id = i13;
+  if t is distinct from '10.00:9.99:0.01' then
+    fails := fails || format('13: the line reads %s, not 10.00:9.99:0.01', t);
   end if;
 
   -- ---- both at once, and out of range -----------------------------------------------------------

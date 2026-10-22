@@ -84,6 +84,7 @@ testWithSupabase('an invoice saved with 10% off the whole: totals after the shar
     invoice: { customer_id: acme.data.id, invoice_date: today, due_date: today, doc_discount_amount: 150.01 },
     lines,
   });
+  expect(fin62).not.toBeNull();
   expect(fin62?.code).toBe('FIN62');
 
   const posted = await postInvoice(ctx, { id: id as string });

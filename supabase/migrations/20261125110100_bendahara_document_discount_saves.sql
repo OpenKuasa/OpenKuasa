@@ -13,10 +13,15 @@
 --   * Before anything is written, they refuse FIN62 when the discount that
 --     will apply (the one sent, else the one stored on the draft) takes all of
 --     the lines' net, worked out from the `lines` json exactly as the database
---     does: each line's value after its own discount, rounded to the sen. The
---     deferred check of 20261125110000 still judges it again at commit. A
---     discount out of range (both set, a percentage of 0 or over 100, a fixed
---     amount of 0) is left to the table's own checks (23514).
+--     does: each line's value after its own discount, rounded to the sen, with
+--     every json value cast to its column's scale first (quantity
+--     numeric(14,3), unit_price numeric(14,4), discount_pct numeric(5,2),
+--     discount_amount numeric(14,2)). The deferred check of 20261125110000
+--     still judges it again at commit. A discount out of range is not judged
+--     here: both set, a percentage of 0 or over 100, or a fixed amount of 0 is
+--     refused by the table's own checks (23514), and a value too large for its
+--     column (a percentage of 1000 or more, say) by the cast itself (22003,
+--     numeric overflow) before anything is written.
 --   * finance_convert_quotation copies both columns to the new invoice. The
 --     shares follow from the lines inserted after it (the line trigger), over
 --     the same nets and positions, so each line's figures in the document's
@@ -93,10 +98,10 @@ begin
     select coalesce(sum(round(
       case
         when nullif(l->>'discount_pct', '') is not null
-          then (l->>'quantity')::numeric * (l->>'unit_price')::numeric * (1 - nullif(l->>'discount_pct', '')::numeric / 100)
+          then (l->>'quantity')::numeric(14,3) * (l->>'unit_price')::numeric(14,4) * (1 - nullif(l->>'discount_pct', '')::numeric(5,2) / 100)
         when nullif(l->>'discount_amount', '') is not null
-          then greatest((l->>'quantity')::numeric * (l->>'unit_price')::numeric - nullif(l->>'discount_amount', '')::numeric, 0)
-        else (l->>'quantity')::numeric * (l->>'unit_price')::numeric
+          then greatest((l->>'quantity')::numeric(14,3) * (l->>'unit_price')::numeric(14,4) - nullif(l->>'discount_amount', '')::numeric(14,2), 0)
+        else (l->>'quantity')::numeric(14,3) * (l->>'unit_price')::numeric(14,4)
       end, 2)), 0) into s
       from jsonb_array_elements(lines) as l;
     d := coalesce(round(s * e_pct / 100, 2), e_amount);
@@ -223,10 +228,10 @@ begin
     select coalesce(sum(round(
       case
         when nullif(l->>'discount_pct', '') is not null
-          then (l->>'quantity')::numeric * (l->>'unit_price')::numeric * (1 - nullif(l->>'discount_pct', '')::numeric / 100)
+          then (l->>'quantity')::numeric(14,3) * (l->>'unit_price')::numeric(14,4) * (1 - nullif(l->>'discount_pct', '')::numeric(5,2) / 100)
         when nullif(l->>'discount_amount', '') is not null
-          then greatest((l->>'quantity')::numeric * (l->>'unit_price')::numeric - nullif(l->>'discount_amount', '')::numeric, 0)
-        else (l->>'quantity')::numeric * (l->>'unit_price')::numeric
+          then greatest((l->>'quantity')::numeric(14,3) * (l->>'unit_price')::numeric(14,4) - nullif(l->>'discount_amount', '')::numeric(14,2), 0)
+        else (l->>'quantity')::numeric(14,3) * (l->>'unit_price')::numeric(14,4)
       end, 2)), 0) into s
       from jsonb_array_elements(lines) as l;
     d := coalesce(round(s * e_pct / 100, 2), e_amount);
