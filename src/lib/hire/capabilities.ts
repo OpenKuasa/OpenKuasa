@@ -1727,8 +1727,9 @@ async function feedbackChanged(
 
 /**
  * Records feedback on one completed interview, or replaces it. With `mark_completed`, a scheduled interview is
- * marked completed and given its feedback in one write. `seen` is the `recorded_at` an edit form was opened with: it
- * is not part of the schema, so only the server action passes it, and the database then saves nothing if the
+ * marked completed and given its feedback in one write. `seen` is the `recorded_at` an edit form was opened with, or
+ * the one the assistant's Approve card was made from (bound on the server's record of the proposal): it is not part
+ * of the schema, so only server code passes it, never a model, and the database then saves nothing if the
  * feedback was changed or cleared meanwhile. It goes on as the string it arrived as: the comparison is to the
  * microsecond. Nothing of the application is read or written, whatever the recommendation.
  */
