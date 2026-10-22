@@ -13,6 +13,7 @@ import {
 } from '@/lib/people/attendance-writes';
 import { type CapResult, type PeopleWriteContext, WRITE_FAILED } from '@/lib/people/capabilities';
 import { PEOPLE_PATHS } from '@/lib/people/paths';
+import { saveHours, saveRoster } from '@/lib/people/roster-writes';
 import { getPeopleViewer } from '@/lib/people/viewer';
 import { createClient } from '@/lib/supabase/server';
 
@@ -22,6 +23,7 @@ const DEMO: CapResult<never> = {
 };
 const NOT_LINKED: CapResult<never> = { ok: false, error: "Your account isn't linked to an employee record yet." };
 const FORBIDDEN: CapResult<never> = { ok: false, error: 'Only owners and admins can do that.' };
+const NOT_YOURS: CapResult<never> = { ok: false, error: 'You can only record your own hours.' };
 
 /** Pages outside {@link PEOPLE_PATHS} (they show no employee data) that a holiday or a setting changes. */
 const EXTRA_PATHS = ['/people/public-holidays', '/people/settings'];
@@ -115,4 +117,39 @@ export async function saveAttendanceSettingsAction(input: unknown) {
   const guard = await asAdmin();
   if (refused(guard)) return guard;
   return changed(await saveAttendanceSettings(guard.ctx, input as never));
+}
+
+export async function saveRosterAction(input: unknown) {
+  const guard = await asAdmin();
+  if (refused(guard)) return guard;
+  return changed(await saveRoster(guard.ctx, input as never));
+}
+
+// ---- Hours: your own, or anyone's for an owner or admin ------------------------------------
+
+/**
+ * One day's hours. An owner or admin may name any employee; anyone else only their own record, looked up here
+ * from the signed-in user. The database checks the same, and the edit window, again.
+ */
+export async function saveHoursAction(input: unknown) {
+  const viewer = await getViewer();
+  if (viewer.isDemo) return DEMO;
+  const client = await createClient();
+  let employeeId: string | null;
+  let isHr: boolean;
+  try {
+    const people = await getPeopleViewer(client, { orgId: viewer.orgId, role: viewer.role });
+    if (people.isDemo) return DEMO;
+    employeeId = people.employeeId;
+    isHr = people.isHr;
+  } catch (error) {
+    return lookupFailed(error);
+  }
+  const ctx = { client, orgId: viewer.orgId };
+  if (!isHr) {
+    if (!employeeId) return NOT_LINKED;
+    const named = typeof input === 'object' && input !== null ? (input as { employee_id?: unknown }).employee_id : undefined;
+    if (named !== employeeId) return NOT_YOURS;
+  }
+  return changed(await saveHours(ctx, input as never));
 }

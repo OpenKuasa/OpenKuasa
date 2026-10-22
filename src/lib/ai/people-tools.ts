@@ -643,8 +643,9 @@ export function createPeopleTools(
   const scope = viewer.isHr || viewer.isDemo ? 'everyone in the workspace' : 'your own records only';
   /**
    * A manager (someone with people reporting to them, outside the demo) is given their own rows and their direct
-   * reports' by the database for five lists: leave, leave balances, time-off, claims and attendance. Their overtime
-   * comes from a function that holds no pay. Only those lookups say so in `scope`; every other one stays "your own".
+   * reports' by the database for seven lists: leave, leave balances, time-off, claims, attendance, shifts and
+   * timesheets. Their overtime comes from a function that holds no pay. Only those lookups say so in `scope`; every
+   * other one stays "your own".
    */
   const manages = !viewer.isHr && !viewer.isDemo && viewer.managesTeam === true;
   const teamScope = 'your own records and those of the people who report to you';
@@ -1291,14 +1292,20 @@ export function createPeopleTools(
 
     getTimesheet: tool({
       description:
-        'Hours worked over the last few days: total and billable hours, and per employee, most hours first. Filter by employee.' +
+        'Hours worked: over the last few days, or over one week (Monday to Sunday) when weekOf names a day in it. Total and ' +
+        'billable hours, and per employee, most hours first. Filter by employee.' +
         SCOPE_NOTE,
-      inputSchema: z.object({ days, employee }),
-      execute: async ({ days: requested, employee: name }) =>
+      inputSchema: z.object({
+        days,
+        weekOf: day('weekOf').optional().describe('Any day of the week wanted, as YYYY-MM-DD. Covers that Monday to Sunday instead of the last few days.'),
+        employee,
+      }),
+      execute: async ({ days: requested, weekOf, employee: name }) =>
         safe('getTimesheet', async () => {
-          const to = today();
-          const from = windowStart(requested);
-          const [entries, employees] = await Promise.all([data.listTimesheet(from, to), data.listEmployees()]);
+          const from = weekOf ? weekStart(weekOf) : windowStart(requested);
+          const to = weekOf ? addDays(from, 6) : today();
+          const [allEntries, employees] = await Promise.all([data.listTimesheet(from, to), data.listEmployees()]);
+          const entries = mine(allEntries);
           const rows = timesheetByEmployee(entries, employees).filter((r) => matchesText(r.employee, name));
           return {
             from,
@@ -1307,7 +1314,7 @@ export function createPeopleTools(
             billable_hours: round2(rows.reduce((sum, r) => sum + r.billable_hours, 0)),
             ...matchedNames(name, rows.map((r) => r.employee)),
             by_employee: rows.slice(0, LOOKUP_MAX),
-            scope,
+            scope: widenedScope,
             ...notLinked, ...askedBy,
           };
         }),
@@ -1318,13 +1325,15 @@ export function createPeopleTools(
         'The shift roster for a week, Monday to Sunday: who is on the morning shift, the night shift or off each day.' +
         SCOPE_NOTE,
       inputSchema: z.object({
-        week: z.enum(['this', 'next']).optional().describe('This week or next week. This week if left out.'),
+        week: z.enum(['last', 'this', 'next']).optional().describe('Last week, this week or next week. This week if left out.'),
+        weekOf: day('weekOf').optional().describe('Any day of the week wanted, as YYYY-MM-DD, for a week further away. Overrides week.'),
       }),
-      execute: async ({ week }) =>
+      execute: async ({ week, weekOf }) =>
         safe('listShifts', async () => {
-          const from = addDays(weekStart(today()), week === 'next' ? 7 : 0);
+          const from = weekOf ? weekStart(weekOf) : addDays(weekStart(today()), week === 'next' ? 7 : week === 'last' ? -7 : 0);
           const to = addDays(from, 6);
-          const [shifts, employees] = await Promise.all([data.listShifts(from, to), data.listEmployees()]);
+          const [allShifts, employees] = await Promise.all([data.listShifts(from, to), data.listEmployees()]);
+          const shifts = mine(allShifts);
           const name = new Map(employees.map((e) => [e.id, e.name]));
           return {
             from,
@@ -1332,10 +1341,11 @@ export function createPeopleTools(
             total: shifts.length,
             shifts: shifts.slice(0, 100).map((s) => ({
               employee: name.get(s.employee_id) ?? 'Unknown',
+              ...yoursFlag(s.employee_id),
               work_date: s.work_date,
               shift: s.shift,
             })),
-            scope,
+            scope: widenedScope,
             ...notLinked, ...askedBy,
           };
         }),
