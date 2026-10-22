@@ -60,6 +60,7 @@ import {
 } from '@/lib/ai/hire-interview-gate';
 import type { ProductToolkit } from '@/lib/ai/products';
 import { FINANCE_ID_GATED, FINANCE_SAVE_GATED } from '@/lib/ai/finance-id-gate';
+import { rosterIdProblem } from '@/lib/ai/roster-id-gate';
 import { revalidateFinance } from '@/lib/ai/finance-revalidate';
 import { logModelCall, logModelError, modelErrorCode } from '@/lib/ai/call-log';
 import { getModel, pickModelId } from '@/lib/ai/provider';
@@ -391,6 +392,10 @@ function specialistTools(
               'to list the item and get its real id, then prepare the change again.',
           };
         }
+        // A roster, hours, shift type or swap change: each id must have been looked up as what it is (an employee from
+        // the directory, a type from listShiftTypes, a shift from listSwapOptions, a swap from listShiftSwaps).
+        const rosterProblem = product.key === 'people' ? rosterIdProblem(name, input, nameIn(results), team.names) : null;
+        if (rosterProblem) return { prepared: false, error: rosterProblem };
         if (APPLICATION_CHANGES.has(name) || name === 'deleteApplication') {
           const id = (input as { id?: unknown } | null)?.id;
           const asApplication =
@@ -630,7 +635,7 @@ export const AREA: Record<ProductToolkit['key'], string> = {
   reach: 'marketing (ads, campaigns, creatives, leads, lead forms, appointments, ad settings)',
   crm: 'the CRM (contacts, deals, pipelines and their stages)',
   hire: 'hiring (jobs, candidates, applications, the hiring funnel, interviews, the talent pool; it can read one candidate\'s uploaded CV and give a verdict on it; it can prepare moving, rejecting, reopening or rating one application at a time; it can prepare recording or clearing the feedback on one interview at a time; it can prepare adding or editing one candidate at a time; it can prepare scheduling, changing, cancelling or closing one interview at a time, or recording one that already took place; it can prepare deleting one application or one candidate at a time; it can prepare a talent pool change for one candidate at a time)',
-  people: 'HR (existing staff, leave, time-off, claims, overtime, attendance, payroll, performance; a manager sees and decides their direct reports\' leave, time-off, claims and overtime; it can prepare deciding leave, time-off, claims and overtime, correcting attendance, and editing staff and departments, one change at a time)',
+  people: 'HR (existing staff, leave, time-off, claims, overtime, attendance, timesheets, shift rosters, shift types and shift swaps, payroll, performance; a manager sees and decides their direct reports\' leave, time-off, claims and overtime; it can prepare deciding leave, time-off, claims and overtime, correcting attendance, editing staff and departments, setting a week\'s shifts, logging hours, adding or changing shift types, and asking for, answering, deciding or cancelling a shift swap, one change at a time)',
   finance: 'finance (sales invoices and quotations, supplier bills, payments in and out, credit notes, refunds, customers and suppliers, items, bank and cash accounts, RFQs and purchase orders, chart of accounts, ledger and manual journals, financial reports (P&L, balance sheet, trial balance, cash flow, aged receivables/payables); it can prepare drafting, posting and voiding invoices and bills, recording payments, issuing credit notes and refunds, managing customers, suppliers and items, handling RFQs and purchase orders and manual journals, each with approval)',
 };
 
