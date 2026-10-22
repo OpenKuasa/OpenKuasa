@@ -69,7 +69,7 @@ describe('buildTeamSection', () => {
   });
 
   it('lists only the kinds with something waiting, in the menu order', () => {
-    const section = build({ waiting: { leave: 2, time_off: 0, claims: 1, overtime: 0 } })!;
+    const section = build({ waiting: { leave: 2, time_off: 0, claims: 1, overtime: 0, swaps: 0, swap_replies: 3 } })!;
     expect(section.waiting).toEqual([
       { label: 'Leave', count: 2, href: '/people/approve-leave' },
       { label: 'Financial Claims', count: 1, href: '/people/approve-claims' },
@@ -77,14 +77,16 @@ describe('buildTeamSection', () => {
     expect(section.waitingTotal).toBe(3);
   });
 
-  it('has the four labels and hrefs of the menu', () => {
-    const section = build({ waiting: { leave: 1, time_off: 1, claims: 1, overtime: 1 } })!;
+  it('has the five labels and hrefs of the menu', () => {
+    const section = build({ waiting: { leave: 1, time_off: 1, claims: 1, overtime: 1, swaps: 1, swap_replies: 1 } })!;
     expect(section.waiting.map((w) => [w.label, w.href])).toEqual([
       ['Leave', '/people/approve-leave'],
       ['Financial Claims', '/people/approve-claims'],
       ['Overtime', '/people/approve-overtime'],
       ['Time-Off', '/people/approve-time-off'],
+      ['Shift Swaps', '/people/approve-shift-swaps'],
     ]);
+    expect(section.waitingTotal).toBe(5);
   });
 
   it('has nothing waiting when the counts are zero', () => {
@@ -149,7 +151,7 @@ describe('loadTeamSection', () => {
       listClaims: async () => [row('x9', 'pending'), row('boss', 'pending')] as unknown as Claim[],
       listOvertime: async () => [row('r3', 'pending'), row('r4', 'pending')] as unknown as OvertimeRecord[],
     };
-    const workspaceWide = async () => ({ leave: 9, time_off: 9, claims: 9, overtime: 9 });
+    const workspaceWide = async () => ({ leave: 9, time_off: 9, claims: 9, overtime: 9, swaps: 9, swap_replies: 9 });
     const section = await loadTeamSection(data, { viewer: adminWithTeam, employees, today: TODAY, readWaiting: workspaceWide });
     expect(section).toMatchObject({
       waiting: [
@@ -162,8 +164,8 @@ describe('loadTeamSection', () => {
   });
   it('keeps hr_waiting_counts for a plain manager', async () => {
     const data = { ...lists, listLeaveRequests: async () => [] as LeaveRequest[] };
-    const counts = async () => ({ leave: 2, time_off: 0, claims: 0, overtime: 0 });
-    expect(await loadTeamSection(data, { viewer: manager, employees, today: TODAY, readWaiting: counts })).toMatchObject({ waitingTotal: 2 });
+    const counts = async () => ({ leave: 2, time_off: 0, claims: 0, overtime: 0, swaps: 1, swap_replies: 4 });
+    expect(await loadTeamSection(data, { viewer: manager, employees, today: TODAY, readWaiting: counts })).toMatchObject({ waitingTotal: 3 });
   });
   it('is unavailable when one of the admin reads fails', async () => {
     const data = { ...lists, listLeaveRequests: async () => [] as LeaveRequest[], listClaims: async () => { throw new Error('boom'); } };
@@ -180,6 +182,6 @@ describe('waitingFromReports', () => {
       claims: [{ employee_id: 'r2', status: 'pending' }] as unknown as Claim[],
       overtime: [] as OvertimeRecord[],
     };
-    expect(waitingFromReports(rows, ids)).toEqual({ leave: 1, time_off: 0, claims: 0, overtime: 0 });
+    expect(waitingFromReports(rows, ids)).toEqual({ leave: 1, time_off: 0, claims: 0, overtime: 0, swaps: 0, swap_replies: 0 });
   });
 });

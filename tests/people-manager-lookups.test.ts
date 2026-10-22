@@ -300,7 +300,7 @@ describe('getWaitingForMe', () => {
     const result = await run('getWaitingForMe', {}, { client });
     expect(client.rpc).toHaveBeenCalledTimes(1);
     expect(client.rpc).toHaveBeenCalledWith('hr_waiting_counts', { p_org: 'org-1' });
-    expect(result).toEqual({ leave: 2, time_off: 1, claims: 3, overtime: 4, total: 10 });
+    expect(result).toEqual({ leave: 2, time_off: 1, claims: 3, overtime: 4, swaps: 0, swap_replies: 0, total: 10 });
   });
   it('says it could not read, and never answers zeros, when the database fails', async () => {
     const log = vi.spyOn(console, 'error').mockImplementation(() => {});

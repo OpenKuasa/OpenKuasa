@@ -18,9 +18,15 @@ const fakeClient = (impl: () => Promise<Reply>) => {
 afterEach(() => vi.restoreAllMocks());
 
 describe('parseWaitingCounts', () => {
-  it('reads the four figures', () => {
+  it('reads the six figures', () => {
+    expect(parseWaitingCounts({ leave: 2, time_off: 0, claims: 1, overtime: 3, swaps: 4, swap_replies: 5 })).toEqual({
+      leave: 2, time_off: 0, claims: 1, overtime: 3, swaps: 4, swap_replies: 5,
+    });
+  });
+
+  it('reads a reply from before shift swaps (no swap figures) as zero swaps', () => {
     expect(parseWaitingCounts({ leave: 2, time_off: 0, claims: 1, overtime: 3 })).toEqual({
-      leave: 2, time_off: 0, claims: 1, overtime: 3,
+      leave: 2, time_off: 0, claims: 1, overtime: 3, swaps: 0, swap_replies: 0,
     });
   });
 
@@ -29,13 +35,13 @@ describe('parseWaitingCounts', () => {
   });
 
   it('runs each figure through safeCount', () => {
-    expect(parseWaitingCounts({ leave: -1, time_off: 1.9, claims: NaN, overtime: Infinity })).toEqual({
-      leave: 0, time_off: 1, claims: 0, overtime: 0,
+    expect(parseWaitingCounts({ leave: -1, time_off: 1.9, claims: NaN, overtime: Infinity, swaps: '3', swap_replies: -4 })).toEqual({
+      leave: 0, time_off: 1, claims: 0, overtime: 0, swaps: 0, swap_replies: 0,
     });
   });
 
-  it('sums the four', () => {
-    expect(waitingTotal({ leave: 1, time_off: 2, claims: 3, overtime: 4 })).toBe(10);
+  it('sums the five approval queues, not the swaps asking for a reply', () => {
+    expect(waitingTotal({ leave: 1, time_off: 2, claims: 3, overtime: 4, swaps: 5, swap_replies: 100 })).toBe(15);
   });
 });
 
@@ -53,10 +59,10 @@ describe('shouldReadWaiting', () => {
 describe('readWaitingCounts', () => {
   it('asks the database once and returns the parsed reply', async () => {
     const { client, rpc } = fakeClient(async () => ({
-      data: { leave: 2, time_off: 1, claims: 0, overtime: 4 },
+      data: { leave: 2, time_off: 1, claims: 0, overtime: 4, swaps: 1, swap_replies: 2 },
       error: null,
     }));
-    expect(await readWaitingCounts({ client, orgId: 'o1' })).toEqual({ leave: 2, time_off: 1, claims: 0, overtime: 4 });
+    expect(await readWaitingCounts({ client, orgId: 'o1' })).toEqual({ leave: 2, time_off: 1, claims: 0, overtime: 4, swaps: 1, swap_replies: 2 });
     expect(rpc).toHaveBeenCalledTimes(1);
     expect(rpc).toHaveBeenCalledWith('hr_waiting_counts', { p_org: 'o1' });
   });
@@ -83,7 +89,7 @@ describe('readWaitingCounts', () => {
 describe('readWaitingCountsStrict', () => {
   it('returns the parsed reply', async () => {
     const { client, rpc } = fakeClient(async () => ({ data: { leave: 1, time_off: 0, claims: 0, overtime: 2 }, error: null }));
-    expect(await readWaitingCountsStrict({ client, orgId: 'o1' })).toEqual({ leave: 1, time_off: 0, claims: 0, overtime: 2 });
+    expect(await readWaitingCountsStrict({ client, orgId: 'o1' })).toEqual({ ...ZERO_WAITING, leave: 1, overtime: 2 });
     expect(rpc).toHaveBeenCalledWith('hr_waiting_counts', { p_org: 'o1' });
   });
 

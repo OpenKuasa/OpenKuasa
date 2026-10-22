@@ -336,7 +336,8 @@ describe('the navigation badge figure', () => {
     const announcements = getProduct('people')!.sections.flatMap((s) => s.items).find((i) => i.slug === 'announcements');
     expect(announcements?.badge).toBe('unreadAnnouncements');
     const badged = PRODUCTS.flatMap((p) => p.sections.flatMap((s) => s.items)).filter((i) => i.badge);
-    // Exactly these: the agents proposals, the two People ones, and the four approval queues' waiting counts.
+    // Exactly these: the agents proposals, the two People ones, the five approval queues' waiting counts and the
+    // swaps asking the person to reply (on Shift Calendar).
     expect(badged.map((i) => `${i.slug}:${i.badge}`).sort()).toEqual(
       [
         'agents:pendingProposals',
@@ -346,6 +347,8 @@ describe('the navigation badge figure', () => {
         'approve-claims:waitingClaims',
         'approve-overtime:waitingOvertime',
         'approve-time-off:waitingTimeOff',
+        'approve-shift-swaps:waitingSwaps',
+        'shift-calendar:waitingSwapReplies',
       ].sort(),
     );
   });
