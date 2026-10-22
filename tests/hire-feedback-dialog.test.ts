@@ -1,7 +1,7 @@
 // tests/hire-feedback-dialog.test.ts
 import { describe, expect, it } from 'vitest';
 import {
-  CLEAR_BODY, COMMENTS_HELP, clearingLine, FEEDBACK_CLEARED_MEANWHILE, FEEDBACK_MENU_WORDS, KEEP_FEEDBACK, LOAD_CURRENT_FEEDBACK, LOAD_CURRENT_FEEDBACK_HELP, RATINGS, RATING_HELP,
+  CLEAR_BODY, COMMENTS_HELP, clearingLine, clearRefusedAsChanged, clearingFromCurrent, FEEDBACK_CLEARED_MEANWHILE, FEEDBACK_MENU_WORDS, KEEP_FEEDBACK, LOAD_CURRENT_FEEDBACK, LOAD_CURRENT_FEEDBACK_HELP, RATINGS, RATING_HELP,
   RECOMMENDATION_HELP, ROW_MENU_WORDS, charactersLeft, clearLabel, clearTitle, countAnnouncement, countShown, countText, currentFeedbackResult, emptyFeedback,
   feedbackDialogDescription, feedbackDialogTitle, feedbackDiscardTitle, feedbackFieldId, feedbackFocusIdAfter, feedbackGone, feedbackNotice, feedbackProblems,
   feedbackRefreshAfter, feedbackRefusalWord, feedbackResult, feedbackSubmission, feedbackSubmitLabel, firstWrongFeedbackField, isDestructive, isFeedbackDirty, modeOf,
@@ -166,6 +166,25 @@ describe('the dialog\'s words', () => {
     // A row read without feedback (cleared meanwhile) has nothing to show: the confirm keeps its own sentence.
     expect(clearingLine(null)).toBeNull();
     expect(clearingLine(undefined)).toBeNull();
+  });
+  it('after a clear refused as changed, the open confirm takes the feedback as it is stored now, as the edit form does', () => {
+    const CHANGED = 'The feedback on this interview was changed a moment ago. Nothing was cleared. Check it and try again.';
+    expect(clearRefusedAsChanged({ ok: false, error: CHANGED })).toBe(true);
+    for (const other of [
+      { ok: false, error: 'This interview has no feedback to clear.' },
+      { ok: false, error: 'The feedback on this interview was changed a moment ago. Nothing was saved. Check it and try again.' },
+      { ok: true, data: {} }, null, 'changed',
+    ]) expect(clearRefusedAsChanged(other), JSON.stringify(other)).toBe(false);
+    const id = '77777777-7777-4777-8777-777777777777';
+    const now = { rating: 2, recommendation: 'reject', comments: null, recorded_at: '2026-10-21T03:00:00.654321+00:00' };
+    // Saved again: the confirm now shows (and will send the version of) what is stored.
+    expect(clearingFromCurrent({ ok: true, data: { id, status: 'completed', feedback: now } }, id)).toEqual(now);
+    // Cleared meanwhile: nothing left to show; a press then answers "no feedback to clear".
+    expect(clearingFromCurrent({ ok: true, data: { id, status: 'completed', feedback: null } }, id)).toBeNull();
+    // Could not be read: the confirm keeps what it showed, and closing and opening it again still works.
+    expect(clearingFromCurrent({ ok: false, error: 'x' }, id)).toBe('keep');
+    expect(clearingFromCurrent(null, id)).toBe('keep');
+    expect(clearingFromCurrent({ ok: true, data: { id: 'other', status: 'completed', feedback: now } }, id)).toBe('keep');
   });
   it('the clear confirm', () => {
     expect(clearTitle('Aina Rahman')).toBe('Clear the feedback on the interview with Aina Rahman?');

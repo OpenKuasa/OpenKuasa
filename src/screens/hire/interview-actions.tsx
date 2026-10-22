@@ -5,11 +5,11 @@ import { useRouter } from 'next/navigation';
 import { AlertDialog, Popover } from 'radix-ui';
 import { MoreHorizontal, Plus } from 'lucide-react';
 import {
-  cancelInterviewAction, clearInterviewFeedbackAction, getInterviewInvitationAction, reopenInterviewAction, setInterviewOutcomeAction,
+  cancelInterviewAction, clearInterviewFeedbackAction, getInterviewFeedbackAction, getInterviewInvitationAction, reopenInterviewAction, setInterviewOutcomeAction,
 } from '@/app/(app)/hire/actions';
 import { DELETION_NOTICE_ID } from '@/lib/hire/delete-dialog-state';
 import {
-  CLEAR_BODY, KEEP_FEEDBACK, ROW_MENU_WORDS, clearLabel, clearTitle, clearingLine, isDestructive, modeOf, reopenRefusal, rowMenuWithFeedback,
+  CLEAR_BODY, KEEP_FEEDBACK, ROW_MENU_WORDS, clearLabel, clearTitle, clearRefusedAsChanged, clearingFromCurrent, clearingLine, isDestructive, modeOf, reopenRefusal, rowMenuWithFeedback,
   type FeedbackMode, type RowMenuItem,
 } from '@/lib/hire/feedback-dialog-state';
 import {
@@ -471,7 +471,20 @@ export function InterviewRowMenu({ row }: { row: InterviewRow }) {
                     if (change.pending || change.inFlight.current) return;
                     busy.current = true;
                     change.send(
-                      () => clearInterviewFeedbackAction({ id: row.id }, clearing?.recorded_at),
+                      async () => {
+                        const result = await clearInterviewFeedbackAction({ id: row.id }, clearing?.recorded_at);
+                        // Saved again by someone else: the refusal shows here as usual, and the confirm takes the
+                        // feedback as stored now, so a second press clears what it then shows (as the edit form loads it).
+                        if (clearRefusedAsChanged(result)) {
+                          try {
+                            const now = clearingFromCurrent(await getInterviewFeedbackAction({ id: row.id }), row.id);
+                            if (now !== 'keep') setClearing(now);
+                          } catch {
+                            // The confirm keeps what it showed; closing and opening it again still works.
+                          }
+                        }
+                        return result;
+                      },
                       () => setPanel(null),
                       () => {
                         busy.current = false;
