@@ -6,8 +6,8 @@
  * Reading is every member's. Marking and unmarking are an owner's or admin's (42501 otherwise). The table has
  * no update grant, so marking is a plain insert: a period already marked answers ok and keeps its first date.
  *
- * Stage 5: the figures typed in per return (finance_sst_return_figures, 20261125090400): 11(e) cards, 13(b),
- * 13(c), 13(d) and 13A. Saving is an owner's or admin's, and refused while the return is marked filed (FIN60).
+ * Stage 5: the figures typed in per return (finance_sst_return_figures,
+ * 20261125100000_bendahara_sst_return_figures.sql): 11(e) cards, 13(b), 13(c), 13(d) and 13A. Saving is an owner's or admin's, and refused while the return is marked filed (FIN60).
  */
 import { z } from 'zod';
 import { addDays, malaysiaDate } from '@/lib/people/dates';

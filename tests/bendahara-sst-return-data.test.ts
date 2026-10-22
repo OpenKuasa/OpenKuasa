@@ -124,7 +124,7 @@ testWithSupabase('an owner marks a past return filed once, and can take the mark
   expect(await listSstFiled(ctx, 'service')).toEqual({});
 });
 
-// Stage 5 (20261125090400_bendahara_sst_return_figures.sql): runs once that migration is applied on hosted.
+// Stage 5 (20261125100000_bendahara_sst_return_figures.sql): runs once that migration is applied on hosted.
 testWithSupabase('typed-in figures count in item 14, stay with their own type, and are locked while filed', async () => {
   const ctx = await owner(`SST figures ${Date.now()}`);
   const key = { type: 'service', period_start: '2024-01-01' } as const;

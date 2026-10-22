@@ -2,7 +2,7 @@ import { expect, test } from 'vitest';
 import { hasSupabaseEnv, supabaseEnvSkipReason } from './setup/supabase';
 import { createConfirmedTestUser, createOrg, liveClient, signInOwner } from './helpers/live-workspaces';
 
-// SST return figures (finance_sst_return_figures, 20261125090400) against the
+// SST return figures (finance_sst_return_figures, 20261125100000_bendahara_sst_return_figures.sql) against the
 // hosted database. Workspaces are made through tests/helpers/live-workspaces.ts,
 // which deletes what it creates. Run only once the migration is applied.
 
