@@ -54,6 +54,7 @@ import { type NavNeed, canSee } from '@/lib/auth/permissions';
 /** A live count pill on a nav item, resolved client-side from the nav-badges context. */
 export type NavBadgeKey =
   | 'pendingProposals'
+  | 'pendingCrmProposals'
   | 'unreadAnnouncements'
   | 'awaitingAcknowledgement'
   | 'waitingLeave'
@@ -149,7 +150,7 @@ export const PRODUCTS: Product[] = [
         label: 'Overview',
         items: [
           { label: 'Overview', slug: 'assistant', icon: LayoutDashboard },
-          { label: 'AI Agents', slug: 'agents', icon: Bot },
+          { label: 'AI Agents', slug: 'agents', icon: Bot, badge: 'pendingCrmProposals' },
         ],
       },
       {

@@ -4,6 +4,7 @@ import { mergeBadges, type NavBadges } from '@/lib/nav-badges';
 
 const ZERO: NavBadges = {
   pendingProposals: 0,
+  pendingCrmProposals: 0,
   unreadAnnouncements: 0,
   awaitingAcknowledgement: 0,
   waitingLeave: 0,
@@ -21,9 +22,16 @@ describe('AI Agents nav badge', () => {
     expect(agents?.badge).toBe('pendingProposals');
   });
 
-  it('is one of exactly nine badged nav items across every product (the others are Lekiu Announcements, My Documents, the five approval pages and Shift Calendar)', () => {
+  it('marks the Kasturi AI Agents item with its own pendingCrmProposals badge', () => {
+    const crm = getProduct('crm')!;
+    const agents = crm.sections.flatMap((s) => s.items).find((i) => i.slug === 'agents');
+    expect(agents?.badge).toBe('pendingCrmProposals');
+  });
+
+  it('is one of exactly ten badged nav items across every product (the others are Kasturi AI Agents, Lekiu Announcements, My Documents, the five approval pages and Shift Calendar)', () => {
     const badged = PRODUCTS.flatMap((p) => p.sections.flatMap((s) => s.items)).filter((i) => i.badge);
     expect(badged.map((i) => [i.slug, i.badge]).sort()).toEqual([
+      ['agents', 'pendingCrmProposals'],
       ['agents', 'pendingProposals'],
       ['announcements', 'unreadAnnouncements'],
       ['approve-claims', 'waitingClaims'],

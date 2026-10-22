@@ -9,6 +9,7 @@ export type { NavBadges };
 /** Live counts for nav-item badges, keyed by NavBadgeKey. The server provides the first values; a page can set one. */
 const EMPTY: NavBadges = {
   pendingProposals: 0,
+  pendingCrmProposals: 0,
   unreadAnnouncements: 0,
   awaitingAcknowledgement: 0,
   waitingLeave: 0,

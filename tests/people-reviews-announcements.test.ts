@@ -321,6 +321,7 @@ describe('when the people layout reads the unread count', () => {
 describe('nav badges set from a page', () => {
   const server = {
     pendingProposals: 3,
+    pendingCrmProposals: 0,
     unreadAnnouncements: 0,
     awaitingAcknowledgement: 0,
     waitingLeave: 0,

@@ -22,8 +22,8 @@ import {
   type ScheduleStatus,
 } from '@/lib/agents/types';
 import type { KnownNames } from '@/lib/chat/change-titles';
-import { PendingApprovals } from '@/components/reach/pending-approvals';
-import { RecentlyDecided } from '@/components/reach/recently-decided';
+import { PendingApprovals } from '@/components/agents/pending-approvals';
+import { RecentlyDecided } from '@/components/agents/recently-decided';
 import {
   cancelScheduleAction,
   createScheduleAction,
