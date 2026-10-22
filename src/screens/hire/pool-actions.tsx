@@ -368,7 +368,7 @@ function PickerBody({
         <p id={meaningId} className={HELP}>{POOL_MEANING[status]}</p>
       </div>
       <div className="flex flex-col gap-1">
-        <label htmlFor={searchId} className="text-sm font-medium">Search by name</label>
+        <label htmlFor={searchId} className="text-sm font-medium">Search by name or headline</label>
         <input
           ref={searchField}
           id={searchId}

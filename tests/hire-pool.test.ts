@@ -118,7 +118,7 @@ describe('the pool table\'s search', () => {
   });
   it('has the lines for the read limit and the picker\'s cut', () => {
     expect(POOL_READ_CAPPED).toBe('Only the newest 1,000 pool members are read, so someone put on file long ago may be missing from this list and from search.');
-    expect(PICKER_MORE).toBe('More people match than are shown. Type more of the name.');
+    expect(PICKER_MORE).toBe('More people match than are shown. Type more of the name or headline.');
     expect(PICKER_FAILED).toBe('The list could not be loaded. Check your connection and try again.');
   });
 });

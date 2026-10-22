@@ -109,39 +109,60 @@ describe('buildPoolModel with the provider\'s own pool read', () => {
 // ─── 2. the "Add to pool" picker asks the server ─────────────────────────────
 
 describe('readPoolPicker', () => {
-  it('asks for the newest people not in the pool whose name matches, one more than it keeps, with no contact columns', async () => {
+  const byHeadline = (q: Query) => q.calls.some((c) => c[0] === 'filter' && c[1] === 'headline');
+  it('asks for the newest people not in the pool whose name, then whose headline, matches, one more than it keeps, with no contact columns', async () => {
     const { client, queries } = standIn(() => ({ data: [] }));
     await readPoolPicker(client, 'org1', ' D.J. 50%* ');
-    const [q] = queries;
-    expect(q.table).toBe('hire_candidates');
-    expect(has(q, 'select', 'id,name,headline,location,skills,source')).toBe(true);
-    expect(has(q, 'eq', 'org_id', 'org1')).toBe(true);
-    expect(has(q, 'eq', 'pool_status', 'none')).toBe(true);
-    expect(has(q, 'filter', 'name', 'imatch', 'D\\.J\\. 50%\\*')).toBe(true);
-    expect(has(q, 'order', 'created_at', { ascending: false })).toBe(true);
-    expect(has(q, 'order', 'id', { ascending: true })).toBe(true);
-    expect(has(q, 'limit', 51)).toBe(true);
-    expect(JSON.stringify(q.calls)).not.toMatch(/email|phone|ilike|"or"/);
+    expect(queries).toHaveLength(2);
+    for (const q of queries) {
+      expect(q.table).toBe('hire_candidates');
+      expect(has(q, 'select', 'id,name,headline,location,skills,source,created_at')).toBe(true);
+      expect(has(q, 'eq', 'org_id', 'org1')).toBe(true);
+      expect(has(q, 'eq', 'pool_status', 'none')).toBe(true);
+      expect(has(q, 'order', 'created_at', { ascending: false })).toBe(true);
+      expect(has(q, 'order', 'id', { ascending: true })).toBe(true);
+      expect(has(q, 'limit', 51)).toBe(true);
+      expect(JSON.stringify(q.calls)).not.toMatch(/email|phone|ilike|"or"/);
+    }
+    expect(has(queries.find((q) => !byHeadline(q))!, 'filter', 'name', 'imatch', 'D\\.J\\. 50%\\*')).toBe(true);
+    expect(has(queries.find(byHeadline)!, 'filter', 'headline', 'imatch', 'D\\.J\\. 50%\\*')).toBe(true);
   });
-  it('with no name, asks for the newest 50 not in the pool', async () => {
+  it('with no name, asks once for the newest 50 not in the pool', async () => {
     for (const blank of ['', '   ', '\u200b']) {
       const { client, queries } = standIn(() => ({ data: [] }));
       await readPoolPicker(client, 'org1', blank);
+      expect(queries, JSON.stringify(blank)).toHaveLength(1);
       expect(queries[0].calls.some((c) => c[0] === 'filter'), JSON.stringify(blank)).toBe(false);
       expect(has(queries[0], 'limit', 51)).toBe(true);
     }
   });
-  it('keeps 50 and says when there were more; keeps only the six fields of a person', async () => {
-    const rows = Array.from({ length: 51 }, (_, i) => ({ id: `c${i}`, name: `P ${i}`, headline: null, location: null, skills: null, source: null, email: 'x@example.com' }));
-    const many = await readPoolPicker(standIn(() => ({ data: rows })).client, 'org1', 'P');
-    expect(many.people).toHaveLength(50);
-    expect(many.more).toBe(true);
-    expect(many.people[0]).toEqual({ id: 'c0', name: 'P 0', headline: null, location: null, skills: [], source: null });
-    const few = await readPoolPicker(standIn(() => ({ data: rows.slice(0, 50) })).client, 'org1', 'P');
+  const row = (i: number, over: Record<string, unknown> = {}) => ({
+    id: `c${i}`, name: `P ${i}`, headline: null, location: null, skills: null, source: null, email: 'x@example.com',
+    created_at: new Date(NOW.getTime() - i * 60_000).toISOString(), ...over,
+  });
+  it('merges the two reads, newest on file first, each person once, and keeps only the six fields of a person', async () => {
+    const named = [row(2, { name: 'Driver Dan' }), row(5)];
+    const titled = [row(1, { headline: 'Driver' }), row(2, { name: 'Driver Dan' })];
+    const got = await readPoolPicker(standIn((q) => ({ data: byHeadline(q) ? titled : named })).client, 'org1', 'driver');
+    expect(got.people.map((p) => p.id)).toEqual(['c1', 'c2', 'c5']);
+    expect(got.more).toBe(false);
+    expect(got.people[0]).toEqual({ id: 'c1', name: 'P 1', headline: 'Driver', location: null, skills: [], source: null });
+  });
+  it('keeps 50 and says when there were more, from either read or from the two together', async () => {
+    const rows = Array.from({ length: 51 }, (_, i) => row(i));
+    const full = await readPoolPicker(standIn((q) => ({ data: byHeadline(q) ? [] : rows })).client, 'org1', 'P');
+    expect(full.people).toHaveLength(50);
+    expect(full.more).toBe(true);
+    const few = await readPoolPicker(standIn((q) => ({ data: byHeadline(q) ? [] : rows.slice(0, 50) })).client, 'org1', 'P');
     expect(few).toMatchObject({ more: false });
     expect(few.people).toHaveLength(50);
+    const halves = await readPoolPicker(standIn((q) => ({ data: byHeadline(q) ? rows.slice(0, 30) : rows.slice(30) })).client, 'org1', 'P');
+    expect(halves.people).toHaveLength(50);
+    expect(halves.more).toBe(true);
+    const blank = await readPoolPicker(standIn(() => ({ data: rows })).client, 'org1', '');
+    expect(blank).toMatchObject({ more: true });
   });
-  it('throws when the query fails', async () => {
+  it('throws when a query fails', async () => {
     await expect(readPoolPicker(standIn(() => ({ error: { code: '42501' } })).client, 'org1', 'x')).rejects.toEqual({ code: '42501' });
   });
 });

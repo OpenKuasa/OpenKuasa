@@ -516,7 +516,7 @@ export async function moveToPipelineAction(input: unknown): Promise<CapResult<Mo
 
 /**
  * The people the "Add to Pool" picker offers for what was typed: up to 50 on
- * file who are not in the pool, whose name holds the text, newest first (the
+ * file who are not in the pool, whose name or headline holds the text, newest first (the
  * newest 50 for an empty box), and `more` when there are more. Only for someone
  * who may edit, read with their own client inside their own workspace. Names,
  * headlines, places, skills and sources: never an email or a phone number.

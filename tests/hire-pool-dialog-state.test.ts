@@ -68,7 +68,7 @@ describe('the picker', () => {
   it('draws the rows the server sent, at most 50, and says when more match', () => {
     const many = Array.from({ length: 60 }, (_, i) => person(String(i), `Person ${i}`));
     expect(PICKER_ROWS).toBe(50);
-    expect(pickerView(many, true, '')).toMatchObject({ line: 'More people match than are shown. Type more of the name.', empty: null });
+    expect(pickerView(many, true, '')).toMatchObject({ line: 'More people match than are shown. Type more of the name or headline.', empty: null });
     expect(pickerView(many, true, '').rows).toHaveLength(50);
     expect(pickerView(many.slice(0, 50), false, '')).toMatchObject({ line: null, empty: null });
     // Nothing is filtered here: the server already matched the name.
