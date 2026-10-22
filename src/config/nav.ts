@@ -59,7 +59,9 @@ export type NavBadgeKey =
   | 'waitingLeave'
   | 'waitingTimeOff'
   | 'waitingClaims'
-  | 'waitingOvertime';
+  | 'waitingOvertime'
+  | 'waitingSwaps'
+  | 'waitingSwapReplies';
 
 export type NavItem = {
   label: string;
@@ -234,6 +236,7 @@ export const PRODUCTS: Product[] = [
           { label: 'Financial Claims', slug: 'approve-claims', icon: CircleCheck, needs: 'approve-team', badge: 'waitingClaims' },
           { label: 'Overtime', slug: 'approve-overtime', icon: CircleCheck, needs: 'approve-team', badge: 'waitingOvertime' },
           { label: 'Time-Off', slug: 'approve-time-off', icon: CircleCheck, needs: 'approve-team', badge: 'waitingTimeOff' },
+          { label: 'Shift Swaps', slug: 'approve-shift-swaps', icon: CircleCheck, needs: 'approve-team', badge: 'waitingSwaps' },
           { label: 'Public Holidays', slug: 'public-holidays', icon: Heart },
           { label: 'Letters', slug: 'letters', icon: FileText },
         ],
@@ -242,7 +245,7 @@ export const PRODUCTS: Product[] = [
         label: 'Attendance',
         items: [
           { label: 'Timesheet', slug: 'timesheet', icon: Clock },
-          { label: 'Shift Calendar', slug: 'shift-calendar', icon: CalendarClock },
+          { label: 'Shift Calendar', slug: 'shift-calendar', icon: CalendarClock, badge: 'waitingSwapReplies', badgeLabel: 'swap requests for you' },
           { label: 'Overtime', slug: 'overtime', icon: Clock },
         ],
       },

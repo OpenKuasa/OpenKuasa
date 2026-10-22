@@ -10,7 +10,7 @@ import { createClient } from '@/lib/supabase/server';
 /**
  * Every Lekiu page. It reads the signed-in person's unread announcements and the count of their documents and
  * letters awaiting acknowledgement, only for a member of a real workspace and only here, so other products' pages
- * never pay for it. It also reads the four waiting-request counts (`hr_waiting_counts` answers zeros for anyone who
+ * never pay for it. It also reads the waiting counts (the five approval queues, and swaps asking the person to reply) (`hr_waiting_counts` answers zeros for anyone who
  * can decide nothing, so there is no second call to find out who manages anyone). All are read on every request and never cached across people. Each reader never throws (0 on
  * any failure); the guard keeps even a surprise from breaking a page. The counts reach the sidebar after hydration
  * and return to 0 when the person leaves Lekiu.
@@ -46,6 +46,8 @@ export default async function PeopleLayout({ children }: { children: React.React
       <SetNavBadge name="waitingTimeOff" value={waiting.time_off} />
       <SetNavBadge name="waitingClaims" value={waiting.claims} />
       <SetNavBadge name="waitingOvertime" value={waiting.overtime} />
+      <SetNavBadge name="waitingSwaps" value={waiting.swaps} />
+      <SetNavBadge name="waitingSwapReplies" value={waiting.swap_replies} />
       {children}
     </>
   );

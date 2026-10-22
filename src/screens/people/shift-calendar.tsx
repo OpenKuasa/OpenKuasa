@@ -1,8 +1,10 @@
-import { CalendarDays, Moon } from 'lucide-react';
+import { ArrowLeftRight, CalendarDays, Moon } from 'lucide-react';
 import { BentoCard, BentoGrid, BentoStat } from '@/components/bento/bento';
 import { RosterGrid } from '@/components/people/roster-grid';
 import { ShiftPill } from '@/components/people/shift-pill';
 import { ShiftTypesPanel } from '@/components/people/shift-types-panel';
+import { SwapButtons } from '@/components/people/swap-buttons';
+import { SwapRequestForm } from '@/components/people/swap-request-form';
 import { PageHeader } from '@/components/screen/page-header';
 import { ScreenContainer } from '@/components/screen/screen-container';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
@@ -10,8 +12,13 @@ import { buildShiftCalendar, type WeekView } from '@/lib/people/attendance';
 import { addDays, formatDay, todayInMalaysia } from '@/lib/people/dates';
 import { parseWeek } from '@/lib/people/roster';
 import { ensureShiftTypes } from '@/lib/people/roster-writes';
+import { type MySwaps, type SwapChoices, buildMySwaps, listSwapOptions, listSwaps, swapChoices } from '@/lib/people/swaps';
 import { EmployeeCell, LOAD_FAILED, Muted, loadPeople } from './parts';
+import { SwapTable } from './swap-table';
 import { WeekNav } from './week-nav';
+
+/** The swaps card: null when it is not shown (the demo, no linked record), 'unavailable' when its reads failed. */
+type SwapsCard = { mine: MySwaps; choices: SwapChoices } | 'unavailable' | null;
 
 const SUBTITLE: Record<WeekView, string> = {
   hr: 'Weekly shift schedule',
@@ -46,7 +53,24 @@ export default async function ShiftCalendarScreen({
     if (types.length === 0 && ctx.viewer.isHr && !ctx.viewer.isDemo && ctx.orgId) {
       if ((await ensureShiftTypes({ client: ctx.client, orgId: ctx.orgId })) > 0) types = await data.listShiftTypes();
     }
-    return buildShiftCalendar({ shifts, employees, viewer: ctx.viewer, today, week, types });
+    const calendar = buildShiftCalendar({ shifts, employees, viewer: ctx.viewer, today, week, types });
+    // Shift swaps, for anyone linked to a record outside the demo. Read apart, so a failure leaves the roster up.
+    let swaps: SwapsCard = null;
+    if (ctx.orgId && ctx.viewer.employeeId && !ctx.viewer.isDemo) {
+      try {
+        const read = { client: ctx.client, orgId: ctx.orgId };
+        const [list, options] = await Promise.all([listSwaps(read), listSwapOptions(read)]);
+        const byId = Object.fromEntries(types.map((t) => [t.id, t]));
+        swaps = {
+          mine: buildMySwaps({ swaps: list, viewer: ctx.viewer, employees, types: byId, today }),
+          choices: swapChoices({ options, types: byId, swaps: list }),
+        };
+      } catch (error) {
+        console.error('[people/shift-calendar] swaps:', error instanceof Error ? error.message : 'error');
+        swaps = 'unavailable';
+      }
+    }
+    return { ...calendar, swaps };
   });
 
   const dash = '—';
@@ -138,6 +162,45 @@ export default async function ShiftCalendarScreen({
             </div>
           )}
         </BentoCard>
+
+        {model?.swaps ? (
+          <BentoCard
+            title="Shift swaps"
+            subtitle="Swap one of your shifts with a colleague's. They accept, then a manager or HR approves."
+            icon={ArrowLeftRight}
+            className="col-span-2 md:col-span-12"
+          >
+            {model.swaps === 'unavailable' ? (
+              LOAD_FAILED
+            ) : (
+              <div className="space-y-5">
+                {model.swaps.mine.waiting_for_you > 0 ? (
+                  <p className="text-sm font-medium">
+                    {model.swaps.mine.waiting_for_you === 1
+                      ? 'A colleague asks to swap shifts with you.'
+                      : `${model.swaps.mine.waiting_for_you} colleagues ask to swap shifts with you.`}
+                  </p>
+                ) : null}
+                {model.swaps.mine.open.length > 0 ? (
+                  <SwapTable
+                    rows={model.swaps.mine.open}
+                    action={(row) => <SwapButtons id={row.id} reply={row.can_reply} cancel={row.can_cancel} />}
+                  />
+                ) : null}
+                <div className="space-y-2">
+                  <h3 className="text-sm font-medium">Ask for a swap</h3>
+                  <SwapRequestForm choices={model.swaps.choices} disabled={false} />
+                </div>
+                {model.swaps.mine.recent.length > 0 ? (
+                  <div className="space-y-2">
+                    <h3 className="text-sm font-medium">Recent swaps</h3>
+                    <SwapTable rows={model.swaps.mine.recent} />
+                  </div>
+                ) : null}
+              </div>
+            )}
+          </BentoCard>
+        ) : null}
 
         <BentoCard title="Shift types" subtitle="Used this week · times are Malaysia time" icon={Moon} className="col-span-2 md:col-span-12">
           {!model ? (

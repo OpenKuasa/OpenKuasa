@@ -15,6 +15,8 @@ const EMPTY: NavBadges = {
   waitingTimeOff: 0,
   waitingClaims: 0,
   waitingOvertime: 0,
+  waitingSwaps: 0,
+  waitingSwapReplies: 0,
 };
 
 const NavBadgesContext = createContext<NavBadges>(EMPTY);
