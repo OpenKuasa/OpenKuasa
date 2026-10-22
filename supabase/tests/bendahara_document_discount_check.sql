@@ -280,6 +280,9 @@ begin
   fails := fails || public.bendahara_check_try('8: lines cut below a fixed discount', 'FIN62',
     format('update public.finance_invoice_lines set unit_price = 1 where invoice_id = %L; set constraints all immediate', i6));
   set constraints all deferred;
+  fails := fails || public.bendahara_check_try('8: lines moved out from under a discount', 'FIN62',
+    format('update public.finance_invoice_lines set invoice_id = %L where invoice_id = %L; set constraints all immediate', i8, i6));
+  set constraints all deferred;
   fails := fails || public.bendahara_check_try('8: lines deleted under a discount', 'FIN62',
     format('delete from public.finance_invoice_lines where invoice_id = %L; set constraints all immediate', i6));
   set constraints all deferred;

@@ -340,6 +340,7 @@ set search_path = ''
 as $$
 declare
   kind text;
+  docs uuid[];
   doc uuid;
   h record;
   s numeric;
@@ -350,46 +351,51 @@ begin
   else
     kind := 'quotation';
   end if;
+  -- A line moved to another document is judged in both.
   if tg_table_name in ('finance_invoices', 'finance_quotations') then
-    doc := new.id;
+    docs := array[new.id];
   elsif tg_op = 'DELETE' then
-    doc := (to_jsonb(old) ->> (kind || '_id'))::uuid;
+    docs := array[(to_jsonb(old) ->> (kind || '_id'))::uuid];
+  elsif tg_op = 'UPDATE' then
+    docs := array[(to_jsonb(old) ->> (kind || '_id'))::uuid, (to_jsonb(new) ->> (kind || '_id'))::uuid];
   else
-    doc := (to_jsonb(new) ->> (kind || '_id'))::uuid;
+    docs := array[(to_jsonb(new) ->> (kind || '_id'))::uuid];
   end if;
 
-  if kind = 'invoice' then
-    select org_id, status, doc_discount_pct, doc_discount_amount into h
-      from public.finance_invoices where id = doc;
-  else
-    select org_id, status, doc_discount_pct, doc_discount_amount into h
-      from public.finance_quotations where id = doc;
-  end if;
-  if not found or h.status <> 'draft' or num_nonnulls(h.doc_discount_pct, h.doc_discount_amount) = 0 then
-    return null;
-  end if;
+  foreach doc in array docs loop
+    if kind = 'invoice' then
+      select org_id, status, doc_discount_pct, doc_discount_amount into h
+        from public.finance_invoices where id = doc;
+    else
+      select org_id, status, doc_discount_pct, doc_discount_amount into h
+        from public.finance_quotations where id = doc;
+    end if;
+    if not found or h.status <> 'draft' or num_nonnulls(h.doc_discount_pct, h.doc_discount_amount) = 0 then
+      continue;
+    end if;
 
-  if kind = 'invoice' then
-    select coalesce(sum(round(
-      case
-        when discount_pct is not null then quantity * unit_price * (1 - discount_pct / 100)
-        when discount_amount is not null then greatest(quantity * unit_price - discount_amount, 0)
-        else quantity * unit_price
-      end, 2)), 0) into s
-      from public.finance_invoice_lines where org_id = h.org_id and invoice_id = doc;
-  else
-    select coalesce(sum(round(
-      case
-        when discount_pct is not null then quantity * unit_price * (1 - discount_pct / 100)
-        when discount_amount is not null then greatest(quantity * unit_price - discount_amount, 0)
-        else quantity * unit_price
-      end, 2)), 0) into s
-      from public.finance_quotation_lines where org_id = h.org_id and quotation_id = doc;
-  end if;
-  d := coalesce(round(s * h.doc_discount_pct / 100, 2), h.doc_discount_amount);
-  if d >= s then
-    raise exception 'A discount on the whole document must leave something to pay.' using errcode = 'FIN62';
-  end if;
+    if kind = 'invoice' then
+      select coalesce(sum(round(
+        case
+          when discount_pct is not null then quantity * unit_price * (1 - discount_pct / 100)
+          when discount_amount is not null then greatest(quantity * unit_price - discount_amount, 0)
+          else quantity * unit_price
+        end, 2)), 0) into s
+        from public.finance_invoice_lines where org_id = h.org_id and invoice_id = doc;
+    else
+      select coalesce(sum(round(
+        case
+          when discount_pct is not null then quantity * unit_price * (1 - discount_pct / 100)
+          when discount_amount is not null then greatest(quantity * unit_price - discount_amount, 0)
+          else quantity * unit_price
+        end, 2)), 0) into s
+        from public.finance_quotation_lines where org_id = h.org_id and quotation_id = doc;
+    end if;
+    d := coalesce(round(s * h.doc_discount_pct / 100, 2), h.doc_discount_amount);
+    if d >= s then
+      raise exception 'A discount on the whole document must leave something to pay.' using errcode = 'FIN62';
+    end if;
+  end loop;
   return null;
 end $$;
 
