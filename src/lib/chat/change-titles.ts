@@ -19,6 +19,7 @@ import { STATUTORY_FIELDS } from '@/lib/people/statutory-fields';
 import { centsToRinggit, monthLabel as payrollMonthLabel, ringgitToCents, toStatutoryInput } from '@/lib/people/payroll-forms';
 import type { ReceiptState } from '@/lib/people/receipts';
 import { money } from '@/lib/finance/format';
+import { rosterCardDetail, rosterCardTitle, rosterLabel } from '@/lib/people/roster-cards';
 
 const APPOINTMENT_STATUS_LABELS: Record<string, string> = {
   scheduled: 'scheduled',
@@ -61,6 +62,7 @@ const idOf = (row: Record<string, unknown>, kind?: ItemKind): unknown =>
 function labelOf(row: Record<string, unknown>, kind?: ItemKind): string | null {
   if (kind === 'goal' || kind === 'review' || kind === 'training' || kind === 'announcement') return performanceFact(row, kind);
   if (kind === 'letter' || kind === 'document') return letterDocumentFact(row, kind);
+  if (kind === 'shift-type' || kind === 'shift' || kind === 'swap') return rosterLabel(row, kind);
   if (kind === 'application' || kind === 'interview') {
     // A listApplications row has `candidate` and `job`, not `name`. So has an interview's row, and the result of an
     // interview change: the card's own line gives the time, so an interview is named by the person and the job alone.
@@ -206,7 +208,10 @@ export type ItemKind =
   | 'appointment'
   | 'refund'
   | 'payment-in'
-  | 'payment-out';
+  | 'payment-out'
+  | 'shift-type'
+  | 'shift'
+  | 'swap';
 const KIND_OF_TOOL: Record<string, ItemKind> = {
   getCampaigns: 'campaign',
   createCampaign: 'campaign',
@@ -327,6 +332,13 @@ const KIND_OF_TOOL: Record<string, ItemKind> = {
   issueLetter: 'letter',
   listDocuments: 'document',
   listLetterTemplates: 'template',
+  // Shift types: a lookup row and a save's result both carry the type's id, name and times.
+  listShiftTypes: 'shift-type',
+  saveShiftType: 'shift-type',
+  archiveShiftType: 'shift-type',
+  // The shifts a swap may offer or ask for, and the swaps themselves.
+  listSwapOptions: 'shift',
+  listShiftSwaps: 'swap',
   listDepartments: 'department',
   createDepartment: 'department',
   updateDepartment: 'department',
@@ -417,6 +429,10 @@ const SUBJECT_ONLY: Record<string, ItemKind> = {
   decideOvertime: 'overtime',
   cancelOvertime: 'overtime',
   removeHoliday: 'holiday',
+  // Their results carry only the swap's id and status, so the swaps lookup names them.
+  replyShiftSwap: 'swap',
+  decideShiftSwap: 'swap',
+  cancelShiftSwap: 'swap',
   deleteAppointment: 'appointment',
   // Their results carry only the id (and a number), so the lookup's row names them.
   markRefundPaid: 'refund',
@@ -1937,6 +1953,15 @@ export function approvalTitle(
       return `Remove ${old ? `public holiday: ${old}` : UNLISTED_HOLIDAY}?`;
     }
     case 'saveAttendanceSettings': return settingsTitle(i, find);
+    case 'setShifts':
+    case 'logHours':
+    case 'saveShiftType':
+    case 'archiveShiftType':
+    case 'requestShiftSwap':
+    case 'replyShiftSwap':
+    case 'decideShiftSwap':
+    case 'cancelShiftSwap':
+      return rosterCardTitle(toolName, i, find) ?? 'Approve this change?';
     case 'saveGoal':
     case 'removeGoal':
     case 'enrolInTraining':
@@ -2299,6 +2324,8 @@ export function approvalDetail(
     return note ? `Note: “${note}”` : null;
   }
   if (toolName === 'saveAttendanceSettings') return settingsDetail(i);
+  const rosterDetail = rosterCardDetail(toolName, i, named);
+  if (rosterDetail !== null) return rosterDetail;
   if (toolName === 'recalculatePayroll' || ['savePayslipLine', 'removePayslipLine', 'setPayslipStatutory', 'removePayslip'].includes(toolName)) {
     const caveat = named ? payrollCaveat(toolName, i, named) : null;
     return [payrollDetail(toolName, i), caveat].filter(Boolean).join(' ') || null;

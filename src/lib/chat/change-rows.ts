@@ -12,6 +12,8 @@
 
 import { kindOfTool, type ItemKind, type NameFinder, type RowFinder } from '@/lib/chat/change-titles';
 import { RECOMMENDATION_LABEL, ratingWords } from '@/lib/hire/interview-feedback';
+import { hoursWords, isRosterTool, rosterDay } from '@/lib/people/roster-cards';
+import { hhmm } from '@/lib/people/loose-input';
 
 export type ChangeRow = {
   /** The argument this row shows, as a path into the input: `private.bank_account`. */
@@ -66,6 +68,8 @@ const FIELD_LABELS: Record<string, string> = {
   memberEmail: 'Account email',
   manager_id: 'Reports to',
   approve: 'Decision',
+  accept: 'Answer',
+  is_off: 'Off type (no times)',
   mark_completed: 'Also marks it completed',
   replace: 'Replaces existing feedback',
   // An assistant's grounds for a rating it proposed itself: on the card for the person who approves, never stored.
@@ -115,6 +119,19 @@ export function cardValueText(toolName: string, path: string[], value: unknown):
   if (key === 'rating' && OUT_OF_FIVE.has(toolName) && typeof value === 'number' && Number.isInteger(value) && value >= 1 && value <= 5) {
     return ratingWords(value);
   }
+  const leaf = path[path.length - 1];
+  if (isRosterTool(toolName)) {
+    // Dates and hours as the roster screens say them; an empty shift type is a day with no shift.
+    if (leaf === 'work_date' && rosterDay(value)) return rosterDay(value) as string;
+    if ((leaf === 'hours' || leaf === 'billable_hours') && hoursWords(value)) return hoursWords(value) as string;
+    if (leaf === 'shift_type_id' && (value === null || value === undefined)) return 'No shift';
+    if (leaf === 'start_time' || leaf === 'end_time') {
+      if (value === null || value === undefined || (typeof value === 'string' && value.trim() === '')) return 'No time';
+      if (hhmm(value)) return hhmm(value) as string;
+    }
+    if (leaf === 'accept' && typeof value === 'boolean') return value ? 'Accept' : 'Decline';
+    if (leaf === 'color' && typeof value === 'string' && value) return value.charAt(0).toUpperCase() + value.slice(1);
+  }
   if (key === 'recommendation' && toolName === 'saveInterviewFeedback' && typeof value === 'string' && Object.hasOwn(RECOMMENDATION_LABEL, value)) {
     return RECOMMENDATION_LABEL[value as keyof typeof RECOMMENDATION_LABEL];
   }
@@ -148,7 +165,7 @@ const ITEM_KINDS: ReadonlySet<string> = new Set<ItemKind>([
   'campaign', 'creative', 'form', 'lead', 'contact', 'deal', 'stage', 'follow-up', 'schedule', 'job', 'application',
   'candidate', 'employee', 'department', 'leave', 'time-off', 'claim', 'overtime', 'holiday', 'settings', 'payslip',
   'payslip-line', 'payroll-run', 'goal', 'review', 'training', 'announcement', 'rfq', 'purchase-order', 'journal',
-  'invoice', 'credit-note', 'letter', 'document', 'appointment',
+  'invoice', 'credit-note', 'letter', 'document', 'appointment', 'shift-type', 'shift', 'swap',
 ]);
 
 /** Finance subjects whose nested `line_id`/`run_id` mean a quote, receipt or journal line — never a payroll row. */
@@ -163,7 +180,7 @@ const HR_ONLY_ALIASES: ReadonlySet<string> = new Set(['line', 'run']);
  */
 function kindOfKey(key: string, subjectKind?: ItemKind): ItemKind | undefined {
   const stem = key.replace(/(_id|Id)$/, '').replace(/([a-z])([A-Z])/g, '$1-$2').replace(/_/g, '-').toLowerCase();
-  const alias: Record<string, ItemKind> = { line: 'payslip-line', run: 'payroll-run', 'payroll-run': 'payroll-run', course: 'training', manager: 'employee', supplier: 'finance-contact' };
+  const alias: Record<string, ItemKind> = { line: 'payslip-line', run: 'payroll-run', 'payroll-run': 'payroll-run', course: 'training', manager: 'employee', supplier: 'finance-contact', 'my-shift': 'shift', 'their-shift': 'shift' };
   const hrAliasBlocked = subjectKind !== undefined && FINANCE_KINDS.has(subjectKind) && HR_ONLY_ALIASES.has(stem);
   if (Object.hasOwn(alias, stem) && !hrAliasBlocked) return alias[stem];
   return ITEM_KINDS.has(stem) ? (stem as ItemKind) : undefined;
@@ -186,6 +203,14 @@ const KIND_WORDS: Partial<Record<ItemKind, string>> = {
   'credit-note': 'Credit note',
   'payment-in': 'Payment in',
   'payment-out': 'Payment out',
+  'shift-type': 'Shift type',
+  swap: 'Shift swap',
+};
+
+/** Record rows of one kind that a change names twice: each says which side it is. */
+const RECORD_LABELS: Record<string, string> = {
+  my_shift_id: 'Your shift',
+  their_shift_id: "Colleague's shift",
 };
 const kindLabel = (kind: ItemKind | undefined): string =>
   kind ? (KIND_WORDS[kind] ?? kind.charAt(0).toUpperCase() + kind.slice(1)) : 'Record';
@@ -262,7 +287,9 @@ export function changeRows(toolName: string, input: unknown, find?: NameFinder, 
         rows.push({
           key: at.join('.'),
           kind: 'record',
-          label: subject ? kindLabel(kind) : [...labels, kind ? kindLabel(kind) : fieldLabel(key)].join(' › '),
+          label: subject
+            ? kindLabel(kind)
+            : [...labels, Object.hasOwn(RECORD_LABELS, key) ? RECORD_LABELS[key] : kind ? kindLabel(kind) : fieldLabel(key)].join(' › '),
           // No lookup named it: a raw database id is no help to a person, so the row says so, with a short ref.
           to: name ?? (UUID.test(inner) ? unnamed(inner) : inner),
         });
