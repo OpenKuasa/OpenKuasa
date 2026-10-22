@@ -2,7 +2,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { getCurrentOrg } from '@/lib/auth/current-org';
 import { hasSupabaseEnv } from '@/lib/auth/viewer';
 import { feedbackOf } from './interview-feedback';
-import { CANDIDATE_COLUMNS, readCandidateSearch } from './candidate-search';
+import { CANDIDATE_COLUMNS, readCandidateSearch, readPool } from './candidate-search';
 import { readInterviewCard, readNamesakes } from './namesakes';
 import { createSeedHireData } from './seed';
 import { DEFAULT_HIRE_SETTINGS, HIRE_READ_CAP, JOB_COLUMNS, SETTINGS_COLUMNS } from './types';
@@ -113,6 +113,7 @@ export function createSupabaseHireData(client: SupabaseClient, orgId: string): H
     poolStatusOf: (id) => readPoolStatus(client, orgId, id),
     interviewCard: (id) => readInterviewCard(client, orgId, id),
     searchCandidates: (query) => readCandidateSearch(client, orgId, query),
+    listPool: () => readPool(client, orgId),
   };
 }
 

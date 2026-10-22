@@ -32,6 +32,25 @@ export const searchPattern = (text: string) => escapeRegex(cleaned(text));
 
 const NOTHING: CandidateSearchResult = { rows: [], more: false };
 
+/** Rows as read, with `skills` never null. */
+const asCandidates = (data: unknown) => ((data ?? []) as Candidate[]).map((c) => ({ ...c, skills: c.skills ?? [] }));
+
+/**
+ * Everyone in the talent pool, newest on file first, up to HIRE_READ_CAP: the pool itself, so people put on file
+ * long ago are not lost behind the newest page of everyone. The member's own client; a failed query throws.
+ */
+export async function readPool(client: SupabaseClient, orgId: string): Promise<Candidate[]> {
+  const { data, error } = await client
+    .from('hire_candidates')
+    .select(CANDIDATE_COLUMNS)
+    .eq('org_id', orgId)
+    .neq('pool_status', 'none')
+    .order('created_at', { ascending: false })
+    .limit(HIRE_READ_CAP);
+  if (error) throw error;
+  return asCandidates(data);
+}
+
 /**
  * The read against the database, with the member's own client (row-level security and the workspace filter apply,
  * as for every other hiring read). A failed query throws.
@@ -54,8 +73,7 @@ export async function readCandidateSearch(
   // HIRE_READ_CAP rows, so a read that asks for the cap counts as "more" when it comes back full.
   const { data, error } = await request.order('created_at', { ascending: false }).limit(Math.min(bound + 1, HIRE_READ_CAP));
   if (error) throw error;
-  const read = ((data ?? []) as unknown as Candidate[]).map((c) => ({ ...c, skills: c.skills ?? [] }));
-  return cut(read, bound);
+  return cut(asCandidates(data), bound);
 }
 
 /** How many rows a lookup keeps: CANDIDATE_SEARCH_LIMIT unless asked for more, never above HIRE_READ_CAP. */

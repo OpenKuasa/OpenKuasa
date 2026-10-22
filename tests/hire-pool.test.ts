@@ -117,7 +117,7 @@ describe('the pool table\'s search', () => {
     expect(poolNoMatch('aina')).toBe('No one in the talent pool matches “aina”.');
   });
   it('has the two lines for the read limit', () => {
-    expect(POOL_READ_CAPPED).toBe('Only the newest 1,000 people on file are read, so someone added long ago may be missing from this list and from search.');
+    expect(POOL_READ_CAPPED).toBe('Only the newest 1,000 pool members are read, so someone put on file long ago may be missing from this list and from search.');
     expect(PICKER_CAPPED).toBe('Only the newest 1,000 people on file are listed here, so someone added long ago may be missing.');
     expect(PICKER_FAILED).toBe('The list could not be loaded. Check your connection and try again.');
   });

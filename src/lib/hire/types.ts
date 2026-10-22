@@ -211,6 +211,13 @@ export type HireData = {
    * sample data) may leave it out: `searchCandidatesFromList` over the candidates list is then used.
    */
   searchCandidates?(query: CandidateSearch): Promise<CandidateSearchResult>;
+  /**
+   * Everyone in the talent pool (pool status other than none), newest first, at most HIRE_READ_CAP rows, read as the
+   * pool so that people on file long ago are not cut off by the newest page of everyone. A provider over a database
+   * must have it. One that holds every row in memory (the sample data) may leave it out: the candidates list is then
+   * filtered.
+   */
+  listPool?(): Promise<Candidate[]>;
 };
 
 /**

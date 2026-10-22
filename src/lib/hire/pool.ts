@@ -32,7 +32,7 @@ export const POOL_NOT_SENT = 'That change could not be sent. Check your connecti
 export const PICKER_FAILED = 'The list could not be loaded. Check your connection and try again.';
 export const PICKER_CAPPED = 'Only the newest 1,000 people on file are listed here, so someone added long ago may be missing.';
 export const POOL_READ_CAPPED =
-  'Only the newest 1,000 people on file are read, so someone added long ago may be missing from this list and from search.';
+  'Only the newest 1,000 pool members are read, so someone put on file long ago may be missing from this list and from search.';
 const FORBIDDEN = 'You do not have permission to make changes here.';
 
 // ─── after a change ──────────────────────────────────────────────────────────

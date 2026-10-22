@@ -250,7 +250,7 @@ describe('the line under the table', () => {
 
 describe('the read limit', () => {
   it('is said above the table only when the read came back full', async () => {
-    const CAP = 'Only the newest 1,000 people on file are read, so someone added long ago may be missing from this list and from search.';
+    const CAP = 'Only the newest 1,000 pool members are read, so someone put on file long ago may be missing from this list and from search.';
     expect(text(await screen())).not.toContain(CAP);
     mocks.pool = pool({ readCapped: true });
     const html = await screen();
