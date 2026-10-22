@@ -132,7 +132,7 @@ export type CareersModel = {
 };
 
 /** The public board lists a job when it is open and has a description with a non-space character. */
-const isListedOnBoard = (job: Job) => job.status === 'open' && /\S/.test(job.description ?? '');
+export const isListedOnBoard = (job: Job) => job.status === 'open' && /\S/.test(job.description ?? '');
 
 function careersRowStatus(job: Job, boardOn: boolean): CareersModel['rows'][number]['status'] {
   if (job.status === 'open') return boardOn && isListedOnBoard(job) ? 'Published' : 'Open';
