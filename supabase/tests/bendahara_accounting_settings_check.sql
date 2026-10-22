@@ -43,7 +43,7 @@ declare
   old_d date := date '1999-11-15';
   lock1 date := date '1999-12-31';
   cust uuid; sup uuid; both_c uuid; usd_c uuid;
-  bank uuid; till uuid; rent uuid; equity uuid; utilities uuid; acc_old uuid;
+  bank uuid; till uuid; rent uuid; equity uuid; utilities uuid; acc_old uuid; acc_sgd uuid; acc_del uuid;
   inv_old_v uuid; inv_old_cn uuid; inv_v_ok uuid; inv_d uuid; inv_ok uuid; inv_r uuid; inv_future uuid; inv_seq uuid;
   iusd uuid; ic_old uuid; bc_old uuid;
   bill_old_v uuid; bill_old_scn uuid; b_d uuid; b_ok uuid;
@@ -145,9 +145,10 @@ begin
   end loop;
   select string_agg(a.attname, ',' order by a.attname) into t
     from pg_trigger g join pg_attribute a on a.attrelid = g.tgrelid and a.attnum = any(g.tgattr)
-   where g.tgrelid = 'public.finance_accounts'::regclass and g.tgname = 'finance_period_lock' and g.tgtype = 23
+   where g.tgrelid = 'public.finance_accounts'::regclass and g.tgname = 'finance_period_lock' and g.tgtype = 31
      and g.tgenabled = 'O' and g.tgfoid = 'private.finance_period_lock()'::regprocedure;
-  if t is distinct from 'opening_balance,opening_date' then
+  -- tgtype 31: row, before, insert, delete, update (of these columns).
+  if t is distinct from 'opening_balance,opening_date,opening_rate' then
     fails := fails || format('finance_period_lock on finance_accounts fires on %s', coalesce(t, 'nothing'));
   end if;
   for r in
@@ -568,19 +569,60 @@ begin
   -- ==== reopened: no lock, everything as before ==================================================================
   update public.finance_settings set lock_date = null where org_id = org;
   begin
+    t := 'reopened: post, void, approve, opening balance';
     perform public.finance_post_invoice(org, inv_d);
     update public.finance_invoices set status = 'void', updated_at = now() where id = inv_old_v;
     perform public.finance_post_journal(org, j_d);
     update public.finance_expenses set status = 'approved', updated_at = now() where id = e_d;
     perform public.finance_void_transfer(org, tr_old);
     update public.finance_accounts set opening_balance = 200 where id = acc_old;
+    -- An approved expense dated in the old period is rejected; two more are approved for the lock below.
+    t := 'reopened: a member''s claims';
+    perform set_config('request.jwt.claims', member_claims, true);
+    e_d := public.finance_save_expense(org, jsonb_build_object('category_id', utilities, 'vendor_name', 'Air', 'amount', 11, 'expense_date', old_d));
+    e_ok := public.finance_save_expense(org, jsonb_build_object('category_id', utilities, 'vendor_name', 'Api', 'amount', 12, 'expense_date', old_d));
+    perform set_config('request.jwt.claims', owner_claims, true);
+    t := 'reopened: approve and reject';
+    update public.finance_expenses set status = 'approved', updated_at = now() where id in (e_d, e_ok);
+    update public.finance_expenses set status = 'rejected', updated_at = now() where id = e_d;
+    -- An opening balance in Singapore dollars dated in the old period: its rate changed; an account with an opening
+    -- balance in the old period deleted.
+    t := 'reopened: opening rate';
+    insert into public.finance_accounts (org_id, name, kind, currency, opening_balance, opening_date, opening_rate, opening_rate_source)
+    values (org, 'SGD Old', 'bank', 'SGD', 100, old_d, 4.2, 'manual') returning id into acc_sgd;
+    update public.finance_accounts set opening_rate = 3.25 where id = acc_sgd;
+    t := 'reopened: account deleted';
+    insert into public.finance_accounts (org_id, name, kind, opening_balance, opening_date) values (org, 'Gone Old', 'cash', 10, old_d)
+      returning id into acc_del;
+    delete from public.finance_accounts where id = acc_del;
   exception when others then
-    fails := fails || format('reopened: %s %s', sqlstate, sqlerrm);
+    fails := fails || format('reopened (%s): %s %s', t, sqlstate, sqlerrm);
   end;
   -- Both fields in one save: two rows.
   update public.finance_settings set lock_date = lock1, year_end_month = 3 where org_id = org;
   -- A save that changes nothing logs nothing.
   update public.finance_settings set lock_date = lock1, year_end_month = 3 where org_id = org;
+
+  -- ==== locked again to 31 Dec 1999: leaving the ledger, opening rates, deleting accounts ===========================
+  -- An approved expense dated in the locked period is not rejected (its entry would leave the closed period).
+  fails := fails || public.bendahara_check_try('an approved expense dated in the locked period rejected', 'FIN63',
+    format('update public.finance_expenses set status = %L, updated_at = now() where id = %L', 'rejected', e_ok));
+  -- The rate of an opening balance dated in the locked period: changed is refused; the same rate marked as Bank
+  -- Negara's for a day (the source and its date, not the rate) is not a ledger change.
+  reset role;
+  insert into public.finance_fx_rates (currency, rate_date, session, unit, selling_rate, middle_rate, rate)
+  values ('SGD', '1999-11-12', '1700', 1, 3.25, 3.2, 3.2);
+  set local role authenticated;
+  fails := fails || public.bendahara_check_try('an opening rate changed', 'FIN63',
+    format('update public.finance_accounts set opening_rate = 3.3 where id = %L', acc_sgd));
+  fails := fails || public.bendahara_check_try('an opening rate''s source and date, same rate', 'ok',
+    format('update public.finance_accounts set opening_rate = 3.25, opening_rate_source = %L, opening_rate_date = %L where id = %L',
+      'bnm', '1999-11-12', acc_sgd));
+  -- An account holding an opening balance dated in the locked period is not deleted; one without is.
+  fails := fails || public.bendahara_check_try('an account with a locked opening balance deleted', 'FIN63',
+    format('delete from public.finance_accounts where id = %L', acc_old));
+  fails := fails || public.bendahara_check_try('an account with no opening balance deleted', 'ok',
+    format('delete from public.finance_accounts where org_id = %L and name = %L', org, 'Empty Old'));
 
   -- ==== what the settings logged: every change once, and nothing else ===========================================
   reset role;
@@ -618,6 +660,15 @@ begin
    where a.org_id = org and a.entity_type = 'finance_settings'
      and (a.actor_id is distinct from owner_id or a.category <> 'data' or a.audience <> 'members' or a.entity_id is not null);
   if n <> 0 then fails := fails || format('settings log: %s rows with the wrong actor, category, audience or id', n); end if;
+
+  -- ==== the lock at today's UTC date: the ledger dates a void's reversal by UTC ===================================
+  -- (After the log comparison: this change of lock date is logged but not in the list above.)
+  perform set_config('request.jwt.claims', owner_claims, true);
+  set local role authenticated;
+  update public.finance_settings set lock_date = (now() at time zone 'UTC')::date where org_id = org;
+  fails := fails || public.bendahara_check_try('lock at today (UTC): void of a later invoice', 'FIN63',
+    format('update public.finance_invoices set status = %L, updated_at = now() where id = %L', 'void', inv_future));
+  reset role;
 
   -- ==== a person who posted inside the locked period is deleted ==================================================
   -- The admin posted the revaluation at 2000-01-31; lock the books past it, then delete the admin: the foreign keys

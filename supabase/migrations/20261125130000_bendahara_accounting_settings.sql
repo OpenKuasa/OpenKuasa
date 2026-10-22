@@ -22,13 +22,17 @@
 --        finance_contras (contra_date; posted, void)          finance_journals (journal_date; posted)
 --        finance_fx_revaluations (period_end; *)
 --      A row written in a ledger status, or moved into one, is refused (FIN63) when its date is on or before the
---      lock; a void is also refused when today in Malaysia (the void's own date) is. Drafts, and changes that leave
---      the status alone (an e-invoice status, a deleted person's id cleared by a foreign key), are not checked. On
+--      lock; a void is also refused when the void's own date (the UTC date the ledger gives its reversal) is. A row
+--      leaving a ledger status for one that is not (an approved expense rejected) is refused by its old date, and a
+--      ledger row whose date moves by either date. Drafts, and changes that leave the status and date alone (an
+--      e-invoice status, a deleted person's id cleared by a foreign key), are not checked. On
 --      finance_fx_revaluations (no status) an insert is checked, and an update only if it moves the date.
---      finance_accounts gets its own finance_period_lock trigger (UPDATE OF opening_balance, opening_date): a
---      non-zero opening balance dated on or before the lock is refused, and so is changing or taking out one that is.
---      Deletes are not checked, so deleting a workspace (its cascades) is untouched. With no lock set (no row, or
---      lock_date null) every trigger returns at once: nothing behaves differently.
+--      finance_accounts gets its own finance_period_lock trigger (INSERT, DELETE, UPDATE OF opening_balance,
+--      opening_date, opening_rate): a non-zero opening balance dated on or before the lock is refused when written,
+--      changed (amount, date or rate), taken out or deleted with its account. Deleting a workspace is untouched: the
+--      document tables' triggers do not fire on delete, and an account's delete is let through once its workspace
+--      row is gone. With no lock set (no row, or lock_date null) every trigger returns at once: nothing behaves
+--      differently.
 --   4. Numbering: public.finance_set_sequence(target_org, doc, new_prefix, new_next) changes a document's prefix and
 --      next number (owner or admin; FIN66 for a bad prefix, stored in capitals; FIN65 when the next number would go
 --      back, so no number is ever given twice; logged per changed field), and public.finance_sequence_list(target_org)
@@ -142,9 +146,22 @@ create trigger finance_settings_audit
 -- 3. the books lock
 -- ============================================================================
 -- tg_argv[0]: the row's date column. tg_argv[1]: its ledger statuses, comma-separated, or '*' (every row is one).
--- On finance_accounts (no arguments): the opening balance and its date. Runs as the owner so the lock is read
--- whoever writes; it reads only the row's own workspace's settings. The status test comes first, so a draft never
--- costs a lookup.
+-- On finance_accounts (no arguments): the opening balance, its date and its rate. Runs as the owner so the lock is
+-- read whoever writes; it reads only the row's own workspace's settings. The status tests come first, so a draft
+-- never costs a lookup.
+--
+-- A ledger row is refused (FIN63) when, with L the lock date:
+--   * it is written in a ledger status, or moved into one, dated on or before L (and a row that was already in a
+--     ledger status, by its old date too);
+--   * it is voided while the void's own date is on or before L. The ledger dates a void's reversal on
+--     (voided_at at time zone 'UTC')::date (finance_void_stamp sets voided_at := now()), so that is the date used;
+--     it is never later than the Malaysia date;
+--   * it leaves a ledger status for one that is not (approved -> rejected expense), dated on or before L: its entry
+--     would disappear from the closed period;
+--   * its date changes while its status stays a ledger status, when either date is on or before L (the documents'
+--     own guards refuse this today; this is defence in depth).
+-- The status read is NEW's as it stands when this trigger fires. BEFORE triggers fire in name order, so a guard
+-- that sets new.status must sort before 'finance_period_lock' for its status to be the one checked here.
 create function private.finance_period_lock()
 returns trigger
 language plpgsql
@@ -153,13 +170,32 @@ set search_path = ''
 as $$
 declare
   l date;
+  n jsonb;
+  o jsonb;
   d date;
+  od date;
   st text;
-  today date;
+  ost text;
+  ledger text[];
+  is_ledger boolean;
+  was_ledger boolean := false;
 begin
   if tg_table_name = 'finance_accounts' then
+    if tg_op = 'DELETE' then
+      -- A workspace being deleted takes its accounts with it: its row is already gone.
+      if old.opening_balance = 0 or not exists (select 1 from public.orgs o2 where o2.id = old.org_id) then
+        return old;
+      end if;
+      select s.lock_date into l from public.finance_settings s where s.org_id = old.org_id;
+      if l is not null and old.opening_date <= l then
+        raise exception 'This date is in a closed period: the books are locked to %.', to_char(l, 'DD Mon YYYY')
+          using errcode = 'FIN63';
+      end if;
+      return old;
+    end if;
     if tg_op = 'UPDATE' and new.opening_balance is not distinct from old.opening_balance
-       and new.opening_date is not distinct from old.opening_date then
+       and new.opening_date is not distinct from old.opening_date
+       and new.opening_rate is not distinct from old.opening_rate then
       return new;
     end if;
     if new.opening_balance = 0 and (tg_op = 'INSERT' or old.opening_balance = 0) then
@@ -177,17 +213,36 @@ begin
     return new;
   end if;
 
-  d := (to_jsonb(new) ->> tg_argv[0])::date;
+  n := to_jsonb(new);
+  d := (n ->> tg_argv[0])::date;
+  if tg_op = 'UPDATE' then
+    o := to_jsonb(old);
+    od := (o ->> tg_argv[0])::date;
+  end if;
+
   if tg_argv[1] = '*' then
-    if tg_op = 'UPDATE' and d is not distinct from (to_jsonb(old) ->> tg_argv[0])::date then
+    if tg_op = 'UPDATE' and d is not distinct from od then
       return new;
     end if;
   else
-    st := to_jsonb(new) ->> 'status';
-    if st is null or not (st = any (string_to_array(tg_argv[1], ','))) then
-      return new;
+    ledger := string_to_array(tg_argv[1], ',');
+    st := n ->> 'status';
+    is_ledger := coalesce(st = any (ledger), false);
+    if tg_op = 'UPDATE' then
+      ost := o ->> 'status';
+      was_ledger := coalesce(ost = any (ledger), false);
     end if;
-    if tg_op = 'UPDATE' and st is not distinct from (to_jsonb(old) ->> 'status') then
+    if tg_op = 'INSERT' then
+      if not is_ledger then
+        return new;
+      end if;
+    elsif st is not distinct from ost then
+      -- Status unchanged: only a ledger row whose date moves.
+      if not is_ledger or d is not distinct from od then
+        return new;
+      end if;
+    elsif not is_ledger and not (was_ledger and st is distinct from 'void') then
+      -- Draft to draft-like statuses (pending approval, scheduled, rejected...): no ledger effect.
       return new;
     end if;
   end if;
@@ -196,8 +251,9 @@ begin
   if l is null then
     return new;
   end if;
-  today := (now() at time zone 'Asia/Kuala_Lumpur')::date;
-  if d <= l or (st = 'void' and today <= l) then
+  if (is_ledger is not false and d <= l)
+     or (was_ledger and od <= l)
+     or (st = 'void' and (now() at time zone 'UTC')::date <= l) then
     raise exception 'This date is in a closed period: the books are locked to %.', to_char(l, 'DD Mon YYYY')
       using errcode = 'FIN63';
   end if;
@@ -223,7 +279,9 @@ create trigger finance_period_lock before insert or update on public.finance_jou
   for each row execute function private.finance_period_lock('journal_date', 'posted');
 create trigger finance_period_lock before insert or update on public.finance_fx_revaluations
   for each row execute function private.finance_period_lock('period_end', '*');
-create trigger finance_period_lock before insert or update of opening_balance, opening_date on public.finance_accounts
+-- An opening balance: written, changed (its amount, date or rate), or deleted with its account.
+create trigger finance_period_lock
+  before insert or delete or update of opening_balance, opening_date, opening_rate on public.finance_accounts
   for each row execute function private.finance_period_lock();
 
 -- ============================================================================
@@ -376,12 +434,15 @@ begin
       raise exception '%.% is not a date column', r.tbl, r.col;
     end if;
   end loop;
+  -- On accounts: BEFORE ROW INSERT OR DELETE OR UPDATE OF the opening balance, its date and its rate (tgtype 31 = 1
+  -- row + 2 before + 4 insert + 8 delete + 16 update).
   select string_agg(a.attname, ',' order by a.attname) into got
     from pg_catalog.pg_trigger g join pg_catalog.pg_attribute a on a.attrelid = g.tgrelid and a.attnum = any (g.tgattr)
-   where g.tgrelid = 'public.finance_accounts'::regclass and g.tgname = 'finance_period_lock' and g.tgtype = 23
+   where g.tgrelid = 'public.finance_accounts'::regclass and g.tgname = 'finance_period_lock' and g.tgtype = 31
      and g.tgenabled = 'O' and g.tgnargs = 0 and g.tgfoid = 'private.finance_period_lock()'::regprocedure;
-  if got is distinct from 'opening_balance,opening_date' then
-    raise exception 'finance_period_lock on finance_accounts fires on %, not opening_balance,opening_date', coalesce(got, 'nothing');
+  if got is distinct from 'opening_balance,opening_date,opening_rate' then
+    raise exception 'finance_period_lock on finance_accounts fires on %, not insert, delete and update of opening_balance,opening_date,opening_rate',
+      coalesce(got, 'nothing');
   end if;
 
   -- The documents listed here are the ones finance_sequences takes.
