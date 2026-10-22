@@ -51,6 +51,8 @@ const SELF_TOOLS = [
   'clockIn', 'clockOut', 'getMyAttendanceToday',
   // ... and keep their own goals and enrol in training.
   'saveGoal', 'removeGoal', 'enrolInTraining', 'withdrawFromTraining',
+  // ... and log their own hours and ask for, answer or cancel their own shift swaps.
+  'listShiftSwaps', 'listSwapOptions', 'logHours', 'requestShiftSwap', 'replyShiftSwap', 'cancelShiftSwap',
 ];
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -78,8 +80,8 @@ describe('who holds which leave tools', () => {
     // This owner has no linked employee record, so the clock tools (and "have I clocked in?") are not theirs.
     const held = Object.keys(tools(HR_VIEWER, hr()));
     expect(held.sort()).toEqual(
-      [...PEOPLE_TOOL_NAMES, 'previewLeave', 'previewOvertime', 'getAttendanceSettings', 'listLetterTemplates', ...PEOPLE_WRITE_TOOL_NAMES]
-        .filter((name) => !['clockIn', 'clockOut'].includes(name))
+      [...PEOPLE_TOOL_NAMES, 'previewLeave', 'previewOvertime', 'getAttendanceSettings', 'listLetterTemplates', 'listShiftSwaps', ...PEOPLE_WRITE_TOOL_NAMES]
+        .filter((name) => !['clockIn', 'clockOut', 'requestShiftSwap', 'replyShiftSwap', 'cancelShiftSwap'].includes(name))
         .sort(),
     );
     for (const name of ['decideLeave', 'decideTimeOff', 'setLeaveEntitlement']) expect(PEOPLE_WRITE_TOOL_NAMES).toContain(name);
@@ -114,7 +116,8 @@ describe('who holds which leave tools', () => {
     expect(Object.keys(member.write).sort()).toEqual([
       'applyLeave', 'applyTimeOff', 'cancelClaim', 'cancelLeaveRequest', 'cancelOvertime', 'cancelTimeOffRequest',
       'clockIn', 'clockOut', 'enrolInTraining', 'removeGoal', 'saveGoal', 'submitClaim', 'submitOvertime', 'withdrawFromTraining',
-    ]);
+      'cancelShiftSwap', 'logHours', 'replyShiftSwap', 'requestShiftSwap',
+    ].sort());
   });
 });
 
