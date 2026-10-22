@@ -53,10 +53,10 @@ import {
 } from '@/lib/hire/capabilities';
 import { isPdf, removeCv, signedCvUrl, storeCv } from '@/lib/hire/cv-store';
 import type { Removal } from '@/lib/hire/deletion';
-import { buildPoolPicker, type PoolPicker } from '@/lib/hire/lists';
-import { PICKER_FAILED } from '@/lib/hire/pool';
+import { cleanSearchName, readPoolPicker } from '@/lib/hire/candidate-search';
+import type { PickerPerson } from '@/lib/hire/lists';
+import { PICKER_FAILED, POOL_SEARCH_MAX } from '@/lib/hire/pool';
 import { careersPath } from '@/lib/hire/public-careers';
-import { createSupabaseHireData } from '@/lib/hire/supabase';
 import { createClient } from '@/lib/supabase/server';
 import { serviceClient } from '@/lib/supabase/service';
 
@@ -514,16 +514,19 @@ export async function moveToPipelineAction(input: unknown): Promise<CapResult<Mo
 }
 
 /**
- * The people the "Add to Pool" picker offers: everyone on file who is not in
- * the pool. Only for someone who may edit, read with their own client inside
- * their own workspace, when they open the picker. Names, headlines, places,
- * skills and sources: never an email or a phone number. Nothing is changed.
+ * The people the "Add to Pool" picker offers for what was typed: up to 50 on
+ * file who are not in the pool, whose name holds the text, newest first (the
+ * newest 50 for an empty box), and `more` when there are more. Only for someone
+ * who may edit, read with their own client inside their own workspace. Names,
+ * headlines, places, skills and sources: never an email or a phone number.
+ * Nothing is changed.
  */
-export async function listPoolPickerAction(): Promise<CapResult<PoolPicker>> {
+export async function searchPoolPickerAction(query: unknown): Promise<CapResult<{ people: PickerPerson[]; more: boolean }>> {
   const ctx = await writeCtx();
   if (!ctx) return FORBIDDEN;
+  const text = cleanSearchName(typeof query === 'string' ? query : '').slice(0, POOL_SEARCH_MAX).trim();
   try {
-    return { ok: true, data: await buildPoolPicker(createSupabaseHireData(ctx.client, ctx.orgId)) };
+    return { ok: true, data: await readPoolPicker(ctx.client, ctx.orgId, text) };
   } catch (error) {
     console.error('[hire/pool-picker] the read failed:', codeOf(error));
     return { ok: false, error: PICKER_FAILED };

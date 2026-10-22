@@ -7,6 +7,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { ZERO_WIDTH, escapeRegex } from './namesakes';
 import { HIRE_READ_CAP } from './types';
+import type { PickerPerson } from './lists';
 import type { Candidate, CandidateSearch, CandidateSearchResult, HireData } from './types';
 
 /** How many matches one lookup returns. More than this and the answer says `more`. */
@@ -29,6 +30,36 @@ const cleaned = cleanSearchName;
  * name. Every sign a pattern reads specially is escaped, so `%`, `_`, `*` or `.` in a name are only themselves.
  */
 export const searchPattern = (text: string) => escapeRegex(cleaned(text));
+
+/** How many people the "Add to pool" picker shows for one search. */
+export const POOL_PICKER_LIMIT = 50;
+
+/** The columns the picker reads: who someone is, never how to reach them. */
+const PICKER_COLUMNS = 'id,name,headline,location,skills,source';
+
+/**
+ * The people the "Add to pool" picker offers for a search: not in the pool, newest on file first, at most
+ * POOL_PICKER_LIMIT, whose name holds the text (any letter case). A blank text: the newest ones. `more` when there
+ * were more than that. The member's own client; a failed query throws.
+ */
+export async function readPoolPicker(
+  client: SupabaseClient,
+  orgId: string,
+  text: string,
+): Promise<{ people: PickerPerson[]; more: boolean }> {
+  let request = client.from('hire_candidates').select(PICKER_COLUMNS).eq('org_id', orgId).eq('pool_status', 'none');
+  if (cleaned(text)) request = request.filter('name', 'imatch', searchPattern(text));
+  const { data, error } = await request.order('created_at', { ascending: false }).limit(POOL_PICKER_LIMIT + 1);
+  if (error) throw error;
+  const rows = (data ?? []) as unknown as (Omit<PickerPerson, 'skills'> & { skills: string[] | null })[];
+  return {
+    // Each field is named: nothing else that rode along can reach the browser.
+    people: rows.slice(0, POOL_PICKER_LIMIT).map((p) => ({
+      id: p.id, name: p.name, headline: p.headline, location: p.location, skills: p.skills ?? [], source: p.source,
+    })),
+    more: rows.length > POOL_PICKER_LIMIT,
+  };
+}
 
 const NOTHING: CandidateSearchResult = { rows: [], more: false };
 

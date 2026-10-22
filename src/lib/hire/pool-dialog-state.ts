@@ -5,7 +5,7 @@
  * could not be tested. Pure.
  */
 import type { PickerPerson } from './lists';
-import { PICKER_FAILED, POOL_LABEL, POOL_SAVE_FAILED, isInPool, poolSearchText, type InPool } from './pool';
+import { PICKER_FAILED, PICKER_MORE, POOL_LABEL, POOL_SAVE_FAILED, isInPool, poolSearchText, type InPool } from './pool';
 import type { PoolStatus } from './types';
 
 // ─── what a change answered ──────────────────────────────────────────────────
@@ -39,7 +39,8 @@ export const boardPoolLine = (poolStatus: PoolStatus | undefined) =>
 
 export type PickerState =
   | { state: 'loading' }
-  | { state: 'ready'; people: PickerPerson[]; capped: boolean }
+  /** The server's answer, and the text it answered (what the "nobody matches" sentence names). */
+  | { state: 'ready'; people: PickerPerson[]; more: boolean; query: string }
   | { state: 'failed'; error: string };
 
 export const PICKER_LOADING: PickerState = { state: 'loading' };
@@ -47,14 +48,14 @@ export const PICKER_ROWS = 50;
 
 const textOrNull = (value: unknown) => (typeof value === 'string' ? value : null);
 
-/** The answer of the picker's action as a state. Only the six fields of a person are kept. */
-export function pickerFrom(result: unknown): PickerState {
+/** The answer of the picker's search for `query` as a state. Only the six fields of a person are kept. */
+export function pickerFrom(result: unknown, query: string): PickerState {
   const failed: PickerState = { state: 'failed', error: PICKER_FAILED };
   if (!result || typeof result !== 'object') return failed;
   const answer = result as { ok?: unknown; data?: unknown; error?: unknown };
   if (answer.ok === false && typeof answer.error === 'string' && answer.error) return { state: 'failed', error: answer.error };
   if (answer.ok !== true || !answer.data || typeof answer.data !== 'object') return failed;
-  const data = answer.data as { people?: unknown; capped?: unknown };
+  const data = answer.data as { people?: unknown; more?: unknown };
   if (!Array.isArray(data.people)) return failed;
   const people: PickerPerson[] = [];
   for (const row of data.people as unknown[]) {
@@ -69,30 +70,19 @@ export function pickerFrom(result: unknown): PickerState {
       source: textOrNull(p.source),
     });
   }
-  return { state: 'ready', people, capped: data.capped === true };
+  return { state: 'ready', people, more: data.more === true, query };
 }
 
-const has = (value: string | null, query: string) => (value ?? '').toLowerCase().includes(query);
-
-/** Any part of the name, the headline or one skill, in any letter case. A blank query keeps everyone. */
-export function pickerMatches(people: PickerPerson[], query: string): PickerPerson[] {
-  const q = query.trim().toLowerCase();
-  if (!q) return people;
-  return people.filter((p) => has(p.name, q) || has(p.headline, q) || p.skills.some((skill) => has(skill, q)));
-}
-
-/** What the picker's list shows: the rows drawn, the count line under them, or the one sentence that replaces them. */
-export function pickerView(people: PickerPerson[], query: string): { rows: PickerPerson[]; line: string | null; empty: string | null } {
-  if (people.length === 0) return { rows: [], line: null, empty: 'Everyone on file is already in the talent pool.' };
-  const matches = pickerMatches(people, query);
-  if (matches.length === 0) return { rows: [], line: null, empty: `No one matches “${query.trim()}”.` };
-  return {
-    rows: matches.slice(0, PICKER_ROWS),
-    line: matches.length > PICKER_ROWS
-      ? `Showing ${PICKER_ROWS} of ${matches.length.toLocaleString('en-US')}. Type to narrow the list.`
-      : null,
-    empty: null,
-  };
+/**
+ * What the picker's list shows for the server's answer to `query`: the rows (the server already matched the name;
+ * nothing is filtered here), the line under them, or the one sentence that replaces them.
+ */
+export function pickerView(people: PickerPerson[], more: boolean, query: string): { rows: PickerPerson[]; line: string | null; empty: string | null } {
+  const asked = query.trim();
+  if (people.length === 0) {
+    return { rows: [], line: null, empty: asked ? `No one outside the pool matches “${asked}”.` : 'Everyone on file is already in the talent pool.' };
+  }
+  return { rows: people.slice(0, PICKER_ROWS), line: more || people.length > PICKER_ROWS ? PICKER_MORE : null, empty: null };
 }
 
 /** Headline and place, on one line. */

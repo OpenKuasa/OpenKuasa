@@ -1,7 +1,7 @@
 // tests/hire-pool.test.ts
 import { describe, expect, it } from 'vitest';
 import {
-  PICKER_CAPPED, PICKER_FAILED, PIPELINE_CARD_DETAIL, POOL_LABEL, POOL_MEANING, POOL_NOT_SENT, POOL_READ_CAPPED, POOL_SAVE_FAILED,
+  PICKER_FAILED, PICKER_MORE, PIPELINE_CARD_DETAIL, POOL_LABEL, POOL_MEANING, POOL_NOT_SENT, POOL_READ_CAPPED, POOL_SAVE_FAILED,
   POOL_SEARCH_MAX, POOL_STATUSES, isInPool, isPoolStatus, matchesPoolSearch, movedMessage, pipelineCardTitle, poolCardDetail,
   poolCardTitle, poolChangedMessage, poolFooter, poolNoMatch, poolRefusal, poolSearchText,
 } from '@/lib/hire/pool';
@@ -116,9 +116,9 @@ describe('the pool table\'s search', () => {
     expect(line(51)).toBe('Showing the newest 50 of 51 people who match “aina”. Type more to narrow it down.');
     expect(poolNoMatch('aina')).toBe('No one in the talent pool matches “aina”.');
   });
-  it('has the two lines for the read limit', () => {
+  it('has the lines for the read limit and the picker\'s cut', () => {
     expect(POOL_READ_CAPPED).toBe('Only the newest 1,000 pool members are read, so someone put on file long ago may be missing from this list and from search.');
-    expect(PICKER_CAPPED).toBe('Only the newest 1,000 people on file are listed here, so someone added long ago may be missing.');
+    expect(PICKER_MORE).toBe('More people match than are shown. Type more of the name.');
     expect(PICKER_FAILED).toBe('The list could not be loaded. Check your connection and try again.');
   });
 });

@@ -4,11 +4,12 @@ import { useEffect, useId, useRef, useState, useSyncExternalStore, useTransition
 import { usePathname, useRouter } from 'next/navigation';
 import { AlertDialog, Dialog } from 'radix-ui';
 import { MoreHorizontal, Plus, Search, X } from 'lucide-react';
-import { listPoolPickerAction, moveToPipelineAction, setPoolStatusAction } from '@/app/(app)/hire/actions';
+import { moveToPipelineAction, searchPoolPickerAction, setPoolStatusAction } from '@/app/(app)/hire/actions';
 import { DELETION_NOTICE_ID, mayClose } from '@/lib/hire/delete-dialog-state';
+import { SEARCH_PAUSE_MS, latestOnly } from '@/lib/hire/latest-answer';
 import type { PickerPerson } from '@/lib/hire/lists';
 import {
-  PICKER_CAPPED, POOL_LABEL, POOL_MEANING, POOL_NOT_SENT, POOL_SEARCH_MAX, POOL_STATUSES, isInPool, type InPool,
+  POOL_LABEL, POOL_MEANING, POOL_NOT_SENT, POOL_SEARCH_MAX, POOL_STATUSES, isInPool, type InPool,
 } from '@/lib/hire/pool';
 import {
   CHOOSE_A_JOB, NO_JOBS, PICKER_LOADING, REMOVE_BODY, addInput, addLabel, addName, addToPoolInput, addedLabel, boxSent,
@@ -287,20 +288,30 @@ function PickerBody({
     // Focus starts in the search field (the dialog itself is told not to pick the first control).
     searchField.current?.focus();
   }, []);
+  /** Only the answer to the newest search is used: an older one that comes back late is dropped. */
+  const latest = useRef(latestOnly());
+  /** True from the first search sent: later ones wait for a pause in typing. */
+  const asked = useRef(false);
+  const [searching, setSearching] = useState(false);
   useEffect(() => {
-    let live = true;
-    listPoolPickerAction().then(
-      (result) => {
-        if (live) setState(pickerFrom(result));
-      },
-      () => {
-        if (live) setState(pickerFrom(null));
-      },
-    );
-    return () => {
-      live = false;
-    };
-  }, [attempt]);
+    const text = query;
+    const timer = window.setTimeout(() => {
+      asked.current = true;
+      const n = latest.current.begin();
+      setSearching(true);
+      const settle = (result: unknown) => {
+        if (!latest.current.isCurrent(n)) return;
+        setSearching(false);
+        setState(pickerFrom(result, text));
+      };
+      searchPoolPickerAction(text).then(settle, () => settle(null));
+    }, asked.current ? SEARCH_PAUSE_MS : 0);
+    return () => window.clearTimeout(timer);
+  }, [query, attempt]);
+  useEffect(() => {
+    const questions = latest.current;
+    return () => questions.cancel();
+  }, []);
 
   const without = (map: Record<string, string>, id: string) => Object.fromEntries(Object.entries(map).filter(([key]) => key !== id));
 
@@ -336,7 +347,7 @@ function PickerBody({
     });
   }
 
-  const view = state.state === 'ready' ? pickerView(state.people, query) : null;
+  const view = state.state === 'ready' ? pickerView(state.people, state.more, state.query) : null;
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-3">
       <div className="flex flex-col gap-1">
@@ -357,19 +368,18 @@ function PickerBody({
         <p id={meaningId} className={HELP}>{POOL_MEANING[status]}</p>
       </div>
       <div className="flex flex-col gap-1">
-        <label htmlFor={searchId} className="text-sm font-medium">Search people</label>
+        <label htmlFor={searchId} className="text-sm font-medium">Search by name</label>
         <input
           ref={searchField}
           id={searchId}
           type="search"
           value={query}
           autoComplete="off"
-          placeholder="Name, headline or skill"
+          maxLength={POOL_SEARCH_MAX}
           className={FIELD_CLASS}
           onChange={(event) => setQuery(event.target.value)}
         />
       </div>
-      {state.state === 'ready' && state.capped ? <p className={HELP}>{PICKER_CAPPED}</p> : null}
       <div className="min-h-24 flex-1 overflow-y-auto rounded-md border">
         {state.state === 'loading' ? (
           <p role="status" className="p-3 text-sm text-muted-foreground">Loading people…</p>
@@ -428,8 +438,10 @@ function PickerBody({
       </div>
       {/* For a screen reader only: the row already shows "Added as …", and the notice line shows the sentence once the dialog closes. */}
       <p aria-live="polite" className="sr-only">{lastSaid}</p>
-      {/* Always in the page, so "Showing 50 of 312…" is read out when it changes. */}
-      <p aria-live="polite" className={cn(HELP, !view?.line && 'sr-only')}>{view?.line ?? ''}</p>
+      {/* Always in the page, so "Searching…" and "More people match…" are read out when they change. */}
+      <p aria-live="polite" className={cn(HELP, !(searching && view) && !view?.line && 'sr-only')}>
+        {searching && view ? 'Searching…' : view?.line ?? ''}
+      </p>
       <div className="flex justify-end">
         <Dialog.Close asChild>
           {/* While an add is being saved it stays focusable and says it is waiting; the dialog ignores the press. */}

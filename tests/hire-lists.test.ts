@@ -2,7 +2,6 @@
 import { describe, expect, it } from 'vitest';
 import {
   buildApplicationsModel,
-  buildPoolPicker,
   buildBoardModel,
   buildCareersModel,
   buildInterviewsModel,
@@ -528,33 +527,6 @@ describe('talent pool', () => {
       expect((await buildPoolModel(full)).readCapped).toBe(true);
       const under: HireData = { ...EMPTY, listCandidates: async () => Array.from({ length: 999 }, (_, i) => person(`c${i}`, { pool_status: 'none' })) };
       expect((await buildPoolModel(under)).readCapped).toBe(false);
-    });
-  });
-
-  describe('the picker\'s read', () => {
-    it('lists the people who are not in the pool, newest on file first, with no contact details', async () => {
-      const picker = await buildPoolPicker({
-        ...EMPTY,
-        listCandidates: async () => [
-          { ...cand('c1', 'none'), name: 'Kamal Ariffin', email: 'kamal@example.com', phone: '+60 12-345 6789', headline: 'Driver', location: 'Klang', skills: ['GDL'], source: 'Referral' },
-          cand('c2', 'passive'),
-          cand('c3', 'none'),
-        ],
-      });
-      expect(picker).toEqual({
-        people: [
-          { id: 'c1', name: 'Kamal Ariffin', headline: 'Driver', location: 'Klang', skills: ['GDL'], source: 'Referral' },
-          { id: 'c3', name: 'c3', headline: null, location: null, skills: [], source: null },
-        ],
-        capped: false,
-      });
-      expect(JSON.stringify(picker)).not.toMatch(/kamal@example\.com|345 6789|email|phone|pool_status/);
-    });
-    it('says when the read came back full', async () => {
-      const full = Array.from({ length: 1000 }, (_, i) => cand(`c${i}`, i % 2 ? 'none' : 'available'));
-      expect((await buildPoolPicker({ ...EMPTY, listCandidates: async () => full })).capped).toBe(true);
-      expect((await buildPoolPicker({ ...EMPTY, listCandidates: async () => full.slice(1) })).capped).toBe(false);
-      expect(await buildPoolPicker(EMPTY)).toEqual({ people: [], capped: false });
     });
   });
 });

@@ -1,6 +1,7 @@
 // tests/hire-capped-lists.test.ts
 import { describe, expect, it } from 'vitest';
-import { CANDIDATE_COLUMNS, readPool } from '@/lib/hire/candidate-search';
+import { CANDIDATE_COLUMNS, readPool, readPoolPicker } from '@/lib/hire/candidate-search';
+import { latestOnly } from '@/lib/hire/latest-answer';
 import { buildPoolModel } from '@/lib/hire/lists';
 import { HIRE_READ_CAP, type Candidate, type HireData } from '@/lib/hire/types';
 
@@ -96,5 +97,63 @@ describe('buildPoolModel with the provider\'s own pool read', () => {
     const model = await buildPoolModel(withPool([person(1), person(2, { pool_status: 'available' })]));
     expect(model.rows.map((r) => r.id)).toEqual(['c2']);
     expect(model.size).toBe(1);
+  });
+});
+
+// ─── 2. the "Add to pool" picker asks the server ─────────────────────────────
+
+describe('readPoolPicker', () => {
+  it('asks for the newest people not in the pool whose name matches, one more than it keeps, with no contact columns', async () => {
+    const { client, queries } = standIn(() => ({ data: [] }));
+    await readPoolPicker(client, 'org1', ' D.J. 50%* ');
+    const [q] = queries;
+    expect(q.table).toBe('hire_candidates');
+    expect(has(q, 'select', 'id,name,headline,location,skills,source')).toBe(true);
+    expect(has(q, 'eq', 'org_id', 'org1')).toBe(true);
+    expect(has(q, 'eq', 'pool_status', 'none')).toBe(true);
+    expect(has(q, 'filter', 'name', 'imatch', 'D\\.J\\. 50%\\*')).toBe(true);
+    expect(has(q, 'order', 'created_at', { ascending: false })).toBe(true);
+    expect(has(q, 'limit', 51)).toBe(true);
+    expect(JSON.stringify(q.calls)).not.toMatch(/email|phone|ilike|"or"/);
+  });
+  it('with no name, asks for the newest 50 not in the pool', async () => {
+    for (const blank of ['', '   ', '\u200b']) {
+      const { client, queries } = standIn(() => ({ data: [] }));
+      await readPoolPicker(client, 'org1', blank);
+      expect(queries[0].calls.some((c) => c[0] === 'filter'), JSON.stringify(blank)).toBe(false);
+      expect(has(queries[0], 'limit', 51)).toBe(true);
+    }
+  });
+  it('keeps 50 and says when there were more; keeps only the six fields of a person', async () => {
+    const rows = Array.from({ length: 51 }, (_, i) => ({ id: `c${i}`, name: `P ${i}`, headline: null, location: null, skills: null, source: null, email: 'x@example.com' }));
+    const many = await readPoolPicker(standIn(() => ({ data: rows })).client, 'org1', 'P');
+    expect(many.people).toHaveLength(50);
+    expect(many.more).toBe(true);
+    expect(many.people[0]).toEqual({ id: 'c0', name: 'P 0', headline: null, location: null, skills: [], source: null });
+    const few = await readPoolPicker(standIn(() => ({ data: rows.slice(0, 50) })).client, 'org1', 'P');
+    expect(few).toMatchObject({ more: false });
+    expect(few.people).toHaveLength(50);
+  });
+  it('throws when the query fails', async () => {
+    await expect(readPoolPicker(standIn(() => ({ error: { code: '42501' } })).client, 'org1', 'x')).rejects.toEqual({ code: '42501' });
+  });
+});
+
+describe('latestOnly', () => {
+  it('lets only the newest question\'s answer through, whatever order the answers come back in', () => {
+    const latest = latestOnly();
+    const first = latest.begin();
+    const second = latest.begin();
+    expect(latest.isCurrent(second)).toBe(true);
+    expect(latest.isCurrent(first)).toBe(false);
+    const third = latest.begin();
+    expect(latest.isCurrent(second)).toBe(false);
+    expect(latest.isCurrent(third)).toBe(true);
+  });
+  it('can drop every question still out, as when the picker closes', () => {
+    const latest = latestOnly();
+    const asked = latest.begin();
+    latest.cancel();
+    expect(latest.isCurrent(asked)).toBe(false);
   });
 });

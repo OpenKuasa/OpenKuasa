@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   CHOOSE_A_JOB, NO_JOBS, PICKER_LOADING, PICKER_ROWS, REMOVE_BODY, SHORTLISTED_NOTE, addInput, addLabel, addName, addToPoolInput,
   addedLabel, boardPoolLine, boxSent, changeResult, followAddress, fromOutside, searchBox, jobOption, moveBody, moveInput, moveLabel, moveTitle, nextAddFocus, personLine,
-  pickerFrom, pickerMatches, pickerOpenAfter, pickerView, removeInput, removeLabel, removeTitle, searchHref, shortlistedNote, statusChangeInput,
+  pickerFrom, pickerOpenAfter, pickerView, removeInput, removeLabel, removeTitle, searchHref, shortlistedNote, statusChangeInput,
 } from '@/lib/hire/pool-dialog-state';
 
 const A = '11111111-1111-4111-8111-111111111111';
@@ -55,35 +55,29 @@ describe('the picker', () => {
     expect(PICKER_LOADING).toEqual({ state: 'loading' });
     const FAILED = { state: 'failed', error: 'The list could not be loaded. Check your connection and try again.' };
     for (const odd of [null, undefined, 'x', {}, { ok: true }, { ok: true, data: {} }, { ok: true, data: { people: 'no' } }, { ok: true, data: { people: [{ id: 1, name: 'x' }] } }]) {
-      expect(pickerFrom(odd)).toEqual(FAILED);
+      expect(pickerFrom(odd, '')).toEqual(FAILED);
     }
-    expect(pickerFrom({ ok: false, error: 'You do not have permission to make changes here.' }))
+    expect(pickerFrom({ ok: false, error: 'You do not have permission to make changes here.' }, ''))
       .toEqual({ state: 'failed', error: 'You do not have permission to make changes here.' });
   });
-  it('keeps only the six fields of a person, whatever else rode along', () => {
-    const state = pickerFrom({ ok: true, data: { people: [{ ...people[0], email: 'z@example.com', phone: '012' }], capped: true } });
-    expect(state).toEqual({ state: 'ready', people: [people[0]], capped: true });
-    expect(pickerFrom({ ok: true, data: { people: [] } })).toEqual({ state: 'ready', people: [], capped: false });
+  it('keeps only the six fields of a person, whatever else rode along, and the text the answer was for', () => {
+    const state = pickerFrom({ ok: true, data: { people: [{ ...people[0], email: 'z@example.com', phone: '012' }], more: true } }, 'zar');
+    expect(state).toEqual({ state: 'ready', people: [people[0]], more: true, query: 'zar' });
+    expect(pickerFrom({ ok: true, data: { people: [] } }, '')).toEqual({ state: 'ready', people: [], more: false, query: '' });
   });
-  it('narrows by any part of the name, the headline or a skill, in any letter case', () => {
-    expect(pickerMatches(people, 'ZARINA').map((p) => p.id)).toEqual(['1']);
-    expect(pickerMatches(people, 'driver').map((p) => p.id)).toEqual(['2']);
-    expect(pickerMatches(people, 'forklift').map((p) => p.id)).toEqual(['1', '2']);
-    expect(pickerMatches(people, '  ').map((p) => p.id)).toEqual(['1', '2', '3']);
-    // The picker does not search by place: that is the pool table's search.
-    expect(pickerMatches(people, 'klang')).toEqual([]);
-  });
-  it('draws at most 50 rows and says how many there are', () => {
-    const many = Array.from({ length: 312 }, (_, i) => person(String(i), `Person ${i}`));
+  it('draws the rows the server sent, at most 50, and says when more match', () => {
+    const many = Array.from({ length: 60 }, (_, i) => person(String(i), `Person ${i}`));
     expect(PICKER_ROWS).toBe(50);
-    expect(pickerView(many, '')).toMatchObject({ line: 'Showing 50 of 312. Type to narrow the list.', empty: null });
-    expect(pickerView(many, '').rows).toHaveLength(50);
-    expect(pickerView(many.slice(0, 50), '')).toMatchObject({ line: null, empty: null });
-    expect(pickerView(many, 'person 31').rows.map((p) => p.name)).toEqual(['Person 31', 'Person 310', 'Person 311']);
+    expect(pickerView(many, true, '')).toMatchObject({ line: 'More people match than are shown. Type more of the name.', empty: null });
+    expect(pickerView(many, true, '').rows).toHaveLength(50);
+    expect(pickerView(many.slice(0, 50), false, '')).toMatchObject({ line: null, empty: null });
+    // Nothing is filtered here: the server already matched the name.
+    expect(pickerView(people, false, 'zarina').rows.map((p) => p.id)).toEqual(['1', '2', '3']);
   });
   it('says so when there is nobody to add, and when nobody matches', () => {
-    expect(pickerView([], '')).toEqual({ rows: [], line: null, empty: 'Everyone on file is already in the talent pool.' });
-    expect(pickerView(people, ' nobody ')).toEqual({ rows: [], line: null, empty: 'No one matches “nobody”.' });
+    expect(pickerView([], false, '')).toEqual({ rows: [], line: null, empty: 'Everyone on file is already in the talent pool.' });
+    expect(pickerView([], false, '   ')).toEqual({ rows: [], line: null, empty: 'Everyone on file is already in the talent pool.' });
+    expect(pickerView([], false, ' nobody ')).toEqual({ rows: [], line: null, empty: 'No one outside the pool matches “nobody”.' });
   });
   it('puts headline and place on one line', () => {
     expect(personLine(people[0])).toBe('Warehouse Supervisor · Klang');

@@ -14,6 +14,8 @@ const ctl = vi.hoisted(() => ({
   reads: [] as { client: unknown; orgId: string }[],
   candidates: [] as unknown[],
   readThrows: null as unknown,
+  picker: [] as { client: unknown; orgId: string; text: string }[],
+  pickerAnswer: { people: [] as unknown[], more: false },
 }));
 
 vi.mock('next/cache', () => ({ revalidatePath: (path: string) => { ctl.revalidated.push(path); } }));
@@ -31,6 +33,17 @@ vi.mock('@/lib/hire/supabase', () => ({
     };
   },
 }));
+vi.mock('@/lib/hire/candidate-search', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/hire/candidate-search')>();
+  return {
+    ...actual,
+    readPoolPicker: async (client: unknown, orgId: string, text: string) => {
+      ctl.picker.push({ client, orgId, text });
+      if (ctl.readThrows) throw ctl.readThrows;
+      return ctl.pickerAnswer;
+    },
+  };
+});
 vi.mock('@/lib/hire/capabilities', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/hire/capabilities')>();
   const record = (fn: string) => async (ctx: { orgId: string; client: unknown }, input: unknown) => {
@@ -40,7 +53,7 @@ vi.mock('@/lib/hire/capabilities', async (importOriginal) => {
   return { ...actual, setPoolStatus: record('setPoolStatus'), moveToPipeline: record('moveToPipeline') };
 });
 
-const { listPoolPickerAction, moveToPipelineAction, setPoolStatusAction } = await import('@/app/(app)/hire/actions');
+const { searchPoolPickerAction, moveToPipelineAction, setPoolStatusAction } = await import('@/app/(app)/hire/actions');
 
 const ID = '44444444-4444-4444-8444-444444444444';
 const JOB = '55555555-5555-4555-8555-555555555555';
@@ -50,10 +63,6 @@ const EVERY_PATH = [
   '/hire/interviews', '/hire/settings', '/hire/talent-pool',
 ];
 const CHANGED = { ok: true, data: { id: ID, name: 'Aina Rahman', from: 'none', to: 'available', message: 'Added Aina Rahman to the talent pool as Available.' } };
-const person = (id: string, pool_status: string, over: Record<string, unknown> = {}) => ({
-  id, name: `Person ${id}`, email: `${id}@example.com`, phone: '+60 12-345 6789', headline: 'Driver', location: 'Klang',
-  skills: ['GDL'], source: 'Referral', pool_status, created_at: '2026-10-01T00:00:00Z', ...over,
-});
 
 beforeEach(() => {
   ctl.viewer = { orgId: 'org1', role: 'member', isDemo: false };
@@ -63,6 +72,8 @@ beforeEach(() => {
   ctl.reads = [];
   ctl.candidates = [];
   ctl.readThrows = null;
+  ctl.picker = [];
+  ctl.pickerAnswer = { people: [], more: false };
 });
 
 const CHANGES = [
@@ -106,44 +117,34 @@ describe('the two change actions', () => {
   });
 });
 
-describe('listPoolPickerAction', () => {
+describe('searchPoolPickerAction', () => {
   it('refuses a viewer and the demo workspace before anything is read', async () => {
     for (const viewer of [
       { orgId: 'org1', role: 'viewer', isDemo: false },
       { orgId: 'org1', role: 'owner', isDemo: true },
     ]) {
       ctl.viewer = viewer;
-      expect(await listPoolPickerAction()).toEqual(FORBIDDEN);
+      expect(await searchPoolPickerAction('aina')).toEqual(FORBIDDEN);
     }
-    expect(ctl.reads).toEqual([]);
+    expect(ctl.picker).toEqual([]);
   });
-  it('lists the people outside the pool, read with the member\'s own client inside their workspace, with no email or phone', async () => {
-    ctl.candidates = [person('c1', 'none'), person('c2', 'passive'), person('c3', 'none', { headline: null, location: null, skills: [], source: null })];
-    const result = await listPoolPickerAction();
-    expect(result).toEqual({
-      ok: true,
-      data: {
-        people: [
-          { id: 'c1', name: 'Person c1', headline: 'Driver', location: 'Klang', skills: ['GDL'], source: 'Referral' },
-          { id: 'c3', name: 'Person c3', headline: null, location: null, skills: [], source: null },
-        ],
-        capped: false,
-      },
-    });
-    expect(ctl.reads).toEqual([{ client: { marker: 'session' }, orgId: 'org1' }]);
-    expect(JSON.stringify(result)).not.toMatch(/@example\.com|345 6789|email|phone|pool_status/);
+  it('asks the database with the member\'s own client inside their workspace, and passes on the answer', async () => {
+    const people = [{ id: 'c1', name: 'Aina Rahman', headline: 'Driver', location: 'Klang', skills: ['GDL'], source: 'Referral' }];
+    ctl.pickerAnswer = { people, more: true };
+    expect(await searchPoolPickerAction('  Aina ')).toEqual({ ok: true, data: { people, more: true } });
+    expect(ctl.picker).toEqual([{ client: { marker: 'session' }, orgId: 'org1', text: 'Aina' }]);
     expect(ctl.revalidated).toEqual([]);
   });
-  it('says when the read came back with its full 1,000 rows', async () => {
-    ctl.candidates = Array.from({ length: 1000 }, (_, i) => person(`c${i}`, 'none'));
-    expect(await listPoolPickerAction()).toMatchObject({ ok: true, data: { capped: true } });
-    ctl.candidates = ctl.candidates.slice(1);
-    expect(await listPoolPickerAction()).toMatchObject({ ok: true, data: { capped: false } });
+  it('takes anything that is not text as an empty search, and cuts a long one to 80 characters', async () => {
+    for (const odd of [undefined, null, 42, { name: 'x' }, ['x']]) await searchPoolPickerAction(odd);
+    expect(ctl.picker.map((p) => p.text)).toEqual(['', '', '', '', '']);
+    await searchPoolPickerAction('z'.repeat(200));
+    expect(ctl.picker.at(-1)?.text).toHaveLength(80);
   });
   it('answers with the sentence and logs only a code when the read fails', async () => {
     const said = vi.spyOn(console, 'error').mockImplementation(() => {});
     ctl.readThrows = Object.assign(new Error('Person c1 could not be read'), { code: '57014' });
-    expect(await listPoolPickerAction()).toEqual({ ok: false, error: 'The list could not be loaded. Check your connection and try again.' });
+    expect(await searchPoolPickerAction('Person')).toEqual({ ok: false, error: 'The list could not be loaded. Check your connection and try again.' });
     expect(JSON.stringify(said.mock.calls)).not.toContain('Person c1');
     said.mockRestore();
   });

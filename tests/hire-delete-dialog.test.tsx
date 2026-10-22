@@ -32,7 +32,7 @@ vi.mock('@/app/(app)/hire/actions', () => ({
   getDeletionSummaryAction: mocks.action,
   setPoolStatusAction: mocks.action,
   moveToPipelineAction: mocks.action,
-  listPoolPickerAction: mocks.action,
+  searchPoolPickerAction: mocks.action,
 }));
 vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh: mocks.refresh, replace: () => {} }), usePathname: () => '/hire/talent-pool' }));
 vi.mock('@/lib/auth/viewer', () => ({ getViewer: async () => mocks.viewer }));

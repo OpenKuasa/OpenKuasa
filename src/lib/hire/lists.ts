@@ -580,19 +580,3 @@ export async function buildPoolModel(data: HireData, search?: string | null): Pr
 export type PickerPerson = {
   id: string; name: string; headline: string | null; location: string | null; skills: string[]; source: string | null;
 };
-export type PoolPicker = {
-  people: PickerPerson[];
-  /** True when the read came back with its full HIRE_READ_CAP candidates: someone added long ago may be missing. */
-  capped: boolean;
-};
-
-/** Everyone on file who is not in the pool, newest on file first. Each field is named: an email or a phone can never ride along. */
-export async function buildPoolPicker(data: HireData): Promise<PoolPicker> {
-  const candidates = await data.listCandidates();
-  return {
-    people: candidates
-      .filter((c) => c.pool_status === 'none')
-      .map((c) => ({ id: c.id, name: c.name, headline: c.headline, location: c.location, skills: c.skills, source: c.source })),
-    capped: candidates.length >= HIRE_READ_CAP,
-  };
-}

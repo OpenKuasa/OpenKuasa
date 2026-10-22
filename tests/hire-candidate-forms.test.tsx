@@ -42,7 +42,7 @@ vi.mock('@/app/(app)/hire/actions', () => ({
   getDeletionSummaryAction: mocks.action,
   setPoolStatusAction: mocks.action,
   moveToPipelineAction: mocks.action,
-  listPoolPickerAction: mocks.action,
+  searchPoolPickerAction: mocks.action,
   scheduleInterviewAction: mocks.action,
   recordPastInterviewAction: mocks.action,
   rescheduleInterviewAction: mocks.action,
