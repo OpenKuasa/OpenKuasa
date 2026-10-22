@@ -1,282 +1,276 @@
-import {
-  ArrowLeftRight,
-  ChartColumn,
-  Coins,
-  Download,
-  Gauge,
-  Landmark,
-  PieChart,
-  TrendingUp,
-} from 'lucide-react';
+import Link from 'next/link';
+import { ArrowLeftRight, ChartColumn, Coins, Gauge, Landmark, PieChart, TrendingUp } from 'lucide-react';
 import { ScreenContainer } from '@/components/screen/screen-container';
 import { PageHeader } from '@/components/screen/page-header';
 import { BentoGrid, BentoCard, BentoStat } from '@/components/bento/bento';
-import {
-  AreaTrend,
-  BarGroup,
-  DonutStat,
-  RadialGauge,
-  Sparkline,
-  type Series,
-  type Slice,
-} from '@/components/charts';
+import { AreaTrend, BarGroup, DonutStat, RadialGauge, Sparkline, type Series, type Slice } from '@/components/charts';
 import { Button } from '@/components/ui/button';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { getViewer, hasSupabaseEnv } from '@/lib/auth/viewer';
+import { createClient } from '@/lib/supabase/server';
+import { todayInMalaysia } from '@/lib/people/dates';
+import { rm, rmShort } from '@/lib/finance/format';
+import { displayDate } from '@/lib/finance/view-helpers';
+import { AGE_BUCKETS } from '@/lib/finance/reports';
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table';
+  DASHBOARD_PERIODS,
+  buildDashboardModel,
+  parseDashboardPeriod,
+  type DashboardInputs,
+  type DashboardModel,
+} from '@/lib/finance/dashboard';
+import { loadDashboardInputs } from '@/lib/finance/dashboard-data';
 import { cn } from '@/lib/utils';
+import { SAMPLE_BANK_ACCOUNTS, SAMPLE_BANK_TRANSACTIONS } from './banking-sample';
+import { SAMPLE_LEDGER_ACCOUNTS, SAMPLE_LEDGER_LINES, SAMPLE_PAYABLES, SAMPLE_RECEIVABLES } from './ledger-sample';
+import { SAMPLE_TODAY } from './sales-sample';
 
-/* ---- mock data (Rimba Ventures Sdn Bhd · FY2026) ------------------ */
-
-/** Monthly closing bank balance + net cash (RM k). Distinct from the
- *  Overview's weekly cash-in/out view. */
-const CASH_TREND = [
-  { label: 'Mar', balance: 62.0, net: 4.2 },
-  { label: 'Apr', balance: 66.0, net: 4.0 },
-  { label: 'May', balance: 68.5, net: 2.5 },
-  { label: 'Jun', balance: 72.0, net: 3.5 },
-  { label: 'Jul', balance: 75.5, net: 3.5 },
-  { label: 'Aug', balance: 78.0, net: 2.5 },
-  { label: 'Sep', balance: 81.6, net: 3.6 },
-  { label: 'Oct', balance: 84.2, net: 2.6 },
-];
 const CASH_SERIES: Series[] = [
-  { key: 'balance', label: 'Closing balance (RM k)', color: 'var(--chart-1)' },
-  { key: 'net', label: 'Net cash (RM k)', color: 'var(--chart-2)' },
-];
-
-/** Income vs expense, monthly (RM k). Oct ties to Revenue 42.8 / Expense 18.4. */
-const PL_TREND = [
-  { label: 'Mar', income: 36.0, expense: 20.0 },
-  { label: 'Apr', income: 40.0, expense: 21.0 },
-  { label: 'May', income: 38.0, expense: 22.0 },
-  { label: 'Jun', income: 44.0, expense: 23.0 },
-  { label: 'Jul', income: 46.0, expense: 22.0 },
-  { label: 'Aug', income: 42.0, expense: 21.0 },
-  { label: 'Sep', income: 48.0, expense: 24.0 },
-  { label: 'Oct', income: 42.8, expense: 18.4 },
+  { key: 'balance', label: 'Closing balance (RM)', color: 'var(--chart-1)' },
+  { key: 'net', label: 'Net cash (RM)', color: 'var(--chart-2)' },
 ];
 const PL_SERIES: Series[] = [
   { key: 'income', label: 'Income', color: 'var(--chart-2)' },
   { key: 'expense', label: 'Expense', color: 'var(--chart-4)' },
 ];
+const SLICE_COLORS = ['var(--chart-1)', 'var(--chart-2)', 'var(--chart-5)', 'var(--chart-3)', 'var(--chart-4)', 'var(--muted-foreground)'];
 
-/** Expense breakdown, this month (RM k) — sums to 18.4 = Expenses MTD. */
-const EXPENSE_BREAKDOWN: Slice[] = [
-  { key: 'payroll', label: 'Payroll', value: 8.4, color: 'var(--chart-1)' },
-  { key: 'rent', label: 'Rent', value: 3.6, color: 'var(--chart-2)' },
-  { key: 'supplies', label: 'Supplies', value: 2.8, color: 'var(--chart-5)' },
-  { key: 'utilities', label: 'Utilities', value: 1.9, color: 'var(--chart-3)' },
-  { key: 'marketing', label: 'Marketing', value: 1.7, color: 'var(--chart-4)' },
-];
+const CANT_LOAD = "Couldn't load";
 
-/** AR/AP ageing buckets (RM k). AR sums to 16.9, AP to 9.3. */
-const AGEING = [
-  { label: 'Current', ar: 9.7, ap: 5.1 },
-  { label: '1–30d', ar: 4.2, ap: 2.2 },
-  { label: '31–60d', ar: 2.0, ap: 1.4 },
-  { label: '60d+', ar: 1.0, ap: 0.6 },
-];
-const AGEING_SERIES: Series[] = [
-  { key: 'ar', label: 'Receivable', color: 'var(--chart-2)' },
-  { key: 'ap', label: 'Payable', color: 'var(--chart-3)' },
-];
+function Unavailable() {
+  return <p className="text-sm text-muted-foreground">{CANT_LOAD}</p>;
+}
 
-type Account = { name: string; type: string; balance: string };
-/** Bank & cash accounts — sum to RM 84,200 = Cash Position. */
-const ACCOUNTS: Account[] = [
-  { name: 'Maybank Current', type: 'Bank', balance: 'RM 60,400' },
-  { name: 'CIMB Business', type: 'Bank', balance: 'RM 12,000' },
-  { name: 'Petty Cash', type: 'Cash', balance: 'RM 11,800' },
-];
+/** A change against the period before, as a chip: no chip when there is nothing to compare to. */
+function change(pct: number | null, goodWhen: 'up' | 'down') {
+  if (pct === null) return { delta: undefined, tone: 'flat' as const };
+  const text = `${pct > 0 ? '+' : pct < 0 ? '−' : ''}${Math.abs(pct)}%`;
+  if (pct === 0) return { delta: text, tone: 'flat' as const };
+  const good = goodWhen === 'up' ? pct > 0 : pct < 0;
+  return { delta: text, tone: good ? ('up' as const) : ('down' as const) };
+}
 
-type TxnTone = 'in' | 'out' | 'flat';
-type TxnStatus = 'Paid' | 'Cleared' | 'Sent' | 'To be paid' | 'Overdue';
-type Txn = {
-  date: string;
-  description: string;
-  reference: string;
-  amount: string;
-  tone: TxnTone;
-  status: TxnStatus;
-};
+/** The reads and today's date; null when the ledger could not be read. Without a database: the sample books. */
+async function loadInputs(): Promise<{ inputs: DashboardInputs; today: string } | null> {
+  if (!hasSupabaseEnv()) {
+    return {
+      inputs: {
+        lines: SAMPLE_LEDGER_LINES,
+        accounts: SAMPLE_LEDGER_ACCOUNTS,
+        receivables: SAMPLE_RECEIVABLES,
+        payables: SAMPLE_PAYABLES,
+        bankAccounts: SAMPLE_BANK_ACCOUNTS,
+        bankTransactions: SAMPLE_BANK_TRANSACTIONS,
+      },
+      today: SAMPLE_TODAY,
+    };
+  }
+  try {
+    const viewer = await getViewer();
+    const ctx = { client: await createClient(), orgId: viewer.orgId };
+    return { inputs: await loadDashboardInputs(ctx), today: todayInMalaysia(new Date()) };
+  } catch (error) {
+    console.error('[finance] the dashboard could not be read:', error);
+    return null;
+  }
+}
 
-const TRANSACTIONS: Txn[] = [
-  { date: '09 Oct', description: 'Payment received', reference: 'Aisyah Trading · INV-1042', amount: '+RM 1,240', tone: 'in', status: 'Paid' },
-  { date: '08 Oct', description: 'Supplier bill', reference: 'Lim Hardware · BILL-304', amount: '−RM 3,300', tone: 'out', status: 'To be paid' },
-  { date: '07 Oct', description: 'Invoice sent', reference: 'Zaki Enterprise · INV-1041', amount: 'RM 3,500', tone: 'flat', status: 'Sent' },
-  { date: '05 Oct', description: 'Expense · utilities', reference: 'TNB · Maybank Current', amount: '−RM 1,900', tone: 'out', status: 'Cleared' },
-  { date: '03 Oct', description: 'Payment received', reference: 'Lim Hardware · INV-1039', amount: '+RM 2,100', tone: 'in', status: 'Paid' },
-  { date: '01 Oct', description: 'Invoice overdue', reference: 'Nurul Boutique · INV-1040', amount: 'RM 4,200', tone: 'flat', status: 'Overdue' },
-];
+function PeriodLinks({ current }: { current: string }) {
+  return (
+    <nav aria-label="Period" className="flex flex-wrap gap-1 rounded-lg border p-0.5">
+      {DASHBOARD_PERIODS.map((p) => (
+        <Link
+          key={p.key}
+          href={`?period=${p.key}`}
+          aria-current={p.key === current ? 'page' : undefined}
+          className={cn(
+            'rounded-md px-2.5 py-1 text-sm whitespace-nowrap',
+            p.key === current ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted',
+          )}
+        >
+          {p.label}
+        </Link>
+      ))}
+    </nav>
+  );
+}
 
-const STATUS_PILL: Record<TxnStatus, string> = {
-  Paid: 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400',
-  Cleared: 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400',
-  Sent: 'bg-amber-500/15 text-amber-600 dark:text-amber-400',
-  'To be paid': 'bg-amber-500/15 text-amber-600 dark:text-amber-400',
-  Overdue: 'bg-red-500/15 text-red-600 dark:text-red-400',
-};
+function Header({ periodKey, label }: { periodKey: string; label: string }) {
+  return (
+    <PageHeader title="Dashboard" subtitle={`Your financial overview · ${label}`} actions={<PeriodLinks current={periodKey} />} />
+  );
+}
 
-const TONE_CLASS: Record<TxnTone, string> = {
-  in: 'text-emerald-600 dark:text-emerald-400',
-  out: 'text-red-600 dark:text-red-400',
-  flat: '',
-};
+export default async function DashboardScreen({
+  searchParams,
+}: {
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
+} = {}) {
+  const params = searchParams ? await searchParams : {};
+  const periodKey = parseDashboardPeriod(params.period);
+  const label = DASHBOARD_PERIODS.find((p) => p.key === periodKey)!.label;
 
-/* ------------------------------------------------------------------ */
+  const loaded = await loadInputs();
+  if (!loaded) {
+    return (
+      <ScreenContainer>
+        <Header periodKey={periodKey} label={label} />
+        <BentoGrid>
+          <BentoCard tone="muted" className="col-span-2 md:col-span-12">
+            <p className="text-sm text-muted-foreground">Couldn&apos;t load your dashboard — please refresh.</p>
+          </BentoCard>
+        </BentoGrid>
+      </ScreenContainer>
+    );
+  }
 
-export default function DashboardScreen() {
+  const m = buildDashboardModel(loaded.inputs, loaded.today, periodKey);
   return (
     <ScreenContainer>
-      <PageHeader
-        title="Dashboard"
-        subtitle="Your financial overview · FY2026, Saudara."
-        actions={
-          <>
-            <Select defaultValue="mtd">
-              <SelectTrigger className="w-40">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="mtd">This month</SelectItem>
-                <SelectItem value="qtd">This quarter</SelectItem>
-                <SelectItem value="ytd">Financial year</SelectItem>
-              </SelectContent>
-            </Select>
-            <Button variant="outline" size="sm">
-              <Download className="size-4" />
-              Export
-            </Button>
-          </>
-        }
-      />
-
+      <Header periodKey={periodKey} label={label} />
       <BentoGrid>
-        {/* KPI row */}
-        <BentoCard tone="primary" className="col-span-1 md:col-span-3">
+        {m.isEmpty ? (
+          <BentoCard tone="muted" className="col-span-2 md:col-span-12">
+            <p className="text-sm text-muted-foreground">
+              Nothing is recorded yet. Raise your first sale in{' '}
+              <Link className="underline" href="/finance/invoices">
+                Invoices
+              </Link>{' '}
+              or connect an account in{' '}
+              <Link className="underline" href="/finance/banking">
+                Banking
+              </Link>
+              , and your figures appear here.
+            </p>
+          </BentoCard>
+        ) : null}
+        <Cards m={m} label={label} />
+      </BentoGrid>
+    </ScreenContainer>
+  );
+}
+
+function Cards({ m, label }: { m: DashboardModel; label: string }) {
+  const revenue = change(m.deltas.revenue, 'up');
+  const expenses = change(m.deltas.expenses, 'down');
+  const net = change(m.deltas.net, 'up');
+  const pl = m.pl;
+
+  const plData = m.series.map((p) => ({ label: p.label, income: p.revenue, expense: p.expenses }));
+  const slices: Slice[] = m.breakdown.map((b, i) => ({ ...b, color: SLICE_COLORS[i % SLICE_COLORS.length] }));
+
+  const ageSeries: Series[] = [
+    ...(m.receivable ? [{ key: 'ar', label: 'Receivable', color: 'var(--chart-2)' }] : []),
+    ...(m.payable ? [{ key: 'ap', label: 'Payable', color: 'var(--chart-3)' }] : []),
+  ];
+  const ageData = AGE_BUCKETS.map((b) => ({
+    label: b.label,
+    ...(m.receivable ? { ar: m.receivable.totals[b.key] } : {}),
+    ...(m.payable ? { ap: m.payable.totals[b.key] } : {}),
+  }));
+
+  return (
+    <>
+      {/* KPI row */}
+      <BentoCard tone="primary" className="col-span-1 md:col-span-3">
+        {m.cashPosition === null ? (
+          <div>
+            <p className="text-xs font-medium text-primary-foreground/70">Cash position</p>
+            <p className="mt-1 text-sm">{CANT_LOAD}</p>
+          </div>
+        ) : (
           <BentoStat
             label="Cash position"
-            value="RM 84,200"
-            delta="+6%"
+            value={rm(m.cashPosition)}
             onPrimary
-            chart={
-              <Sparkline
-                data={[62, 66, 68.5, 72, 75.5, 78, 81.6, 84.2]}
-                color="var(--primary-foreground)"
-                height={36}
-              />
-            }
+            chart={<Sparkline data={m.cashTrend.map((c) => c.balance)} color="var(--primary-foreground)" height={36} />}
           />
-        </BentoCard>
-        <BentoCard className="col-span-1 md:col-span-3">
-          <BentoStat
-            label="Revenue · MTD"
-            value="RM 42,800"
-            delta="+14%"
-            deltaTone="up"
-            chart={<Sparkline data={[36, 40, 38, 44, 46, 42, 48, 42.8]} height={36} />}
-          />
-        </BentoCard>
-        <BentoCard className="col-span-1 md:col-span-3">
-          <BentoStat
-            label="Expenses · MTD"
-            value="RM 18,400"
-            delta="−8%"
-            deltaTone="up"
-            chart={
-              <Sparkline
-                data={[20, 21, 22, 23, 22, 21, 24, 18.4]}
-                color="var(--chart-4)"
-                height={36}
-              />
-            }
-          />
-        </BentoCard>
-        <BentoCard className="col-span-1 md:col-span-3">
-          <BentoStat
-            label="Net profit · MTD"
-            value="RM 24,400"
-            delta="+22%"
-            deltaTone="up"
-            chart={
-              <Sparkline
-                data={[16, 19, 16, 21, 24, 21, 24, 24.4]}
-                color="var(--chart-2)"
-                height={36}
-              />
-            }
-          />
-        </BentoCard>
+        )}
+      </BentoCard>
+      <BentoCard className="col-span-1 md:col-span-3">
+        <BentoStat
+          label={`Revenue · ${label}`}
+          value={rm(pl.totalIncome)}
+          delta={revenue.delta}
+          deltaTone={revenue.tone}
+          chart={<Sparkline data={m.series.map((p) => p.revenue)} height={36} />}
+        />
+      </BentoCard>
+      <BentoCard className="col-span-1 md:col-span-3">
+        <BentoStat
+          label={`Expenses · ${label}`}
+          value={rm(pl.totalExpenses)}
+          delta={expenses.delta}
+          deltaTone={expenses.tone}
+          chart={<Sparkline data={m.series.map((p) => p.expenses)} color="var(--chart-4)" height={36} />}
+        />
+      </BentoCard>
+      <BentoCard className="col-span-1 md:col-span-3">
+        <BentoStat
+          label={`Net profit · ${label}`}
+          value={rm(pl.netProfit)}
+          delta={net.delta}
+          deltaTone={net.tone}
+          chart={<Sparkline data={m.series.map((p) => p.net)} color="var(--chart-2)" height={36} />}
+        />
+      </BentoCard>
 
-        {/* Cash flow + expense breakdown */}
-        <BentoCard
-          title="Cash flow"
-          subtitle="Closing balance & net cash · FY2026"
-          icon={TrendingUp}
-          className="col-span-2 md:col-span-8"
-        >
-          <AreaTrend data={CASH_TREND} series={CASH_SERIES} height={240} showLegend />
-        </BentoCard>
-        <BentoCard
-          title="Expense breakdown"
-          subtitle="This month"
-          icon={PieChart}
-          className="col-span-2 md:col-span-4"
-        >
-          <DonutStat
-            data={EXPENSE_BREAKDOWN}
+      {/* Cash flow + expense breakdown */}
+      <BentoCard
+        title="Cash flow"
+        subtitle="Closing balance & net cash · last 8 months"
+        icon={TrendingUp}
+        className="col-span-2 md:col-span-8"
+      >
+        <AreaTrend data={m.cashTrend} series={CASH_SERIES} height={240} showLegend />
+      </BentoCard>
+      <BentoCard title="Expense breakdown" subtitle={label} icon={PieChart} className="col-span-2 md:col-span-4">
+        {slices.length === 0 ? (
+          <p className="text-sm text-muted-foreground">No expenses in this period.</p>
+        ) : (
+          <DonutStat data={slices} height={240} centerValue={rmShort(pl.totalExpenses)} centerLabel="expenses" />
+        )}
+      </BentoCard>
+
+      {/* P&L bars + profit-margin gauge */}
+      <BentoCard title="Profit & loss" subtitle="Income vs expense (RM) · last 8 months" icon={ChartColumn} className="col-span-2 md:col-span-8">
+        <BarGroup data={plData} series={PL_SERIES} height={240} showLegend />
+      </BentoCard>
+      <BentoCard title="Profit margin" subtitle={`Net profit of revenue · ${label}`} icon={Gauge} className="col-span-2 md:col-span-4">
+        {pl.margin === null ? (
+          <p className="text-sm text-muted-foreground">No income in this period</p>
+        ) : (
+          <RadialGauge
+            value={Math.max(0, Math.min(100, Math.round(pl.margin * 100)))}
+            label="margin"
+            valueLabel={`${Math.round(pl.margin * 100)}%`}
+            color="var(--chart-2)"
             height={240}
-            centerValue="RM 18.4k"
-            centerLabel="expenses"
           />
-        </BentoCard>
+        )}
+      </BentoCard>
 
-        {/* P&L bars + profit-margin gauge */}
-        <BentoCard
-          title="Profit & loss"
-          subtitle="Income vs expense (RM k)"
-          icon={ChartColumn}
-          className="col-span-2 md:col-span-8"
-        >
-          <BarGroup data={PL_TREND} series={PL_SERIES} height={240} showLegend />
-        </BentoCard>
-        <BentoCard
-          title="Profit margin"
-          subtitle="Net profit of revenue"
-          icon={Gauge}
-          className="col-span-2 md:col-span-4"
-        >
-          <RadialGauge value={57} label="margin" valueLabel="57%" color="var(--chart-2)" height={240} />
-        </BentoCard>
-
-        {/* AR/AP ageing + accounts */}
-        <BentoCard
-          title="AR / AP ageing"
-          subtitle="Receivable vs payable (RM k)"
-          icon={Coins}
-          className="col-span-2 md:col-span-6"
-        >
-          <BarGroup data={AGEING} series={AGEING_SERIES} height={220} showLegend />
-        </BentoCard>
-        <BentoCard
-          title="Bank & cash accounts"
-          subtitle="Owed to suppliers · RM 9,300"
-          icon={Landmark}
-          className="col-span-2 md:col-span-6"
-        >
+      {/* AR/AP ageing + accounts */}
+      <BentoCard title="AR / AP ageing" subtitle="Receivable vs payable (RM)" icon={Coins} className="col-span-2 md:col-span-6">
+        {ageSeries.length === 0 ? (
+          <Unavailable />
+        ) : (
+          <>
+            <BarGroup data={ageData} series={ageSeries} height={220} showLegend />
+            {!m.receivable || !m.payable ? (
+              <p className="mt-2 text-xs text-muted-foreground">
+                {!m.receivable ? 'Receivable' : 'Payable'}: {CANT_LOAD}
+              </p>
+            ) : null}
+          </>
+        )}
+      </BentoCard>
+      <BentoCard title="Bank & cash accounts" icon={Landmark} className="col-span-2 md:col-span-6">
+        {m.bankAccounts === null ? (
+          <Unavailable />
+        ) : m.bankAccounts.length === 0 ? (
+          <p className="text-sm text-muted-foreground">No bank or cash accounts yet.</p>
+        ) : (
           <div className="overflow-x-auto">
             <Table>
               <TableHeader>
@@ -287,89 +281,84 @@ export default function DashboardScreen() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {ACCOUNTS.map((a) => (
-                  <TableRow key={a.name}>
-                    <TableCell className="whitespace-nowrap font-medium">
-                      {a.name}
-                    </TableCell>
-                    <TableCell className="text-muted-foreground">{a.type}</TableCell>
-                    <TableCell className="whitespace-nowrap text-right tabular-nums">
-                      {a.balance}
-                    </TableCell>
+                {m.bankAccounts.map((a) => (
+                  <TableRow key={a.id}>
+                    <TableCell className="whitespace-nowrap font-medium">{a.name}</TableCell>
+                    <TableCell className="text-muted-foreground">{a.kind === 'bank' ? 'Bank' : 'Cash'}</TableCell>
+                    <TableCell className="whitespace-nowrap text-right tabular-nums">{rm(a.balance)}</TableCell>
                   </TableRow>
                 ))}
                 <TableRow className="border-t-2">
                   <TableCell className="font-semibold">Cash position</TableCell>
                   <TableCell />
-                  <TableCell className="text-right font-semibold tabular-nums">
-                    RM 84,200
+                  <TableCell className="whitespace-nowrap text-right font-semibold tabular-nums">
+                    {m.cashPosition === null ? CANT_LOAD : rm(m.cashPosition)}
+                  </TableCell>
+                </TableRow>
+                <TableRow>
+                  <TableCell className="text-muted-foreground">Owed to suppliers</TableCell>
+                  <TableCell />
+                  <TableCell className="whitespace-nowrap text-right tabular-nums">
+                    {m.payable === null ? CANT_LOAD : rm(m.payable.total)}
                   </TableCell>
                 </TableRow>
               </TableBody>
             </Table>
           </div>
-        </BentoCard>
+        )}
+      </BentoCard>
 
-        {/* Recent transactions */}
-        <BentoCard
-          title="Recent transactions"
-          subtitle="Latest cash book activity"
-          icon={ArrowLeftRight}
-          action={
-            <Button variant="outline" size="sm">
-              View all
-            </Button>
-          }
-          className="col-span-2 md:col-span-12"
-        >
+      {/* Latest cash book activity */}
+      <BentoCard
+        title="Latest cash book activity"
+        subtitle="Money in and out, newest first"
+        icon={ArrowLeftRight}
+        action={
+          <Button variant="outline" size="sm" asChild>
+            <Link href="/finance/banking">View all</Link>
+          </Button>
+        }
+        className="col-span-2 md:col-span-12"
+      >
+        {m.recentCash === null ? (
+          <Unavailable />
+        ) : m.recentCash.length === 0 ? (
+          <p className="text-sm text-muted-foreground">No cash movements yet.</p>
+        ) : (
           <div className="overflow-x-auto">
             <Table>
               <TableHeader>
                 <TableRow className="bg-muted/40">
                   <TableHead className="whitespace-nowrap">Date</TableHead>
-                  <TableHead>Description</TableHead>
-                  <TableHead>Reference</TableHead>
-                  <TableHead className="text-right">Amount (RM)</TableHead>
-                  <TableHead>Status</TableHead>
+                  <TableHead>Party</TableHead>
+                  <TableHead>Documents</TableHead>
+                  <TableHead>Account</TableHead>
+                  <TableHead className="text-right">Amount</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {TRANSACTIONS.map((t) => (
-                  <TableRow key={`${t.date}-${t.reference}`}>
-                    <TableCell className="whitespace-nowrap text-muted-foreground">
-                      {t.date}
-                    </TableCell>
-                    <TableCell className="whitespace-nowrap font-medium">
-                      {t.description}
-                    </TableCell>
-                    <TableCell className="whitespace-nowrap text-muted-foreground">
-                      {t.reference}
-                    </TableCell>
+                {m.recentCash.map((t) => (
+                  <TableRow key={t.id}>
+                    <TableCell className="whitespace-nowrap text-muted-foreground">{displayDate(t.date.slice(0, 10))}</TableCell>
+                    <TableCell className="whitespace-nowrap font-medium">{t.party || '—'}</TableCell>
+                    <TableCell className="whitespace-nowrap text-muted-foreground">{t.documents ?? '—'}</TableCell>
+                    <TableCell className="whitespace-nowrap text-muted-foreground">{t.accountName}</TableCell>
                     <TableCell
                       className={cn(
                         'whitespace-nowrap text-right font-semibold tabular-nums',
-                        TONE_CLASS[t.tone],
+                        t.direction === 'in' ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400',
                       )}
                     >
-                      {t.amount}
-                    </TableCell>
-                    <TableCell>
-                      <span
-                        className={cn(
-                          'inline-flex items-center rounded-full px-2 py-0.5 text-xs font-semibold',
-                          STATUS_PILL[t.status],
-                        )}
-                      >
-                        {t.status}
-                      </span>
+                      {t.direction === 'in' ? '+' : '−'}
+                      {rm(t.amount)}
                     </TableCell>
                   </TableRow>
                 ))}
               </TableBody>
             </Table>
           </div>
-        </BentoCard>
-      </BentoGrid>
-    </ScreenContainer>
+        )}
+      </BentoCard>
+    </>
   );
 }
