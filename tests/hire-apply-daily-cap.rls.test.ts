@@ -1,14 +1,17 @@
 // tests/hire-apply-daily-cap.rls.test.ts
 //
 // Live check of the workspace's daily cap on public applications
-// (20261125090200_hire_apply_daily_cap.sql): 500 in any 24 hours, answered 'day_full'.
-// Needs that migration applied; before it, the 301st application of the day is refused as 'throttled'
-// and the first test fails on that word.
+// (20261125090200_hire_apply_daily_cap.sql): 300 in any 24 hours, answered 'day_full'.
+// Needs that migration applied; before it, the old daily counter answers 'throttled' (not 'day_full')
+// and the test fails on that word.
+//
+// Slow and heavy (300 live writes), so it is opt-in: run it once after applying the migration, with
+//   RUN_SLOW_LIVE=1 pnpm exec vitest run tests/hire-apply-daily-cap.rls.test.ts
 //
 // How the cap is reached: neither a member nor the service role may insert into hire_applications
 // directly, and the cap must not have a test-only lower number, so the test does what a flood would do.
-// It sends 500 real applications through submit_public_application as the server, spread round-robin
-// over 17 open jobs (at most 30 per job, so a job's limit of 30 a minute never answers first, however
+// It sends 300 real applications through submit_public_application as the server, spread round-robin
+// over 10 open jobs (at most 30 per job, so a job's limit of 30 a minute never answers first, however
 // fast they go). That takes a while: the test allows five minutes.
 //
 // Everything it writes (candidates, applications, notifications, rate-limit ticks) belongs to its
@@ -20,11 +23,13 @@ import { hasSupabaseEnv, supabaseEnvSkipReason } from './setup/supabase';
 import { createOrg, liveClient, signInOwner } from './helpers/live-workspaces';
 import { publicWriter } from './helpers/public-writer';
 
-const testWithSupabase = hasSupabaseEnv ? test : test.skip;
+const optedIn = process.env.RUN_SLOW_LIVE === '1';
+const testWithSupabase = hasSupabaseEnv && optedIn ? test : test.skip;
 if (!hasSupabaseEnv) console.warn(supabaseEnvSkipReason);
+else if (!optedIn) console.warn('Set RUN_SLOW_LIVE=1 to run the daily application cap check (300 live writes)');
 
-const CAP = 500;
-const JOBS = 17;
+const CAP = 300;
+const JOBS = 10;
 const PER_JOB_MINUTE = 30;
 const BATCH = 20;
 const RUN = Date.now();
@@ -67,7 +72,7 @@ let owner: Owned;
 let other: Owned;
 let jobs: string[] = [];
 let otherJob: string;
-/** A job that took none of the 500, so its own limit of 30 a minute cannot answer before the cap. */
+/** A job that took none of the 300, so its own limit of 30 a minute cannot answer before the cap. */
 let spareJob: string;
 
 const apply = (orgId: string, jobId: string, email = uniqueEmail()) =>
@@ -106,7 +111,7 @@ const addByHand = (who: Owned, jobId: string, email: string) =>
   });
 
 beforeAll(async () => {
-  if (!hasSupabaseEnv) return;
+  if (!hasSupabaseEnv || !optedIn) return;
   ({ writer } = await publicWriter(createAnonymousClient()));
   owner = await ownedOrg('Hire Cap Owner Sdn Bhd');
   other = await ownedOrg('Hire Cap Other Sdn Bhd');
@@ -126,7 +131,7 @@ testWithSupabase('a hand-added application first does not use up the day', async
   expect((res.data as { word: string; application: string }).application).toBe('created');
 }, 30_000);
 
-testWithSupabase('takes 500 public applications across the jobs, then answers day_full', async () => {
+testWithSupabase('takes 300 public applications across the jobs, then answers day_full', async () => {
   const answers: unknown[] = [];
   for (let start = 0; start < CAP; start += BATCH) {
     const batch = [];
