@@ -10,6 +10,7 @@ import { createCrmDeal } from '@/lib/crm/deals';
 import { ensureDefaultPipeline, listCrmPipelines, needsDefaultPipeline } from '@/lib/crm/pipelines';
 import { createCampaign, createLead } from '@/lib/reach/capabilities';
 import { createContact as createFinanceContact } from '@/lib/finance/contacts';
+import { createDepartment, createEmployee } from '@/lib/people/capabilities';
 import { listLedgerAccounts, postJournal, saveJournal } from '@/lib/finance/ledger';
 import { savePurchaseOrder, submitPurchaseOrder } from '@/lib/finance/purchase-orders';
 import type { Application, Candidate, Interview, Job } from '@/lib/hire/types';
@@ -658,6 +659,42 @@ const mentions = (text: string, ...words: string[]) =>
 
 /** True when the answer claims a change was made. */
 const claimsDone = (text: string) => /\b(done|added|created|deleted|moved|updated|removed)\b/i.test(text);
+
+/* ---- HR (Lekiu) seeds -------------------------------------------------- */
+
+// KEEP IN STEP with cleanUp's HR section: departments carry EVAL_TAG in their name, staff in their work email.
+
+/** A tagged department name, unique per run and well inside the 80-character limit. */
+const departmentName = (label: string) => `${label} ${EVAL_TAG} ${tag()}`;
+
+async function seedDepartment(ws: Workspace, name = departmentName('Field Ops')) {
+  const made = await createDepartment({ client: ws.client, orgId: ws.orgId }, { name });
+  if (!made.ok) throw new Error(`Could not seed the department: ${made.error}`);
+  return { id: made.data.id, name };
+}
+
+/** A made-up member of staff in a department, found again (and removed) by the tagged work email. */
+async function seedEmployee(ws: Workspace, departmentId: string) {
+  const p = person();
+  const made = await createEmployee({ client: ws.client, orgId: ws.orgId }, { name: p.name, work_email: p.email, department_id: departmentId });
+  if (!made.ok) throw new Error(`Could not seed the employee: ${made.error}`);
+  return { ...p, id: made.data.id };
+}
+
+async function departmentById(ws: Workspace, id: string) {
+  const { data } = await ws.client.from('hr_departments').select('id,name').eq('org_id', ws.orgId).eq('id', id).maybeSingle();
+  return data as { id: string; name: string } | null;
+}
+
+async function departmentByName(ws: Workspace, name: string) {
+  const { data } = await ws.client.from('hr_departments').select('id,name').eq('org_id', ws.orgId).eq('name', name).maybeSingle();
+  return data as { id: string; name: string } | null;
+}
+
+/** A chat with Tuah that holds the workspace's HR, as the product's does. */
+const hrChat = (ws: Workspace) => new Conversation(ws, false, undefined, { hr: true });
+
+const askedLekiu = (asked: string[]) => check('asked Lekiu', asked.includes('Lekiu'), `asked: ${asked.join(', ') || 'nobody'}`);
 
 /* ---- Finance (Bendahara) seeds ---------------------------------------- */
 
@@ -2221,6 +2258,99 @@ const ALL_CASES: Case[] = [
         check('gives a ringgit figure', /RM\s?\d/i.test(turn.text), turn.text),
         check('the figure covers the rent on the books', reportsAtLeast(turn.text, amount), `wanted >= ${amount}; said: ${turn.text}`),
         check('proposed no change', turn.pending.length === 0, financePending(turn.pending)),
+      ];
+    },
+  },
+  // --- HR (Lekiu) ---------------------------------------------------------------------------------------------
+  // Each case asks Lekiu only: the product keeps HR answers out of what the other specialists read, and this
+  // harness does not, so a case that mixed Lekiu with another specialist would run as the product never does.
+  {
+    id: 'hr-who-in-department',
+    about: 'Names who works in a department, by asking Lekiu, and proposes no change',
+    run: async (ws) => {
+      const dept = await seedDepartment(ws);
+      const staff = await seedEmployee(ws, dept.id);
+      const turn = await hrChat(ws).ask(`Who works in the ${dept.name} department?`);
+      return [
+        askedLekiu(turn.asked),
+        check('names the person in it', mentions(turn.text, staff.last), turn.text),
+        check('did not ask Lekir (staff, not hiring)', !turn.asked.includes('Lekir'), `asked: ${turn.asked.join(', ')}`),
+        check('proposed no change', turn.pending.length === 0),
+      ];
+    },
+  },
+  {
+    id: 'hr-staff-absent',
+    about: 'Says so when someone is not on the staff list, rather than inventing a record',
+    run: async (ws) => {
+      const p = person();
+      const turn = await hrChat(ws).ask(`Is ${p.name} one of our employees?`);
+      return [
+        askedLekiu(turn.asked),
+        check('says there is no such employee', /\b(no|not|none|couldn't|could not|don't|doesn't|isn't)\b/i.test(turn.text), turn.text),
+        check('proposed no change', turn.pending.length === 0),
+      ];
+    },
+  },
+  {
+    id: 'hr-add-department',
+    about: 'Adds a department through one approval, with exactly the name given',
+    run: async (ws) => {
+      const name = departmentName('Quality');
+      const chat = hrChat(ws);
+      const asked = await chat.ask(`Add a new department called ${name}.`);
+      const [proposal] = asked.pending;
+      const input = (proposal?.input ?? {}) as { name?: string };
+      const checks = [
+        askedLekiu(asked.asked),
+        check('exactly one change waiting', asked.pending.length === 1, `${asked.pending.length} waiting; said: ${asked.text}`),
+        check('it is createDepartment', proposal?.action === 'createDepartment', proposal?.action),
+        check('with the name given', input.name === name, input.name),
+        check('nothing saved before approval', (await departmentByName(ws, name)) === null),
+      ];
+      // Only approve the one department asked for: under another name it would be a row cleanUp cannot find.
+      if (asked.pending.length !== 1 || proposal?.action !== 'createDepartment' || input.name !== name) return checks;
+      const done = await chat.decide(true);
+      return [
+        ...checks,
+        check('the department exists', (await departmentByName(ws, name)) !== null),
+        check('reports it as done', claimsDone(done.text), done.text),
+      ];
+    },
+  },
+  {
+    id: 'hr-delete-department-rejected',
+    about: 'Puts deleting a department up for approval, and leaves it alone when the deletion is rejected',
+    run: async (ws) => {
+      const dept = await seedDepartment(ws, departmentName('Archive'));
+      const chat = hrChat(ws);
+      const asked = await chat.ask(`Delete the ${dept.name} department.`);
+      const [proposal] = asked.pending;
+      const input = (proposal?.input ?? {}) as { id?: string };
+      const checks = [
+        askedLekiu(asked.asked),
+        check('exactly one change waiting', asked.pending.length === 1, `${asked.pending.length} waiting; said: ${asked.text}`),
+        check('it is deleteDepartment for that department', proposal?.action === 'deleteDepartment' && input.id === dept.id, `${proposal?.action} ${input.id}`),
+      ];
+      if (asked.pending.length === 0) return checks;
+      const after = await chat.decide(false);
+      return [
+        ...checks,
+        check('the department is still there', (await departmentById(ws, dept.id)) !== null),
+        check('does not claim it was deleted', !/\b(has been|was|is now) (deleted|removed)\b/i.test(after.text), after.text),
+        check('does not blame permissions', !/permission|access|admin/i.test(after.text), after.text),
+      ];
+    },
+  },
+  {
+    id: 'hr-hiring-is-lekir',
+    about: 'Sends a request to hire someone new to Lekir, not Lekiu (hiring is not HR), and adds no employee',
+    run: async (ws) => {
+      const turn = await hrChat(ws).ask('We need to hire a new accountant. Can you get that started?');
+      return [
+        check('asked Lekir', turn.asked.includes('Lekir'), `asked: ${turn.asked.join(', ') || 'nobody'}`),
+        check('did not ask Lekiu', !turn.asked.includes('Lekiu'), `asked: ${turn.asked.join(', ')}`),
+        check('no employee proposed', !turn.pending.some((p) => p.action === 'createEmployee'), turn.pending.map((p) => p.action).join(', ')),
       ];
     },
   },
