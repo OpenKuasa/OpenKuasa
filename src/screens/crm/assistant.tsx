@@ -71,16 +71,14 @@ const SAMPLE_OVERVIEW: CrmOverviewModel = {
     { id: 'f3', title: 'Call Nurul Huda re: POS setup', due: 'Today', overdue: false },
     { id: 'f4', title: 'Prepare proposal for Siti Decor event', due: '12 Oct', overdue: false },
   ],
+  activity: [
+    { text: 'Aisyah Rahim added via Lead form', when: '8m' },
+    { text: 'WhatsApp logged: Sent price list to Lim Hardware', when: '1h' },
+    { text: 'Follow-up done: Call Nurul Huda', when: '3h' },
+    { text: 'New deal: Zaki Enterprise — Renovation', when: '5h' },
+    { text: 'Won Rahman Logistics — Fleet tracking · RM 24,000', when: '1d' },
+  ],
 };
-
-/** Nothing records what happened on a deal yet, so only the sample has a feed. */
-const SAMPLE_ACTIVITY = [
-  { text: 'Aisyah Rahim replied on WhatsApp', when: '8m' },
-  { text: 'Proposal sent to Lim Hardware', when: '1h' },
-  { text: 'Call booked with Nurul Huda', when: '3h' },
-  { text: 'Zaki Enterprise moved to Negotiation', when: '5h' },
-  { text: 'Rahman Logistics marked Won — RM 24,000', when: '1d' },
-];
 
 const TREND_SERIES: Series[] = [
   { key: 'created', label: 'Created', color: 'var(--chart-1)' },
@@ -300,10 +298,12 @@ export default async function OverviewScreen() {
           icon={Activity}
           className="col-span-2 md:col-span-4"
         >
-          {isSample ? (
+          {!model ? failed : model.activity.length === 0 ? (
+            <Muted>Nothing yet</Muted>
+          ) : (
             <ul className="space-y-2.5">
-              {SAMPLE_ACTIVITY.map((a) => (
-                <li key={a.text} className="flex items-start gap-2.5">
+              {model.activity.map((a, index) => (
+                <li key={`${a.text}-${index}`} className="flex items-start gap-2.5">
                   <span className="mt-1.5 size-1.5 shrink-0 rounded-full bg-primary" />
                   <span className="min-w-0 flex-1 text-sm leading-snug">{a.text}</span>
                   <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
@@ -312,8 +312,6 @@ export default async function OverviewScreen() {
                 </li>
               ))}
             </ul>
-          ) : (
-            <Muted>Not available yet</Muted>
           )}
         </BentoCard>
 
