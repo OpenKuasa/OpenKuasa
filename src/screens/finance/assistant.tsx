@@ -27,8 +27,10 @@ import { createClient } from '@/lib/supabase/server';
 import { isLiveChatAllowed } from '@/lib/ai/access';
 import { getViewer } from '@/lib/auth/viewer';
 import { listBills } from '@/lib/finance/bills';
+import { buildDashboardModel, collectionRate, weeklyCash, type DashboardInputs, type DashboardModel } from '@/lib/finance/dashboard';
+import { loadDashboardInputs } from '@/lib/finance/dashboard-data';
 import { rm } from '@/lib/finance/format';
-import { listInvoices } from '@/lib/finance/invoices';
+import { listInvoices, type InvoiceListRow } from '@/lib/finance/invoices';
 import { buildFinanceOverview, type FinanceOverview } from '@/lib/finance/overview';
 import { displayDate, todayUtc } from '@/lib/finance/view-helpers';
 import { cn } from '@/lib/utils';
@@ -148,6 +150,23 @@ function Muted({ children }: { children: React.ReactNode }) {
   );
 }
 
+/** A card with no source yet: says so, and why, in one muted line. */
+function NotYet({ why }: { why: string }) {
+  return (
+    <div className="grid min-h-24 place-items-center text-center">
+      <div>
+        <p className="text-sm text-muted-foreground">Not available yet</p>
+        <p className="mt-1 text-xs text-muted-foreground">{why}</p>
+      </div>
+    </div>
+  );
+}
+
+const CASHFLOW_LIVE_SERIES: Series[] = [
+  { key: 'inflow', label: 'Cash in (RM)', color: 'var(--chart-2)' },
+  { key: 'outflow', label: 'Cash out (RM)', color: 'var(--chart-3)' },
+];
+
 function overdueAge(days: number): string {
   if (days <= 0) return 'Due today';
   return `${days} day${days === 1 ? '' : 's'} overdue`;
@@ -165,18 +184,34 @@ export default async function OverviewScreen() {
   // A signed-in person sees only their own workspace's figures. Anything with no real
   // source yet shows "Not available yet" rather than the sample numbers.
   let model: FinanceOverview | null = null;
+  let dash: DashboardModel | null = null;
+  let books: DashboardInputs | null = null;
+  let invoiceRows: InvoiceListRow[] | null = null;
+  const today = todayUtc();
   if (!isDemo) {
     try {
       const viewer = await getViewer();
       const ctx = { client: supabase, orgId: viewer.orgId };
-      const [invoices, bills] = await Promise.all([listInvoices(ctx), listBills(ctx)]);
-      model = buildFinanceOverview(invoices, bills, todayUtc());
+      const [invoices, bills, inputs] = await Promise.all([
+        listInvoices(ctx),
+        listBills(ctx),
+        // The books read fails on its own: the invoice and bill cards still show.
+        loadDashboardInputs(ctx).catch((e) => {
+          console.error('[finance/assistant] dashboard inputs error:', e);
+          return null;
+        }),
+      ]);
+      invoiceRows = invoices;
+      model = buildFinanceOverview(invoices, bills, today);
+      books = inputs;
+      dash = inputs ? buildDashboardModel(inputs, today, 'this_month') : null;
     } catch (e) {
       console.error('[finance/assistant] data error:', e);
     }
   }
+  const weeks = books?.bankTransactions ? weeklyCash(books.bankTransactions, today) : null;
+  const rate = invoiceRows ? collectionRate(invoiceRows, today) : null;
   const failed = <Muted>Couldn&apos;t load your dashboard — please refresh</Muted>;
-  const na = <Muted>Not available yet</Muted>;
   const live = (children: (m: FinanceOverview) => React.ReactNode, empty: string) =>
     !model ? failed : model.isEmpty ? <Muted>{empty}</Muted> : children(model);
 
@@ -205,7 +240,13 @@ export default async function OverviewScreen() {
               }
             />
           ) : (
-            <BentoStat label="Cash balance" value="—" delta="Not available yet" deltaTone="flat" onPrimary />
+            <BentoStat
+              label="Cash balance"
+              value={dash?.cashPosition != null ? rm(dash.cashPosition) : '—'}
+              delta={dash?.cashPosition != null ? undefined : "Couldn't load"}
+              deltaTone="flat"
+              onPrimary
+            />
           )}
         </BentoCard>
         <BentoCard className="col-span-1 md:col-span-3">
@@ -218,7 +259,18 @@ export default async function OverviewScreen() {
               chart={<Sparkline data={[28, 31, 33, 36, 39, 41, 42, 43]} height={36} />}
             />
           ) : (
-            <BentoStat label="Revenue · MTD" value="—" delta="Not available yet" deltaTone="flat" />
+            <BentoStat
+              label="Revenue · MTD"
+              value={dash ? rm(dash.pl.totalIncome) : '—'}
+              delta={
+                !dash
+                  ? "Couldn't load"
+                  : dash.deltas.revenue === null
+                    ? undefined
+                    : `${dash.deltas.revenue > 0 ? '+' : ''}${dash.deltas.revenue}%`
+              }
+              deltaTone={!dash || dash.deltas.revenue === null ? 'flat' : dash.deltas.revenue >= 0 ? 'up' : 'down'}
+            />
           )}
         </BentoCard>
         <BentoCard className="col-span-1 md:col-span-3">
@@ -239,9 +291,15 @@ export default async function OverviewScreen() {
           ) : (
             <BentoStat
               label="Outstanding · AR"
-              value={model ? rm(model.receivable.total) : '—'}
-              delta={model && model.receivable.overdue > 0 ? `${rm(model.receivable.overdue)} overdue` : undefined}
-              deltaTone="down"
+              value={dash?.receivable ? rm(dash.receivable.total) : '—'}
+              delta={
+                !dash?.receivable
+                  ? "Couldn't load"
+                  : dash.receivable.overdue > 0
+                    ? `${rm(dash.receivable.overdue)} overdue`
+                    : undefined
+              }
+              deltaTone={dash?.receivable ? 'down' : 'flat'}
             />
           )}
         </BentoCard>
@@ -263,9 +321,15 @@ export default async function OverviewScreen() {
           ) : (
             <BentoStat
               label="Payable · AP"
-              value={model ? rm(model.payable.total) : '—'}
-              delta={model && model.payable.overdue > 0 ? `${rm(model.payable.overdue)} overdue` : undefined}
-              deltaTone="down"
+              value={dash?.payable ? rm(dash.payable.total) : '—'}
+              delta={
+                !dash?.payable
+                  ? "Couldn't load"
+                  : dash.payable.overdue > 0
+                    ? `${rm(dash.payable.overdue)} overdue`
+                    : undefined
+              }
+              deltaTone={dash?.payable ? 'down' : 'flat'}
             />
           )}
         </BentoCard>
@@ -279,8 +343,15 @@ export default async function OverviewScreen() {
         >
           {isDemo ? (
             <AreaTrend data={CASHFLOW_TREND} series={CASHFLOW_SERIES} height={240} showLegend />
+          ) : weeks ? (
+            <AreaTrend
+              data={weeks.map((w) => ({ label: w.label, inflow: w.in, outflow: w.out }))}
+              series={CASHFLOW_LIVE_SERIES}
+              height={240}
+              showLegend
+            />
           ) : (
-            na
+            <Muted>Couldn&apos;t load</Muted>
           )}
         </BentoCard>
         <BentoCard
@@ -297,7 +368,7 @@ export default async function OverviewScreen() {
               centerLabel="revenue"
             />
           ) : (
-            na
+            <NotYet why="Invoices post to one sales account, so there are no categories yet." />
           )}
         </BentoCard>
 
@@ -308,7 +379,11 @@ export default async function OverviewScreen() {
           icon={Filter}
           className="col-span-2 md:col-span-4"
         >
-          {isDemo ? <FunnelFlow data={COLLECTIONS} height={200} /> : na}
+          {isDemo ? (
+            <FunnelFlow data={COLLECTIONS} height={200} />
+          ) : (
+            <NotYet why="Nothing records when a customer opens an invoice yet." />
+          )}
         </BentoCard>
         <BentoCard
           title="Outstanding by customer"
@@ -337,14 +412,18 @@ export default async function OverviewScreen() {
         </BentoCard>
         <BentoCard
           title="Collection rate"
-          subtitle="Collected of billed"
+          subtitle={isDemo ? 'Collected of billed' : 'Paid of invoiced, last 90 days'}
           icon={Gauge}
           className="col-span-2 md:col-span-4"
         >
           {isDemo ? (
             <RadialGauge value={82} label="collected" valueLabel="82%" color="var(--chart-2)" height={200} />
+          ) : !invoiceRows ? (
+            failed
+          ) : rate === null ? (
+            <Muted>No invoices in the last 90 days</Muted>
           ) : (
-            na
+            <RadialGauge value={rate} label="collected" valueLabel={`${rate}%`} color="var(--chart-2)" height={200} />
           )}
         </BentoCard>
 
@@ -547,7 +626,7 @@ export default async function OverviewScreen() {
               ))}
             </div>
           ) : (
-            na
+            <NotYet why="Bendahara's agents are coming later." />
           )}
         </BentoCard>
       </BentoGrid>
