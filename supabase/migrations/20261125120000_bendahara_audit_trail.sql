@@ -291,8 +291,8 @@ create trigger finance_supplier_credit_notes_audit
 -- A payment (transfer_id null) logs: recorded (written posted, or posted from draft or pending approval), paid
 -- (scheduled to posted), submitted (written or moved to pending approval), approved (written scheduled, or moved to
 -- scheduled from draft or pending approval: an owner or admin scheduling a payment approves it),
--- rejected, voided, and the delete of one that was never posted. Most RPCs write a draft and post it in the same
--- call; either way it is one "recorded".
+-- rejected, voided, and the delete of one that was never posted (draft, pending approval, scheduled or rejected).
+-- Most RPCs write a draft and post it in the same call; either way it is one "recorded".
 -- A transfer is two rows sharing transfer_id; only its 'out' row logs, so a transfer is one row: recorded, voided.
 -- amount_myr is stored only for money in another currency; a ringgit movement's is its amount.
 create function private.finance_transactions_audit()
@@ -331,7 +331,7 @@ begin
   end if;
 
   if tg_op = 'DELETE' then
-    if old.status not in ('draft', 'pending_approval', 'rejected') then
+    if old.status not in ('draft', 'pending_approval', 'scheduled', 'rejected') then
       return null;
     end if;
     what := 'Deleted a payment that was not posted'; ev := 'deleted';
@@ -367,7 +367,7 @@ create trigger finance_transactions_audit
   after insert or update or delete on public.finance_transactions
   for each row execute function private.finance_transactions_audit();
 
--- ---- expenses: approved, rejected, a pending claim deleted ------------------------------------------------------
+-- ---- expenses: approved, rejected, a pending or rejected claim deleted -------------------------------------------
 create function private.finance_expenses_audit()
 returns trigger
 language plpgsql
@@ -384,7 +384,7 @@ begin
     return null;
   end if;
   if tg_op = 'DELETE' then
-    if old.status <> 'pending' then
+    if old.status not in ('pending', 'rejected') then
       return null;
     end if;
     r := old; what := 'Deleted an expense claim'; ev := 'deleted';

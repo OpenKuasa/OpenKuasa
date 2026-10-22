@@ -235,6 +235,10 @@ begin
   else
     fails := fails || format('setup: a payment out saved scheduled is %s', r.status);
   end if;
+  -- A scheduled payment is never posted, so deleting it is logged.
+  delete from public.finance_transactions where id = p_sched;
+  expected := expected || jsonb_build_object('t', 'finance_payment', 'id', p_sched, 'e', 'deleted', 'a', 'Deleted a payment that was not posted',
+    'g', coalesce(r.number, 'Pembekal Sdn Bhd'));
   -- A voucher: sent for approval as it is made, approved, marked paid.
   v1 := public.finance_save_voucher(org, jsonb_build_object('account_id', bank, 'method', 'cash', 'amount', 7,
     'party_name', 'Kedai Runcit', 'category_id', utilities, 'status', 'pending_approval'), '[]');
@@ -285,6 +289,9 @@ begin
   expected := expected || jsonb_build_object('t', 'finance_expense', 'id', e1, 'e', 'approved', 'a', 'Approved an expense', 'g', 'TNB');
   update public.finance_expenses set status = 'rejected', updated_at = now() where id = e2;
   expected := expected || jsonb_build_object('t', 'finance_expense', 'id', e2, 'e', 'rejected', 'a', 'Rejected an expense', 'g', 'Syabas');
+  -- A rejected claim may be deleted (only an approved one may not); that is logged too.
+  delete from public.finance_expenses where id = e2;
+  expected := expected || jsonb_build_object('t', 'finance_expense', 'id', e2, 'e', 'deleted', 'a', 'Deleted an expense claim', 'g', 'Syabas');
   delete from public.finance_expenses where id = e3;
   expected := expected || jsonb_build_object('t', 'finance_expense', 'id', e3, 'e', 'deleted', 'a', 'Deleted an expense claim', 'g', 'Indah Water');
 
