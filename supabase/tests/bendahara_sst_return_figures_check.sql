@@ -1,5 +1,5 @@
 -- Bendahara SST return figures check (SST stage 5). Run it after
--- 20261125090400_bendahara_sst_return_figures.sql, in the same transaction for
+-- 20261125100000_bendahara_sst_return_figures.sql, in the same transaction for
 -- a dry run, or by itself once applied. It leaves nothing behind either way:
 -- the block always ends with RAISE, so every row and the helper function
 -- below are rolled back. Read the message:
