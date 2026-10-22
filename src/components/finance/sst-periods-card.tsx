@@ -16,7 +16,7 @@ export type SstPeriodRow = {
   label: string;
   /** Already formatted: "30 Nov 2026". */
   due: string;
-  /** Item 14 formatted, or "Not ready yet". */
+  /** Item 14 formatted, or "not ready yet" (lower case: it follows "payable" mid-line). */
   payable: string;
   /** Formatted date it was marked filed, or null. */
   filedOn: string | null;
@@ -75,6 +75,12 @@ function PeriodRow({
   const filed = row.filedOn !== null;
   const input = { type, period_start: row.start };
   const button = filed ? unmark : row.ended ? mark : undefined;
+  // A period still running is open, not overdue: only an ended, unmarked period is "Not filed".
+  const badge = filed
+    ? { text: 'Marked filed', tone: 'bg-emerald-500/15 text-emerald-600' }
+    : row.ended
+      ? { text: 'Not filed', tone: 'bg-amber-500/15 text-amber-600' }
+      : { text: 'Open', tone: 'bg-muted text-muted-foreground' };
 
   return (
     <li className="flex flex-wrap items-center gap-x-3 gap-y-1.5 py-2.5">
@@ -91,16 +97,16 @@ function PeriodRow({
           {filed ? ` · filed ${row.filedOn}` : ''}
         </span>
       </span>
-      <span
-        className={cn(
-          'shrink-0 rounded-full px-2.5 py-0.5 text-xs font-medium',
-          filed ? 'bg-emerald-500/15 text-emerald-600' : 'bg-amber-500/15 text-amber-600',
-        )}
-      >
-        {filed ? 'Marked filed' : 'Not filed'}
-      </span>
+      <span className={cn('shrink-0 rounded-full px-2.5 py-0.5 text-xs font-medium', badge.tone)}>{badge.text}</span>
       {button ? (
-        <Button type="button" variant="outline" size="sm" disabled={action.pending} onClick={() => action.run(() => button(input))}>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          aria-label={filed ? `Undo the filed mark for ${row.label}` : `Mark ${row.label} as filed`}
+          disabled={action.pending}
+          onClick={() => action.run(() => button(input))}
+        >
           {filed ? 'Undo' : 'Mark as filed'}
         </Button>
       ) : null}

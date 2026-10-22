@@ -381,7 +381,7 @@ export default async function SstReportScreen({
     start: p.start,
     label: sstPeriodLabel(p),
     due: displayDate(p.due),
-    payable: notReady ? NOT_READY : rm(buildSstReturn(view.type, p, rows, credits).item14),
+    payable: notReady ? NOT_READY.toLowerCase() : rm(buildSstReturn(view.type, p, rows, credits).item14),
     filedOn: filed[p.start] ? displayDate(filed[p.start]) : null,
     ended: today > p.end,
   }));

@@ -160,12 +160,41 @@ describe('the SST Report return (#222 stage 2)', () => {
     expect(text).not.toContain('13(a)');
     expect(text).toContain('Periods');
     expect(text).toContain('1 Jul – 31 Aug 2026');
+    // Mid-line in the periods list it is lower case; the stat tiles keep the capital.
+    expect(text).toContain('payable not ready yet');
+    expect(text).not.toContain('payable Not ready yet');
+    expect(text).toContain('Tax payable (item 14) Not ready yet');
   });
 
   it('says "their" for more than one line the form has no item for', async () => {
     state.settings = async () => SAVED;
     state.rows = async () => ({ lines: [line({ id: 'a', sst_rate: 7 }), line({ id: 'b', sst_rate: 7 })], credits: [] });
     expect(await render()).toContain('2 lines (RM 2,000.00) are at a rate with no item on this return. Fix their rate or tax type before you file.');
+  });
+
+  it('names each Mark as filed and Undo button by its period', async () => {
+    state.settings = async () => SAVED;
+    state.filed = async () => ({ '2026-07-01': '2026-09-28' });
+    const html = renderToStaticMarkup(await SstReportScreen({ searchParams: Promise.resolve({}) }));
+    expect(html).toContain('aria-label="Undo the filed mark for 1 Jul – 31 Aug 2026"');
+    expect(html).toContain('aria-label="Mark 1 May – 30 Jun 2026 as filed"');
+    // The current period has not ended, so it has no button and no label.
+    expect(html).not.toContain('aria-label="Mark 1 Sep – 31 Oct 2026 as filed"');
+    const labels = [...html.matchAll(/aria-label="(Mark [^"]+ as filed|Undo the filed mark for [^"]+)"/g)].map((m) => m[1]);
+    expect(labels).toHaveLength(11);
+    expect(new Set(labels).size).toBe(11);
+  });
+
+  it('shows a period still running as Open, and an ended unmarked one as Not filed in amber', async () => {
+    state.settings = async () => SAVED;
+    state.filed = async () => ({ '2026-07-01': '2026-09-28' });
+    const html = renderToStaticMarkup(await SstReportScreen({ searchParams: Promise.resolve({}) }));
+    const badges = [...html.matchAll(/<span class="(shrink-0 rounded-full[^"]*)">([^<]+)<\/span>/g)].map((m) => ({ cls: m[1], text: m[2] }));
+    // Newest first: Sep–Oct is running, Jul–Aug is marked, the ten before have ended unmarked.
+    expect(badges.map((b) => b.text)).toEqual(['Open', 'Marked filed', ...Array(10).fill('Not filed')]);
+    expect(badges[0].cls).toContain('text-muted-foreground');
+    expect(badges[0].cls).not.toContain('amber');
+    expect(badges[2].cls).toContain('text-amber-600');
   });
 
   it('lists lines the form has no item for in a note', async () => {
