@@ -42,7 +42,7 @@ import { isHeldCvMessage } from '@/lib/ai/hire-tools';
 import { ALSO_SCHEDULED_MAX, THIS_INTERVIEW, alsoScheduledLines, interviewFullLine, interviewLine } from '@/lib/hire/interviews';
 import { interviewCardFromLists, namesakesFromLists } from '@/lib/hire/namesakes';
 import { instantMs, klInstant } from '@/lib/hire/interview-time';
-import { feedbackNowLine } from '@/lib/hire/interview-feedback';
+import { feedbackBound, feedbackNowLine } from '@/lib/hire/interview-feedback';
 import type { HireData, InterviewCardRow, Namesakes } from '@/lib/hire/types';
 
 export const HIRE_INTERVIEW_TOOL_NAMES = [
@@ -651,7 +651,10 @@ export function interviewCheckFor(
       // since the card, or a status that moved, stops the change.
       const now = onFeedback ? [feedbackNowLine(target.status, target.feedback)] : [];
       const note = [THIS_INTERVIEW(interviewFullLine(target)), ...now, ...(named ? [named.note] : []), ...alsoScheduledLines(target.candidate, also ?? []), ...closed].join('\n');
-      return { ok: true, note, namesakes: named ? named.namesakes : [] };
+      // And the feedback's exact version, from the same read: kept on the server's record of the proposal and sent
+      // with the change when the user approves, so the database refuses it if the feedback was saved or cleared since.
+      // The line above is compared to the second; this is to the microsecond, and holds up to the write itself.
+      return { ok: true, note, namesakes: named ? named.namesakes : [], ...(onFeedback ? { bound: feedbackBound(target.feedback) } : {}) };
     } catch {
       // Nothing of the error is logged: its words can hold a name, an email or a link.
       console.error('[lekir] the check before an interview change could not read the rows');
@@ -701,7 +704,8 @@ const sameLine = (shown: string | null, now: string | null): boolean =>
 export function interviewCardDecision(check: CardCheck, shown: { note: string | null } | null): Decision {
   if (!check.ok) return { type: 'denied', reason: check.refusal };
   if (shown && !sameLine(shown.note, check.note)) return { type: 'denied', reason: INTERVIEW_CHANGED_SINCE };
-  return check.note ? { type: 'user-approval', reason: check.note } : 'user-approval';
+  if (!check.note) return 'user-approval';
+  return check.bound ? { type: 'user-approval', reason: check.note, bound: check.bound } : { type: 'user-approval', reason: check.note };
 }
 
 /**

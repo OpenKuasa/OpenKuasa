@@ -8,7 +8,7 @@
  * rule is taken from which side a tool is on, never from a list kept elsewhere.
  */
 
-import { deletionCheckFor, type DeletionCheck, type DeletionGate } from '@/lib/ai/hire-deletions';
+import { deletionCheckFor, type Decision, type DeletionCheck, type DeletionGate } from '@/lib/ai/hire-deletions';
 import { makeFinanceIdCheck } from '@/lib/ai/finance-id-gate';
 import { revalidateFinance } from '@/lib/ai/finance-revalidate';
 import { poolCheckFor, type PoolCheck } from '@/lib/ai/hire-pool-gate';
@@ -364,12 +364,18 @@ export function bindApprovals(
       const inner = kit.toolApproval[name] ?? 'user-approval';
 
       toolApproval[name] = async (input, options) => {
-        const decision = typeof inner === 'function' ? await inner(input, options) : inner;
-        if (typeof decision === 'object' && decision.type === 'denied') return decision;
+        const decided = typeof inner === 'function' ? await inner(input, options) : inner;
+        if (typeof decided === 'object' && decided.type === 'denied') return decided;
+        // What a gate read and binds to the change (the version of the row its card shows) goes on the record, and
+        // never to the SDK: the answer is passed on without it.
+        const bound = typeof decided === 'object' ? decided.bound : undefined;
+        const decision: Decision = typeof decided === 'object' ? { type: 'user-approval', reason: decided.reason } : decided;
         // The user's answer to a call the conversation already held: nothing new is proposed here.
-        // Whether that call was ever recorded is settled when the change runs.
+        // Whether that call was ever recorded is settled when the change runs, on what was bound when it was proposed.
         if (binding.incoming.has(options.toolCallId)) return decision;
-        const kept = await binding.store.record({ toolCallId: options.toolCallId, product: product.key, action: name, input });
+        const kept = await binding.store.record({
+          toolCallId: options.toolCallId, product: product.key, action: name, input, ...(bound ? { bound } : {}),
+        });
         return kept ? decision : { type: 'denied', reason: NOT_PREPARED };
       };
 
@@ -381,8 +387,9 @@ export function bindApprovals(
           if (!stored || !run || stored.product !== product.key || stored.action !== name) {
             return { ok: false, error: NOT_WAITING };
           }
-          // The arguments the server kept when it proposed the change, not the ones this request carried.
-          const result = await run(stored.input, options);
+          // The arguments the server kept when it proposed the change, not the ones this request carried; and what it
+          // bound to the change then, beside the SDK's options, where no argument can reach.
+          const result = await run(stored.input, stored.bound ? { ...(options as object), bound: stored.bound } : options);
           // An AI-applied finance write bypasses the finance forms' own revalidatePath calls, so refresh the
           // screens it changed here — only on success, and only for finance (see finance-revalidate.ts).
           if (product.key === 'finance' && (result as { ok?: unknown } | null)?.ok) revalidateFinance(name);

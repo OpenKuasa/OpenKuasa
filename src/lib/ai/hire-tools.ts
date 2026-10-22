@@ -76,7 +76,7 @@ import type { CvReader } from '@/lib/hire/cv-read';
 import { sameText } from '@/lib/hire/namesakes';
 import { timeToHire } from '@/lib/hire/dashboard';
 import { klDateOf, klTimeOf, klTodayWords, shortWhen } from '@/lib/hire/interview-time';
-import { feedbackForModel } from '@/lib/hire/interview-feedback';
+import { feedbackForModel, seenFeedbackAt } from '@/lib/hire/interview-feedback';
 import { careersPath, careersUrl } from '@/lib/hire/public-careers';
 import { applicantsByJob, overviewTotals, sourceBreakdown } from '@/lib/hire/overview';
 import { APPLICATION_STAGES, HIRE_READ_CAP, type HireData, type Job } from '@/lib/hire/types';
@@ -266,6 +266,9 @@ function withoutInvitation<T extends { invitation?: unknown }>(result: CapResult
   void _left;
   return { ...result, data: rest };
 }
+
+/** The feedback version the server bound to an approved change, from the options its record was run with (lib/ai/products.ts). */
+const boundSeen = (options: unknown): string | undefined => seenFeedbackAt((options as { bound?: unknown } | null | undefined)?.bound);
 
 /** A feedback change's answer as a model is given it: the same, with long comments cut as the lookup cuts them. */
 function feedbackForTool(result: CapResult<InterviewFeedbackChange>) {
@@ -936,13 +939,16 @@ export function createHireTools(
         "Use the interview's id from listInterviews. It does not move, reject or rate the application. " +
         'When the rating or the recommendation is your own reading, put the grounds in basis.',
       inputSchema: saveInterviewFeedbackInput,
-      // No "last seen" version is passed: the gate reads the interview again when the user's yes arrives.
-      execute: async (input) => feedbackForTool(await saveInterviewFeedback(ctx, input)),
+      // The version is the one the server read when it showed the card, and it comes only from the server's record of
+      // the proposal (`bound`, beside the SDK's options): never from the input, which a model writes. The database then
+      // saves nothing if the feedback was saved or cleared after the card. The gate's last check on the yes stays too.
+      execute: async (input, options) => feedbackForTool(await saveInterviewFeedback(ctx, input, boundSeen(options))),
     }),
     clearInterviewFeedback: tool({
       description: "Clear the feedback on ONE interview for good. Use the interview's id from listInterviews.",
       inputSchema: clearInterviewFeedbackInput,
-      execute: async (input) => feedbackForTool(await clearInterviewFeedback(ctx, input)),
+      // The same: the version of the feedback the card showed, so newer feedback is never cleared unseen.
+      execute: async (input, options) => feedbackForTool(await clearInterviewFeedback(ctx, input, boundSeen(options))),
     }),
   };
 }

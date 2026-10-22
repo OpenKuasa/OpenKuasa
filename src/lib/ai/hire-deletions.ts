@@ -12,6 +12,7 @@ import { nameIn, withoutPoolSide } from '@/lib/chat/change-titles';
 import { fullDate } from '@/lib/hire/lists';
 import { namesakesFromLists, sameText } from '@/lib/hire/namesakes';
 import type { HireData, Namesake, Namesakes } from '@/lib/hire/types';
+import type { Bound } from '@/lib/chat/proposal-store';
 
 export const HIRE_DELETE_TOOL_NAMES = ['deleteApplication', 'deleteCandidate'] as const;
 
@@ -329,8 +330,12 @@ export function identifyingLine(row: Namesake): string {
 /** What the server found about a deletion's row, for whatever shows its card. */
 export type CardCheck =
   | { ok: false; refusal: string }
-  /** `note` is the line the card must carry, or null when nobody shares the name. `namesakes` are the rows that do. */
-  | { ok: true; note: string | null; namesakes: Namesake[] };
+  /**
+   * `note` is the line the card must carry, or null when nobody shares the name. `namesakes` are the rows that do.
+   * `bound`: what the same read found that the change must carry when it runs (the version of the row the card
+   * showed). It goes on the server's record of the proposal, never on the card and never to a model.
+   */
+  | { ok: true; note: string | null; namesakes: Namesake[]; bound?: Bound };
 
 /** Decides from the row and its namesakes. A row that is not there is left to the database to report. */
 export function cardCheck(found: Namesakes): CardCheck {
@@ -402,7 +407,11 @@ export function cardDecision(check: CardCheck, shown: { note: string | null } | 
   return check.note ? { type: 'user-approval', reason: check.note } : 'user-approval';
 }
 
-export type Decision = 'user-approval' | { type: 'user-approval'; reason: string } | { type: 'denied'; reason: string };
+/**
+ * A gate's answer. `bound` rides only from a gate to `bindApprovals` (lib/ai/products.ts), which keeps it on the record
+ * of the proposal and takes it off before the SDK sees the answer.
+ */
+export type Decision = 'user-approval' | { type: 'user-approval'; reason: string; bound?: Bound } | { type: 'denied'; reason: string };
 /** The approval function both delete tools share (the SDK's per-tool approval function). */
 export type DeletionGate = (
   input: unknown,

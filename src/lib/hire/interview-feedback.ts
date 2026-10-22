@@ -169,6 +169,28 @@ export function feedbackForModel(feedback: Feedback | null | undefined): {
   };
 }
 
+// ─── the version an Approve card was made from ────────────────────────────────
+
+/**
+ * What the server binds to an assistant's feedback change when it shows the card: the time the feedback it read was
+ * last saved, exactly as stored, or null when there was none. It is kept on the server's record of the proposal and
+ * comes back only from there when the user approves (lib/chat/proposal-store.ts), so no model can set it.
+ */
+export const feedbackBound = (feedback: Pick<Feedback, 'recorded_at'> | null | undefined): { feedback_at: string | null } => ({
+  feedback_at: feedback?.recorded_at ?? null,
+});
+
+/**
+ * The version to send with an approved feedback change: the `feedback_at` the server bound to it, or undefined when
+ * it bound none or there was no feedback. Undefined sends no version: a save that was prepared over no feedback is
+ * then refused by the database's own rule if feedback was added meanwhile (`has_feedback`), since it does not say
+ * "replace".
+ */
+export function seenFeedbackAt(bound: unknown): string | undefined {
+  const at = bound && typeof bound === 'object' ? (bound as { feedback_at?: unknown }).feedback_at : undefined;
+  return typeof at === 'string' && at ? at : undefined;
+}
+
 // ─── the Approve cards ───────────────────────────────────────────────────────
 
 const DOT = ' · ';

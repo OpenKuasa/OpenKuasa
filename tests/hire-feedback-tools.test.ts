@@ -75,8 +75,8 @@ describe('the two feedback tools', () => {
     expect(applied.save).toHaveBeenCalledTimes(1);
     expect(applied.save.mock.calls[0][0]).toBe(ctx);
     expect(applied.save.mock.calls[0][1]).toEqual(input);
-    // No "last seen" version is ever passed by the assistant: the gate's last check does that job.
-    expect(applied.save.mock.calls[0]).toHaveLength(2);
+    // Run with no binding (as a model's own call would be), no version is sent.
+    expect(applied.save.mock.calls[0][2]).toBeUndefined();
     expect(saved).toMatchObject({ ok: true, data: { id: IV, candidate: 'Aina Rahman', job: 'Sales Executive', message: 'Saved.', replaced: false } });
     expect(saved.data.feedback).toEqual({
       rating: 4, recommendation: 'advance', comments: `${'c'.repeat(600)}…`, comments_cut: true, recorded_at: SAVED, recorded: 'Wed 7 Oct 2026, 10:05 am',
@@ -84,6 +84,23 @@ describe('the two feedback tools', () => {
     applied.clear.mockResolvedValue({ ok: true, data: { ...change, feedback: null, message: 'Cleared.' } });
     expect(await tools.clearInterviewFeedback.execute({ id: IV }, OPTIONS)).toMatchObject({ ok: true, data: { id: IV, feedback: null, message: 'Cleared.' } });
     expect(applied.clear.mock.calls[0][1]).toEqual({ id: IV });
+    expect(applied.clear.mock.calls[0][2]).toBeUndefined();
+  });
+  it('send the version the server bound to the approved change, and only that: never one the input brings', async () => {
+    const tools = writer();
+    applied.save.mockResolvedValue({ ok: false, error: 'x' });
+    applied.clear.mockResolvedValue({ ok: false, error: 'x' });
+    const at = '2026-10-07T02:05:40.123456+00:00';
+    const bound = { ...OPTIONS, bound: { feedback_at: at } };
+    await tools.saveInterviewFeedback.execute({ id: IV, rating: 4, recommendation: 'advance', replace: true }, bound);
+    await tools.clearInterviewFeedback.execute({ id: IV }, bound);
+    expect(applied.save.mock.calls[0][2]).toBe(at);
+    expect(applied.clear.mock.calls[0][2]).toBe(at);
+    // Bound as none (there was no feedback): no version. A version in the input, under any name, is not read.
+    await tools.saveInterviewFeedback.execute({ id: IV, rating: 4, recommendation: 'advance' }, { ...OPTIONS, bound: { feedback_at: null } });
+    await tools.clearInterviewFeedback.execute({ id: IV, $bound: { feedback_at: at }, feedback_at: at, seen: at }, OPTIONS);
+    expect(applied.save.mock.calls[1][2]).toBeUndefined();
+    expect(applied.clear.mock.calls[1][2]).toBeUndefined();
   });
   it('a refusal is handed on as it is', async () => {
     const refused = { ok: false, error: 'This interview already has feedback. Open it to edit it.' };

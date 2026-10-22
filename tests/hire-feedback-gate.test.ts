@@ -8,6 +8,8 @@ import {
   feedbackNotHeld, feedbackRuleProblem, guardInterviewChanges, interviewCardDecision, interviewCheckFor, interviewNotLookedUp,
 } from '@/lib/ai/hire-interview-gate';
 import { refusalForUser } from '@/components/chat/tool-parts';
+import { approvalBinding, bindApprovals, hireProduct } from '@/lib/ai/products';
+import { memoryProposalStore } from '@/lib/chat/proposal-store';
 import type { Feedback } from '@/lib/hire/interview-feedback';
 import { interviewCardFromLists } from '@/lib/hire/namesakes';
 import { createSeedHireData } from '@/lib/hire/seed';
@@ -31,6 +33,9 @@ const LINE = 'This interview: Tue 6 Oct 2026, 3:00 pm · video · 1 hour · No p
 const NONE_YET = `${LINE}\nNow: completed · no feedback yet`;
 const HAS = `${LINE}\nNow: completed · feedback 3 out of 5 · Hold · saved Wed 7 Oct 2026, 10:05:40 am`;
 const SAVE = { id: IV, rating: 4, recommendation: 'advance' };
+/** What the server binds to a feedback card: the version of the feedback it read, to the microsecond, or null. */
+const NONE_SEEN = { feedback_at: null };
+const SEEN = { feedback_at: SAVED };
 
 type State = { status: InterviewStatus; feedback: Feedback | null; second?: InterviewStatus; fail?: boolean; gone?: boolean };
 /** One application with one interview (and, with `second`, an earlier one); the checks read these rows. */
@@ -151,20 +156,20 @@ describe('what feedback\'s own rules refuse', () => {
 
 describe('the server read behind a feedback card', () => {
   it('a card for feedback carries which interview it is and how it stands now, both read from the server\'s row', async () => {
-    expect(await check(COMPLETED)('saveInterviewFeedback', SAVE)).toEqual({ ok: true, note: NONE_YET, namesakes: [] });
-    expect(await check(RATED)('saveInterviewFeedback', { ...SAVE, replace: true })).toEqual({ ok: true, note: HAS, namesakes: [] });
-    expect(await check(RATED)('clearInterviewFeedback', { id: IV })).toEqual({ ok: true, note: HAS, namesakes: [] });
+    expect(await check(COMPLETED)('saveInterviewFeedback', SAVE)).toEqual({ ok: true, note: NONE_YET, namesakes: [], bound: NONE_SEEN });
+    expect(await check(RATED)('saveInterviewFeedback', { ...SAVE, replace: true })).toEqual({ ok: true, note: HAS, namesakes: [], bound: SEEN });
+    expect(await check(RATED)('clearInterviewFeedback', { id: IV })).toEqual({ ok: true, note: HAS, namesakes: [], bound: SEEN });
     expect(await check(SCHEDULED)('saveInterviewFeedback', { ...SAVE, mark_completed: true }))
-      .toEqual({ ok: true, note: `${LINE}\nNow: scheduled · no feedback yet`, namesakes: [] });
+      .toEqual({ ok: true, note: `${LINE}\nNow: scheduled · no feedback yet`, namesakes: [], bound: NONE_SEEN });
     // Nothing of the input is on the line: not the rating, not the comments.
     const noted = await check(COMPLETED)('saveInterviewFeedback', { ...SAVE, comments: 'Strong on key accounts.' });
     expect(JSON.stringify(noted)).not.toMatch(/key accounts|4 out of 5/);
   });
   it('lists the person\'s other interviews: two completed ones are easily taken for each other', async () => {
     const two = await check({ ...COMPLETED, second: 'completed' })('saveInterviewFeedback', SAVE);
-    expect(two).toEqual({ ok: true, note: `${NONE_YET}\nAlso closed for ${WHO}: Thu 1 Oct 2026, 11:00 am · video · completed (${JOB})`, namesakes: [] });
+    expect(two).toEqual({ ok: true, note: `${NONE_YET}\nAlso closed for ${WHO}: Thu 1 Oct 2026, 11:00 am · video · completed (${JOB})`, namesakes: [], bound: NONE_SEEN });
     const ahead = await check({ ...RATED, second: 'scheduled' })('clearInterviewFeedback', { id: IV });
-    expect(ahead).toEqual({ ok: true, note: `${HAS}\nAlso scheduled for ${WHO}: Thu 1 Oct 2026, 11:00 am · video (${JOB})`, namesakes: [] });
+    expect(ahead).toEqual({ ok: true, note: `${HAS}\nAlso scheduled for ${WHO}: Thu 1 Oct 2026, 11:00 am · video (${JOB})`, namesakes: [], bound: SEEN });
   });
   it('refuses, before any card, what the rules refuse; an interview that has gone and a failed read are said as 4a says them', async () => {
     expect(await check(RATED)('saveInterviewFeedback', SAVE)).toEqual({ ok: false, refusal: FEEDBACK_EXISTS });
@@ -180,6 +185,7 @@ describe('the server read behind a feedback card', () => {
     said.mockRestore();
   });
   it('4a\'s cards are as they were: no "Now" line on a change that is not about feedback', async () => {
+    // Nor anything bound: only a feedback change carries the feedback's version.
     expect(await check(SCHEDULED)('cancelInterview', { id: IV })).toEqual({ ok: true, note: LINE, namesakes: [] });
     expect(await check(COMPLETED)('reopenInterview', { id: IV })).toEqual({ ok: true, note: LINE, namesakes: [] });
   });
@@ -187,7 +193,7 @@ describe('the server read behind a feedback card', () => {
     const shown = { note: HAS };
     const replace = { ...SAVE, replace: true };
     // Unchanged: the same card again.
-    expect(interviewCardDecision(await check(RATED)('saveInterviewFeedback', replace), shown)).toEqual({ type: 'user-approval', reason: HAS });
+    expect(interviewCardDecision(await check(RATED)('saveInterviewFeedback', replace), shown)).toEqual({ type: 'user-approval', reason: HAS, bound: SEEN });
     // A colleague edited it one second later.
     const edited: State = { status: 'completed', feedback: { ...STORED, recorded_at: '2026-10-07T02:05:41.000Z' } };
     expect(interviewCardDecision(await check(edited)('saveInterviewFeedback', replace), shown)).toEqual({ type: 'denied', reason: INTERVIEW_CHANGED_SINCE });
@@ -199,6 +205,36 @@ describe('the server read behind a feedback card', () => {
     // Another closed interview of the person appeared: which interview the yes was for has not changed.
     const more = await check({ ...RATED, second: 'completed' })('saveInterviewFeedback', replace);
     expect(interviewCardDecision(more, shown)).toMatchObject({ type: 'user-approval' });
+  });
+});
+
+describe('the version a feedback card was made from, on the server\'s record', () => {
+  const listed = [
+    { role: 'user', content: `Clear ${WHO}'s feedback` },
+    { role: 'assistant', content: [{ type: 'tool-call', toolCallId: 'l1', toolName: 'listInterviews', input: {} }] },
+    { role: 'tool', content: [{ type: 'tool-result', toolCallId: 'l1', toolName: 'listInterviews', output: { type: 'json', value: { total: 1, interviews: [
+      { id: IV, application_id: APP, candidate: WHO, job: JOB, status: 'completed' },
+    ] } } }] },
+  ] as ModelMessage[];
+  const bound = (state: State) => {
+    const product = hireProduct({ data: world(state), write: { ctx: { client: {} as never, orgId: 'org1' }, canWrite: true } });
+    const products = [product];
+    const approval = Object.fromEntries(HIRE_FEEDBACK_TOOL_NAMES.map((name) => [name, 'user-approval'])) as Record<string, 'user-approval'>;
+    const store = memoryProposalStore();
+    const kit = bindApprovals(
+      { tools: { ...product.read, ...product.write }, toolApproval: guardInterviewChanges(approval, product.checkInterviewChange) },
+      products, approvalBinding(store, listed),
+    );
+    const gate = (tool: string) => kit.toolApproval![tool] as DeletionGate;
+    return { store, gate };
+  };
+  it('is kept on the record with the proposal and never handed to the SDK with the card', async () => {
+    const rated = bound(RATED);
+    expect(await rated.gate('clearInterviewFeedback')({ id: IV }, { toolCallId: 'c1', messages: listed })).toEqual({ type: 'user-approval', reason: HAS });
+    expect(rated.store.rows[0]).toMatchObject({ toolCallId: 'c1', action: 'clearInterviewFeedback', input: { id: IV }, bound: SEEN });
+    const fresh = bound(COMPLETED);
+    expect(await fresh.gate('saveInterviewFeedback')(SAVE, { toolCallId: 'c1', messages: listed })).toEqual({ type: 'user-approval', reason: NONE_YET });
+    expect(fresh.store.rows[0]).toMatchObject({ action: 'saveInterviewFeedback', input: SAVE, bound: NONE_SEEN });
   });
 });
 
@@ -245,7 +281,8 @@ describe('one interview change a turn, feedback included', () => {
   it('a call this gate refused is not the turn\'s one: sent again as the refusal says, it reaches a card', async () => {
     const gates = guarded(SCHEDULED);
     expect(await ask(gates, 'saveInterviewFeedback', SAVE, 'c1')).toEqual({ type: 'denied', reason: FEEDBACK_NOT_COMPLETED });
-    expect(await ask(gates, 'saveInterviewFeedback', { ...SAVE, mark_completed: true }, 'c2')).toEqual({ type: 'user-approval', reason: `${LINE}\nNow: scheduled · no feedback yet` });
+    expect(await ask(gates, 'saveInterviewFeedback', { ...SAVE, mark_completed: true }, 'c2'))
+      .toEqual({ type: 'user-approval', reason: `${LINE}\nNow: scheduled · no feedback yet`, bound: NONE_SEEN });
     // The same across requests: the refused call is in the messages, with its reason.
     const refused = [
       ...listed,

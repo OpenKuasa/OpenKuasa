@@ -523,7 +523,10 @@ function specialistTools(
         // Its place is held above without a pause; now it is recorded. An approval is answered from this record,
         // so a change that could not be recorded is withdrawn and never reaches a card: a deletion or a talent
         // pool change gives its one place in the turn back, like any other.
-        const kept = await team.store.record({ id: proposal.id, product: product.key, action: name, input });
+        // With what the server read binds to it (the version of the feedback the card was made from): kept on the
+        // record, never on the proposal the browser and the models see.
+        const bound = checkedInterview?.ok ? checkedInterview.bound : undefined;
+        const kept = await team.store.record({ id: proposal.id, product: product.key, action: name, input, ...(bound ? { bound } : {}) });
         if (!kept) {
           team.proposals.delete(proposal.id);
           prepared.splice(prepared.indexOf(proposal), 1);
@@ -681,7 +684,8 @@ async function apply(
   if (!parsed.success) {
     return { ok: false, error: 'That prepared change is no longer valid. Ask for it again.' };
   }
-  const output = await run(parsed.data, options);
+  // What the server bound when it prepared the change goes beside the SDK's options, where no argument can reach.
+  const output = await run(parsed.data, stored.bound ? { ...(options as object), bound: stored.bound } : options);
   if (team.names) collectNames([{ tool: proposal.action, output }], team.names);
   // An AI-applied finance write bypasses the finance forms' own revalidatePath calls, so refresh the screens
   // it changed here — only on success, and only for finance (see finance-revalidate.ts).

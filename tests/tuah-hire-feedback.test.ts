@@ -392,6 +392,88 @@ describe('through the user\'s answer, as a chat route runs each request', () => 
       }
     });
 
+    // The version the card was made from travels on the server's record and is sent when the user approves.
+    const CHANGED_SAVE = 'The feedback on this interview was changed a moment ago. Nothing was saved. Check it and try again.';
+    const CHANGED_CLEAR = 'The feedback on this interview was changed a moment ago. Nothing was cleared. Check it and try again.';
+    /** A colleague's save inside the same second: the card's line (to the second) reads the same, the version does not. */
+    const SAME_SECOND: Feedback = { ...STORED, comments: 'Fine with night shifts after all.', recorded_at: '2026-10-07T02:05:40.500Z' };
+    /** The capability as the database answers it: refused when a version is sent that is not the stored one. */
+    const asDatabase = (state: State, ok: unknown, changed: string) => async (_ctx: unknown, _input: unknown, seen?: string) =>
+      (seen !== undefined && seen !== state.feedback?.recorded_at ? { ok: false, error: changed } : ok);
+    const clear: Call = { tool: 'clearInterviewFeedback', input: { id: IV } };
+
+    it('an approved replacement sends the version of the feedback its card showed; one prepared over no feedback sends none', async () => {
+      reset();
+      const run = asRoute(mode, world({ status: 'completed', feedback: STORED }));
+      const replace = save({ replace: true });
+      seen.workerScript = own ? null : [listAll, replace, 'answer'];
+      try {
+        const shown = await exchange([say('u1', `Change ${WHO}'s interview feedback to 4, advance`)], run, own ? [[listAll], [replace]] : null);
+        expect(waiting(shown)).toHaveLength(1);
+        await exchange(decide(shown, true), run, own ? [] : null);
+        expect(feedbackSaved).toHaveBeenCalledTimes(1);
+        expect(feedbackSaved.mock.calls[0][1]).toEqual({ ...SAVE, replace: true });
+        expect(feedbackSaved.mock.calls[0][2]).toBe(STORED.recorded_at);
+      } finally {
+        seen.workerScript = null;
+      }
+      reset();
+      const fresh = asRoute(mode, world({ status: 'completed', feedback: null }));
+      seen.workerScript = own ? null : [listAll, save(), 'answer'];
+      try {
+        const shown = await exchange([say('u1', `Record feedback for ${WHO}: 4, advance`)], fresh, own ? [[listAll], [save()]] : null);
+        await exchange(decide(shown, true), fresh, own ? [] : null);
+        expect(feedbackSaved).toHaveBeenCalledTimes(1);
+        // No version: the database refuses it by its own rule if feedback was added meanwhile, as it does not say replace.
+        expect(feedbackSaved.mock.calls[0][2]).toBeUndefined();
+      } finally {
+        seen.workerScript = null;
+      }
+    });
+
+    it('an approved clear sends the version of the feedback its card showed', async () => {
+      reset();
+      feedbackCleared.mockResolvedValue({ ok: true, data: { id: IV, candidate: WHO, job: JOB, message: `Cleared the feedback on the interview with ${WHO}.`, feedback: null, replaced: false, marked_completed: false, confirmed: true } });
+      const run = asRoute(mode, world({ status: 'completed', feedback: STORED }));
+      seen.workerScript = own ? null : [listAll, clear, 'answer'];
+      try {
+        const shown = await exchange([say('u1', `Clear ${WHO}'s interview feedback`)], run, own ? [[listAll], [clear]] : null);
+        expect(waiting(shown)).toHaveLength(1);
+        expect(asks(shown, waiting(shown)[0])).toEqual({ action: 'clearInterviewFeedback', input: { id: IV } });
+        await exchange(decide(shown, true), run, own ? [] : null);
+        expect(feedbackCleared).toHaveBeenCalledTimes(1);
+        expect(feedbackCleared.mock.calls[0][1]).toEqual({ id: IV });
+        expect(feedbackCleared.mock.calls[0][2]).toBe(STORED.recorded_at);
+      } finally {
+        seen.workerScript = null;
+      }
+    });
+
+    it.each(['save', 'clear'] as const)('a colleague saves within the same second (the card reads the same): the approved %s is refused by the database, in plain words', async (doing) => {
+      reset();
+      const state: State = { status: 'completed', feedback: STORED };
+      const run = asRoute(mode, world(state));
+      const ok = { ok: true, data: { id: IV, candidate: WHO, job: JOB, message: 'Done.', feedback: null, replaced: false, marked_completed: false, confirmed: true } };
+      feedbackSaved.mockImplementation(asDatabase(state, ok, CHANGED_SAVE));
+      feedbackCleared.mockImplementation(asDatabase(state, ok, CHANGED_CLEAR));
+      const call = doing === 'save' ? save({ replace: true }) : clear;
+      seen.workerScript = own ? null : [listAll, call, 'answer'];
+      try {
+        const shown = await exchange([say('u1', `Change ${WHO}'s interview feedback`)], run, own ? [[listAll], [call]] : null);
+        expect(waiting(shown)).toHaveLength(1);
+        state.feedback = SAME_SECOND;
+        const after = await exchange(decide(shown, true), run, own ? [] : null);
+        // The gate's last check let it through (its line is to the second); the version sent is the card's, and the database said no.
+        const capability = doing === 'save' ? feedbackSaved : feedbackCleared;
+        expect(capability).toHaveBeenCalledTimes(1);
+        expect(capability.mock.calls[0][2]).toBe(STORED.recorded_at);
+        expect(stopped(after)).toEqual([]);
+        expect(told(doing === 'save' ? CHANGED_SAVE : CHANGED_CLEAR)).toBe(true);
+      } finally {
+        seen.workerScript = null;
+      }
+    });
+
     it('a colleague clears the feedback between the card and the yes: the approved replacement is stopped, in that outcome\'s own words', async () => {
       reset();
       const state: State = { status: 'completed', feedback: STORED };
