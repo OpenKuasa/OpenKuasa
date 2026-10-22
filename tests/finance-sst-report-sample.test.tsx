@@ -80,5 +80,8 @@ describe('the return body', () => {
     expect(body).not.toContain('Not ready yet');
     for (const item of ['11(a)', '11(b)', '13(a)', '13(b)', '13A', '13(d)', '14']) expect(body).toContain(item);
     expect(body).toContain('Not registered: add the number in SST settings above');
+    // The sales return's B1 column is item (8); (10) is the service return's.
+    expect(body).toContain('Value of goods sold (8)');
+    expect(body).not.toContain('Value of taxable goods');
   });
 });

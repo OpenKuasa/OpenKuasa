@@ -196,7 +196,7 @@ export function SstReturnBody({ ret, settings, companyName }: { ret: SstReturn; 
                   <TableRow className="bg-muted/40">
                     <TableHead>Description</TableHead>
                     <TableHead>{service ? 'Service type code' : 'Tariff code'}</TableHead>
-                    <TableHead className="text-right">{service ? 'Value of taxable service (10)' : 'Value of taxable goods (10)'}</TableHead>
+                    <TableHead className="text-right">{service ? 'Value of taxable service (10)' : 'Value of goods sold (8)'}</TableHead>
                     <TableHead className="text-right">Own use or free</TableHead>
                   </TableRow>
                 </TableHeader>
