@@ -96,9 +96,9 @@ begin
   select string_agg(p.policyname, ',' order by p.policyname), count(*) filter (where p.policyname = 'hr_receipts_select' and p.cmd = 'SELECT' and p.qual like '%is_manager_of(c.employee_id)%') into ctx, i
   from pg_policies p where p.schemaname = 'storage' and p.tablename = 'objects' and p.policyname like 'hr\_receipts%';
   if ctx is distinct from 'hr_receipts_insert_own,hr_receipts_mfa_required,hr_receipts_select' or i <> 1 then fails := fails || format('the receipt policies are %s, the read rule with the manager branch %s of 1', ctx, i); end if;
-  select count(*), string_agg(p.tablename, ',' order by p.tablename) filter (where not (p.tablename = any(five) or p.policyname = 'hr_receipts_select')) into i, ctx
+  select count(*), string_agg(p.tablename, ',' order by p.tablename) filter (where not (p.tablename = any(five) or p.tablename in ('hr_shifts', 'hr_timesheet_entries') or p.policyname = 'hr_receipts_select')) into i, ctx
   from pg_policies p where coalesce(p.qual, '') || coalesce(p.with_check, '') like '%is_manager_of%';
-  if i <> 6 or ctx is not null then fails := fails || format('%s policies mention a manager (6: the five tables and the receipts); others: %s', i, coalesce(ctx, 'none')); end if;
+  if i <> 8 or ctx is not null then fails := fails || format('%s policies mention a manager (8: the five tables, shifts, timesheets and the receipts); others: %s', i, coalesce(ctx, 'none')); end if;
   if cardinality(fails) > 0 then raise exception 'the catalogue is not as expected, so nothing else was tried'; end if;
 
   -- ---- helpers ----------------------------------------------------------------------------
@@ -280,8 +280,7 @@ begin
   with a as (insert into public.hr_scorecards (org_id, employee_id, period, score, released_at) values (org, e_rep, 'H1 2026', 3.5, timestamptz '2026-01-05 00:00+00') returning id) insert into rl_closed select 'hr_scorecards', id from a;
   with a as (insert into public.hr_goals (org_id, employee_id, title) values (org, e_rep, 'A goal') returning id) insert into rl_closed select 'hr_goals', id from a;
   with a as (insert into public.hr_training_enrolments (org_id, employee_id, training_id) values (org, e_rep, trn) returning id) insert into rl_closed select 'hr_training_enrolments', id from a;
-  with a as (insert into public.hr_timesheet_entries (org_id, employee_id, work_date, hours) values (org, e_rep, date '2026-01-07', 8) returning id) insert into rl_closed select 'hr_timesheet_entries', id from a;
-  with a as (insert into public.hr_shifts (org_id, employee_id, work_date, shift) values (org, e_rep, date '2026-01-07', 'morning') returning id) insert into rl_closed select 'hr_shifts', id from a;
+  -- Shifts and timesheets are read by a manager since 20261124140000_people_rosters_and_hours.sql; people_rosters_hours_check.sql proves it.
   insert into rl_closed values ('hr_payslips', slip);
   perform pg_temp.inbox();
 
@@ -379,7 +378,7 @@ begin
   end loop;
   -- rep reads their own of the kinds an employee may read, so the rows above are not hidden from everyone.
   select count(*) into i from rl_closed q where pg_temp.g(rep, format('(select count(*) from public.%I x where x.id = %L)', q.tbl, q.id)) = '=1';
-  if i <> 10 then fails := fails || format('rep reads %s of their own 10 rows in the closed tables', i); end if;
+  if i <> 8 then fails := fails || format('rep reads %s of their own 8 rows in the closed tables', i); end if;
   foreach k in array array['hr_payroll_runs', 'hr_payment_vouchers', 'hr_settings', 'hr_letter_templates'] loop
     a := pg_temp.g(adm, format('(select count(*) > 0 from public.%I x where x.org_id = %L)', k, org));
     b := pg_temp.g(mgr, format('(select count(*) from public.%I x where x.org_id = %L)', k, org));
