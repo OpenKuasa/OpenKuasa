@@ -192,13 +192,15 @@ describe('buildSstReturn: voids', () => {
     expect(sep.item12).toBe(300);
     expect(sep.b1Total).toBe(5000);
     expect(item(sep.deductions, '13(a)')?.tax).toBe(0);
+    expect(sep.voidedTax).toBe(0);
     const nov = buildSstReturn('service', NOV_DEC, [l], []);
     expect(item(nov.deductions, '13(a)')?.tax).toBe(300);
+    expect(nov.voidedTax).toBe(300);
     expect(nov.b1).toEqual([]);
     expect(nov.b1Total).toBe(0);
     expect(nov.item12).toBe(0);
     expect(nov.item14).toBe(-300);
-    // A void of a sales line does not touch the service return.
+    // A void of a service line does not touch the sales return.
     expect(item(buildSstReturn('sales', NOV_DEC, [l], []).deductions, '13(a)')?.tax).toBe(0);
   });
 
@@ -208,6 +210,7 @@ describe('buildSstReturn: voids', () => {
     const nov = buildSstReturn('service', NOV_DEC, [l], []);
     expect(item(nov.deductions, '13(a)')?.tax).toBe(0);
     expect(nov.offForm).toEqual({ count: 0, value: 0, tax: 0 });
+    expect(nov.voidedTax).toBe(0);
   });
 
   it('counts a credit note voided later in its own period and lowers 13(a) of the void period', () => {
@@ -223,6 +226,8 @@ describe('buildSstReturn: voids', () => {
     const nov = buildSstReturn('service', NOV_DEC, [], [c]);
     expect(item(nov.deductions, '13(a)')?.tax).toBe(-80);
     expect(nov.item14).toBe(80);
+    // A credit note's void is not an invoice's: voidedTax stays 0.
+    expect(nov.voidedTax).toBe(0);
   });
 
   it('leaves out a credit note voided in the period it was issued in', () => {

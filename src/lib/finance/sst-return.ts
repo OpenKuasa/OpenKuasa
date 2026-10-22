@@ -8,6 +8,7 @@
  * Periods: an invoice line counts by its invoice date, a credit note by its credit date. A document voided in
  * the period it was dated in counts nowhere. One voided in a later period counts in its own period, and the
  * void period's 13(a) moves by its tax: up for an invoice, down for a credit note (13(a) may go below 0).
+ * An off-form line voided later moves nothing, because its tax was never in item 12.
  */
 import { type SstPeriod, type SstSettings, type SstTaxType, sstPeriodFor, taxTypeForRate } from './sst';
 
@@ -55,6 +56,8 @@ export type SstReturn = {
   item14: number;
   offForm: { count: number; value: number; tax: number };
   untyped: { count: number; value: number };
+  /** The part of 13(a), in ringgit, from invoice lines of earlier periods voided in this one; 0 otherwise. */
+  voidedTax: number;
 };
 
 /** The form's rate items per return: a line of the type at any other rate is off the form. */
@@ -114,6 +117,7 @@ export function buildSstReturn(type: SstReturnType, period: SstPeriod, lines: Ss
   const offForm = { count: 0, value: 0, tax: 0 };
   const untyped = { count: 0, value: 0 };
   let creditNotesSen = 0;
+  let voidedSen = 0;
 
   for (const l of lines) {
     const where = standing(l.invoice_date, l.invoice_status === 'void', l.voided_on, period);
@@ -130,7 +134,10 @@ export function buildSstReturn(type: SstReturnType, period: SstPeriod, lines: Ss
     const at = items.findIndex((i) => i.rate === l.sst_rate);
     if (where === 'reversed') {
       // Only tax that was on the form (item 12) of its own period comes back through 13(a).
-      if (at >= 0) creditNotesSen += toSen(l.sst_amount_myr);
+      if (at >= 0) {
+        creditNotesSen += toSen(l.sst_amount_myr);
+        voidedSen += toSen(l.sst_amount_myr);
+      }
       continue;
     }
     if (at < 0) {
@@ -194,6 +201,7 @@ export function buildSstReturn(type: SstReturnType, period: SstPeriod, lines: Ss
     item14: fromSen(item14Sen),
     offForm: { count: offForm.count, value: fromSen(offForm.value), tax: fromSen(offForm.tax) },
     untyped: { count: untyped.count, value: fromSen(untyped.value) },
+    voidedTax: fromSen(voidedSen),
   };
 }
 
