@@ -155,6 +155,8 @@ export function SstReturnBody({ ret, settings, companyName }: { ret: SstReturn; 
   const registration = (service ? settings.service_tax_no : settings.sales_tax_no) || 'Not registered: add the number in SST settings above';
   const deductionsTotal = ret.deductions.reduce((s, d) => s + Math.round(d.tax * 100), 0) / 100;
   const notes = notReady ? [] : notesOf(ret);
+  // The items the tile sums; a not-ready return has no items to name.
+  const deductionsHint = notReady ? 'this period' : service ? '13(a) to 13(d)' : '13(a) to 13(d) and 13A';
   const partA = [
     { label: service ? 'Service tax no.' : 'Sales tax no.', value: registration },
     { label: 'Name', value: companyName },
@@ -169,7 +171,7 @@ export function SstReturnBody({ ret, settings, companyName }: { ret: SstReturn; 
         <BentoStat label="Total tax (item 12)" value={notReady ? NOT_READY : rm(ret.item12)} delta="this period" deltaTone="flat" onPrimary />
       </BentoCard>
       <BentoCard className="col-span-2 md:col-span-3">
-        <BentoStat label="Deductions (item 13)" value={notReady ? NOT_READY : rm(deductionsTotal)} delta="credit notes" deltaTone="flat" />
+        <BentoStat label="Deductions (item 13)" value={notReady ? NOT_READY : rm(deductionsTotal)} delta={deductionsHint} deltaTone="flat" />
       </BentoCard>
       <BentoCard className="col-span-2 md:col-span-3">
         <BentoStat label="Tax payable (item 14)" value={notReady ? NOT_READY : rm(ret.item14)} delta="to Customs (JKDM)" deltaTone="flat" />

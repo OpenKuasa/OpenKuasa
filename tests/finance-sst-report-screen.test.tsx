@@ -339,4 +339,13 @@ describe('the typed-in figures on the SST Report (#222 stage 5)', () => {
     state.settings = async () => null;
     expect(textOf(await html())).not.toContain('Typed-in figures');
   });
+
+  it("names the deductions tile's items for each return, not only credit notes", async () => {
+    state.settings = async () => SAVED;
+    const service = textOf(await html());
+    expect(service).toMatch(/Deductions \(item 13\) RM 0\.00 13\(a\) to 13\(d\) Tax payable/);
+    const sales = textOf(await html({ tax: 'sales' }));
+    expect(sales).toMatch(/Deductions \(item 13\) RM 0\.00 13\(a\) to 13\(d\) and 13A Tax payable/);
+    for (const t of [service, sales]) expect(t).not.toMatch(/Deductions \(item 13\) RM [\d.,-]+ credit notes/);
+  });
 });
