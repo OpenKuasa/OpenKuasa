@@ -11,6 +11,7 @@ const actions = vi.hoisted(() => ({
   saveSstSettingsAction: vi.fn(),
   markSstReturnFiledAction: vi.fn(),
   unmarkSstReturnFiledAction: vi.fn(),
+  saveSstFiguresAction: vi.fn(),
 }));
 vi.mock('@/app/(app)/finance/actions', () => actions);
 // The picker is a client component that changes the URL; there is no app router in a static render.
@@ -23,6 +24,8 @@ const state = vi.hoisted(() => ({
   company: async (): Promise<{ name: string; sstNo: string }> => ({ name: 'Rimba Ventures Sdn Bhd', sstNo: '' }),
   rows: async (): Promise<{ lines: unknown[]; credits: unknown[] }> => ({ lines: [], credits: [] }),
   filed: async (): Promise<Record<string, string>> => ({}),
+  figures: async (): Promise<Record<string, unknown>> => ({}),
+  figureReads: [] as string[],
   spans: [] as { start: string; end: string }[],
 }));
 vi.mock('@/lib/auth/viewer', () => ({ getViewer: async () => state.viewer, hasSupabaseEnv: () => true }));
@@ -35,6 +38,10 @@ vi.mock('@/lib/finance/sst-return-data', async (importOriginal) => ({
     return state.rows();
   },
   listSstFiled: () => state.filed(),
+  listSstFigures: (_ctx: unknown, type: string) => {
+    state.figureReads.push(type);
+    return state.figures();
+  },
 }));
 // Malaysian today is pinned: 10 Oct 2026, in the 1 Sep – 31 Oct period of a September start.
 vi.mock('@/lib/people/dates', async (importOriginal) => ({
@@ -55,6 +62,8 @@ beforeEach(() => {
   state.company = async () => ({ name: 'Rimba Ventures Sdn Bhd', sstNo: '' });
   state.rows = async () => ({ lines: [], credits: [] });
   state.filed = async () => ({});
+  state.figures = async () => ({});
+  state.figureReads = [];
   state.spans = [];
 });
 
@@ -223,5 +232,111 @@ describe('the SST Report return (#222 stage 2)', () => {
     expect(member).toContain('filed 28 Sep 2026');
     expect(member).not.toContain('Mark as filed');
     expect(member).not.toContain('Undo');
+  });
+});
+
+describe('the typed-in figures on the SST Report (#222 stage 5)', () => {
+  const html = async (params: Record<string, string> = {}) => renderToStaticMarkup(await SstReportScreen({ searchParams: Promise.resolve(params) }));
+  const NONE = { cards11e: 0, deduction13b: 0, deduction13c: 0, badDebt13d: 0, adjustment13a: 0 };
+  const SERVICE_LABELS = [
+    '11(e) Credit and charge cards (number)',
+    '13(c) Approved service tax deduction (RM)',
+    '13(d) Bad debt relief (approved) (RM)',
+  ];
+  const SALES_LABELS = ['13(b) Sales tax deduction (RM)', '13A Adjustment to the sales tax deduction (RM)', '13(d) Bad debt relief (approved) (RM)'];
+
+  it('reads the figures once, and each listed period counts its own', async () => {
+    state.settings = async () => SAVED;
+    state.rows = async () => ({ lines: [line({})], credits: [] });
+    state.figures = async () => ({
+      '2026-09-01': { ...NONE, cards11e: 4, deduction13c: 10 },
+      '2026-07-01': { ...NONE, badDebt13d: 5 },
+    });
+    const text = textOf(await html());
+    expect(state.figureReads).toEqual(['service']);
+    // Sep–Oct: 80 + 4 cards × RM25 = 180 in item 12, less 13(c) 10 = 170 in item 14.
+    expect(text).toContain('Total tax (item 12) RM 180.00');
+    expect(text).toContain('Tax payable (item 14) RM 170.00');
+    // The periods list: Sep–Oct its own 170, Jul–Aug its own 13(d) only.
+    expect(text).toMatch(/1 Sep – 31 Oct 2026 .*payable RM 170\.00/);
+    expect(text).toMatch(/1 Jul – 31 Aug 2026 .*payable RM -5\.00/);
+  });
+
+  it('shows 11(e) as a number of cards, never as ringgit', async () => {
+    state.settings = async () => SAVED;
+    state.figures = async () => ({ '2026-09-01': { ...NONE, cards11e: 4 } });
+    const text = textOf(await html());
+    expect(text).toContain('4 cards');
+    expect(text).not.toContain('RM 4.00');
+    state.figures = async () => ({ '2026-09-01': { ...NONE, cards11e: 1 } });
+    expect(textOf(await html())).toContain('1 card ');
+    state.figures = async () => ({});
+    expect(textOf(await html())).toContain('0 cards');
+  });
+
+  it('says "(typed in)" on the typed lines, no longer "coming later"', async () => {
+    state.settings = async () => SAVED;
+    const text = textOf(await html());
+    expect(text).toContain('(typed in)');
+    expect(text).not.toContain('coming later');
+  });
+
+  it("gives an owner the service return's boxes, filled from its figures, with Save", async () => {
+    state.settings = async () => SAVED;
+    state.figures = async () => ({ '2026-09-01': { ...NONE, cards11e: 4, deduction13c: 1234.5 } });
+    const out = await html();
+    const text = textOf(out);
+    expect(text).toContain('Typed-in figures');
+    expect(text.replace(/&#x27;/g, "'")).toContain("From Customs' approvals and your own records");
+    for (const l of SERVICE_LABELS) expect(text).toContain(l);
+    expect(text).not.toContain('13(b) Sales tax deduction (RM)');
+    expect(out).toContain('value="4"');
+    expect(out).toContain('value="1234.50"');
+    // Two submit buttons: the settings card's and the figures card's.
+    expect(out.match(/<button[^>]*type="submit"/g)).toHaveLength(2);
+  });
+
+  it("gives the sales return its own boxes, not the service return's", async () => {
+    state.settings = async () => SAVED;
+    const text = textOf(await html({ tax: 'sales' }));
+    expect(state.figureReads).toEqual(['sales']);
+    for (const l of SALES_LABELS) expect(text).toContain(l);
+    expect(text).not.toContain('11(e) Credit and charge cards (number)');
+    expect(text).not.toContain('13(c) Approved service tax deduction (RM)');
+  });
+
+  it('gives a member the figures as text, with no box and no Save', async () => {
+    state.settings = async () => SAVED;
+    state.viewer.role = 'member';
+    state.figures = async () => ({ '2026-09-01': { ...NONE, cards11e: 4, deduction13c: 10 } });
+    const out = await html();
+    const text = textOf(out);
+    expect(text).toContain('Typed-in figures');
+    expect(text).toContain('Only an owner or admin can change the typed-in figures.');
+    expect(out).not.toMatch(/<button[^>]*type="submit"/);
+    expect(out).not.toMatch(/<input\b/);
+  });
+
+  it('locks the boxes of a period marked filed', async () => {
+    state.settings = async () => SAVED;
+    state.filed = async () => ({ '2026-07-01': '2026-09-28' });
+    const out = await html({ period: '2026-07-01' });
+    expect(textOf(out)).toContain('This return is marked filed. Undo the mark to change its figures.');
+    const inputs = out.match(/<input\b[^>]*>/g) ?? [];
+    const figureInputs = inputs.filter((i) => /inputMode|inputmode/.test(i));
+    expect(figureInputs).toHaveLength(3);
+    for (const i of figureInputs) expect(i).toMatch(/\sdisabled=""/);
+    // The current period is not filed: its boxes are open.
+    const open = (await html()).match(/<input\b[^>]*inputmode[^>]*>/gi) ?? [];
+    expect(open).toHaveLength(3);
+    for (const i of open) expect(i).not.toMatch(/\sdisabled=""/);
+  });
+
+  it('shows no figures card on the not-ready payment-basis service return, nor before the settings', async () => {
+    state.settings = async () => ({ ...SAVED, service_tax_basis: 'payment' });
+    expect(textOf(await html())).not.toContain('Typed-in figures');
+    expect(textOf(await html({ tax: 'sales' }))).toContain('Typed-in figures');
+    state.settings = async () => null;
+    expect(textOf(await html())).not.toContain('Typed-in figures');
   });
 });

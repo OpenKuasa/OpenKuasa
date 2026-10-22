@@ -9,6 +9,7 @@ vi.mock('@/app/(app)/finance/actions', () => ({
   saveSstSettingsAction: vi.fn(),
   markSstReturnFiledAction: vi.fn(),
   unmarkSstReturnFiledAction: vi.fn(),
+  saveSstFiguresAction: vi.fn(),
 }));
 
 // The picker is a client component that changes the URL; there is no app router in a static render.
@@ -36,9 +37,10 @@ describe('the SST Report without a database', () => {
     for (const item of ['Part A', 'Part B1', 'Value of taxable service (10)', 'Total', '11(c)', '11(d)', '11(e)', '12', '13(a)', '14', 'RM 0.00']) {
       expect(text, item).toContain(item);
     }
-    // Typed-in lines say they come later; never a bare "(typed in)".
-    expect(text).toContain('(typed in, coming later)');
-    expect(text).not.toMatch(/\(typed in\)/);
+    // Typed-in lines say so; they no longer say they come later. 11(e) is a number of cards.
+    expect(text).toContain('(typed in)');
+    expect(text).not.toContain('coming later');
+    expect(text).toContain('0 cards');
     // 13(b) and 13A belong to the sales tax return.
     expect(text).not.toMatch(/13\(b\)|13A/);
   });

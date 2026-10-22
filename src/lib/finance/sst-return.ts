@@ -85,6 +85,9 @@ export type SstTypedFigures = {
 
 export const NO_TYPED_FIGURES: SstTypedFigures = { cards11e: 0, deduction13b: 0, deduction13c: 0, badDebt13d: 0, adjustment13a: 0 };
 
+/** 11(e) is a number of cards, never ringgit: "0 cards", "1 card", "1,200 cards". */
+export const sstCards = (n: number) => `${n.toLocaleString('en-MY')} ${n === 1 ? 'card' : 'cards'}`;
+
 /** Service tax charged on each credit or charge card, in sen. */
 const CARD_TAX_SEN = 2500;
 

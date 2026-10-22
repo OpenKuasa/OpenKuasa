@@ -21,9 +21,11 @@ import {
 } from '@/components/ui/table';
 import {
   markSstReturnFiledAction,
+  saveSstFiguresAction,
   saveSstSettingsAction,
   unmarkSstReturnFiledAction,
 } from '@/app/(app)/finance/actions';
+import { SstFiguresCard } from '@/components/finance/sst-figures-card';
 import { SstPeriodsCard, type SstPeriodRow } from '@/components/finance/sst-periods-card';
 import { SstReturnPicker } from '@/components/finance/sst-return-picker';
 import { SstSettingsCard } from '@/components/finance/sst-settings-card';
@@ -37,11 +39,14 @@ import {
   type SstFormLine,
   type SstLineRow,
   type SstReturn,
+  type SstTypedFigures,
+  NO_TYPED_FIGURES,
   buildSstReturn,
   pickSstView,
   recentSstPeriods,
+  sstCards,
 } from '@/lib/finance/sst-return';
-import { listSstFiled, readSstRows } from '@/lib/finance/sst-return-data';
+import { listSstFiled, listSstFigures, readSstRows } from '@/lib/finance/sst-return-data';
 import { displayDate } from '@/lib/finance/view-helpers';
 import { todayInMalaysia } from '@/lib/people/dates';
 import { createClient } from '@/lib/supabase/server';
@@ -75,7 +80,7 @@ function FormRow({ line, strong }: { line: { item: string; label: string; value?
       <span className="w-16 shrink-0 font-mono text-xs text-muted-foreground">{line.item}</span>
       <span className="min-w-0 flex-1">
         {line.label}
-        {line.typed ? <span className="ml-1.5 text-xs text-muted-foreground">(typed in, coming later)</span> : null}
+        {line.typed ? <span className="ml-1.5 text-xs text-muted-foreground">(typed in)</span> : null}
       </span>
       {line.value !== undefined ? (
         <span className="hidden shrink-0 text-right tabular-nums text-muted-foreground sm:block sm:w-32">
@@ -87,11 +92,11 @@ function FormRow({ line, strong }: { line: { item: string; label: string; value?
   );
 }
 
-/** A form line with its figures formatted. A typed-in card count (11(e)) shows as cards. */
+/** A form line with its figures formatted. A typed-in card count (11(e)) shows as cards, never as ringgit. */
 const shown = (l: SstFormLine) => ({
   item: l.item,
   label: l.label,
-  value: l.value === null ? (l.item === '11(e)' ? '0 cards' : undefined) : rm(l.value),
+  value: l.item === '11(e)' ? sstCards(l.value ?? 0) : l.value === null ? undefined : rm(l.value),
   tax: rm(l.tax),
   typed: l.typed,
 });
@@ -293,6 +298,8 @@ type Loaded = {
   canDecide: boolean;
   rows: (span: { start: string; end: string }) => Promise<{ lines: SstLineRow[]; credits: SstCreditRow[] }>;
   filed: (type: SstReturn['type']) => Promise<Record<string, string>>;
+  /** The typed-in figures of one tax type: period start → figures. */
+  figures: (type: SstReturn['type']) => Promise<Record<string, SstTypedFigures>>;
 };
 
 /**
@@ -311,6 +318,7 @@ async function load(): Promise<Loaded> {
       canDecide: false,
       rows: async () => ({ lines: [], credits: [] }),
       filed: async () => ({}),
+      figures: async () => ({}),
     };
   }
   const viewer = await getViewer();
@@ -334,6 +342,7 @@ async function load(): Promise<Loaded> {
     canDecide: expensesScreenPlan(viewer.role, viewer.isDemo).canDecide,
     rows: (span) => readSstRows(ctx, span),
     filed: (type) => listSstFiled(ctx, type),
+    figures: (type) => listSstFigures(ctx, type),
   };
 }
 
@@ -374,15 +383,20 @@ export default async function SstReportScreen({
   // One read covers the shown period (which may be older than the list) and the twelve listed periods.
   const oldest = periods[periods.length - 1].start;
   const span = { start: view.period.start < oldest ? view.period.start : oldest, end: periods[0].end };
-  const [{ lines: rows, credits }, filed] = await Promise.all([data.rows(span), data.filed(view.type)]);
+  // The figures are read once too, and each period is built with its own (none is zeros).
+  const [{ lines: rows, credits }, filed, figures] = await Promise.all([
+    data.rows(span),
+    data.filed(view.type),
+    data.figures(view.type),
+  ]);
 
-  const ret = buildSstReturn(view.type, view.period, rows, credits);
+  const ret = buildSstReturn(view.type, view.period, rows, credits, figures[view.period.start]);
   const notReady = isNotReady(view.type, settings);
   const periodRows: SstPeriodRow[] = periods.map((p) => ({
     start: p.start,
     label: sstPeriodLabel(p),
     due: displayDate(p.due),
-    payable: notReady ? NOT_READY.toLowerCase() : rm(buildSstReturn(view.type, p, rows, credits).item14),
+    payable: notReady ? NOT_READY.toLowerCase() : rm(buildSstReturn(view.type, p, rows, credits, figures[p.start]).item14),
     filedOn: filed[p.start] ? displayDate(filed[p.start]) : null,
     ended: today > p.end,
   }));
@@ -402,6 +416,17 @@ export default async function SstReportScreen({
       <BentoGrid>
         {card}
         <SstReturnBody ret={ret} settings={settings} companyName={data.companyName} />
+        {/* No return body to put figures in while the service return is not ready (ruling 6). */}
+        {notReady ? null : (
+          <SstFiguresCard
+            key={`${view.type}-${view.period.start}`}
+            type={view.type}
+            periodStart={view.period.start}
+            figures={figures[view.period.start] ?? NO_TYPED_FIGURES}
+            filed={Boolean(filed[view.period.start])}
+            save={data.canDecide ? saveSstFiguresAction : undefined}
+          />
+        )}
         <SstPeriodsCard
           type={view.type}
           shownStart={view.period.start}

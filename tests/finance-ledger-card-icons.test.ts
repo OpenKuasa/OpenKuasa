@@ -45,6 +45,7 @@ const EXPECTED: Record<string, { cards: number; withIcon: number }> = {
   'components/finance/journals-view': { cards: 6, withIcon: 3 },
   'components/finance/reports-view': { cards: 12, withIcon: 8 },
   'screens/finance/sst-report': { cards: 13, withIcon: 6 },
+  'components/finance/sst-figures-card': { cards: 1, withIcon: 1 },
   'components/finance/sst-periods-card': { cards: 1, withIcon: 1 },
   'components/finance/sst-settings-card': { cards: 1, withIcon: 1 },
 };
