@@ -507,12 +507,24 @@ describe('clearInterviewFeedback', () => {
     expect(f.calls).toEqual([{ fn: 'hire_clear_interview_feedback', args: { p_interview_id: IV_ID } }]);
     expect(f.reads).toEqual([{ table: 'hire_interviews', columns: FB_READ, filters: { id: IV_ID, org_id: ORG } }]);
   });
+  it('passes the version that was seen exactly as it arrived, and nothing when there is none', async () => {
+    const seen = fbFake({ answer: 'ok', row: CLEARED_ROW });
+    await clearInterviewFeedback(seen.ctx, { id: IV_ID }, SAVED_AT);
+    expect(seen.calls).toEqual([{ fn: 'hire_clear_interview_feedback', args: { p_interview_id: IV_ID, p_if_feedback_at: SAVED_AT } }]);
+    for (const none of [undefined, ''] as const) {
+      const f = fbFake({ answer: 'ok', row: CLEARED_ROW });
+      await clearInterviewFeedback(f.ctx, { id: IV_ID }, none);
+      expect(f.calls[0].args, String(none)).toEqual({ p_interview_id: IV_ID });
+    }
+  });
   it('refuses a made-up id before any call, and maps each word to its sentence', async () => {
     const f = fbFake({ answer: 'ok' });
     expect(await clearInterviewFeedback(f.ctx, { id: 'interview-7' })).toEqual({ ok: false, error: NOT_AN_INTERVIEW_ID });
     expect(f.calls).toEqual([]);
     for (const [answer, error] of [
-      ['not_found', NOT_FOUND], ['forbidden', FORBIDDEN], ['no_feedback', 'This interview has no feedback to clear.'], ['has_feedback', GENERIC], [null, GENERIC],
+      ['not_found', NOT_FOUND], ['forbidden', FORBIDDEN], ['no_feedback', 'This interview has no feedback to clear.'],
+      ['changed', 'The feedback on this interview was changed a moment ago. Nothing was cleared. Check it and try again.'],
+      ['has_feedback', GENERIC], [null, GENERIC],
     ] as const) {
       expect(await clearInterviewFeedback(fbFake({ answer }).ctx, { id: IV_ID }), String(answer)).toEqual({ ok: false, error });
     }

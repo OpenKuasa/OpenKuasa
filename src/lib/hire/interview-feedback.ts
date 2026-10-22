@@ -90,6 +90,7 @@ const SENTENCES: Record<'save' | 'clear', Record<string, string>> = {
     not_found: NOT_FOUND,
     forbidden: FORBIDDEN,
     no_feedback: 'This interview has no feedback to clear.',
+    changed: 'The feedback on this interview was changed a moment ago. Nothing was cleared. Check it and try again.',
   },
 };
 

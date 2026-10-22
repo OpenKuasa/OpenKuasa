@@ -1765,15 +1765,23 @@ export async function saveInterviewFeedback(
   );
 }
 
-/** Clears the feedback on one interview: the rating, the recommendation, the comments and the saved time. The interview stays completed. */
+/**
+ * Clears the feedback on one interview: the rating, the recommendation, the comments and the saved time. The interview
+ * stays completed. `seen` is the `recorded_at` of the feedback the person was shown (the screen's confirm, or the
+ * assistant's Approve card): as with a save, it is not part of the schema, and the database then clears nothing if
+ * the feedback was saved again meanwhile.
+ */
 export async function clearInterviewFeedback(
   ctx: HireWriteContext,
   input: z.input<typeof clearInterviewFeedbackInput>,
+  seen?: string,
 ): Promise<CapResult<InterviewFeedbackChange>> {
   const parsed = clearInterviewFeedbackInput.safeParse(input);
   if (!parsed.success) return invalid(parsed.error);
   const { id } = parsed.data;
-  const called = await callInterviewFunction(ctx, 'clearInterviewFeedback', 'hire_clear_interview_feedback', { p_interview_id: id });
+  const args: Record<string, unknown> = { p_interview_id: id };
+  if (typeof seen === 'string' && seen) args.p_if_feedback_at = seen;
+  const called = await callInterviewFunction(ctx, 'clearInterviewFeedback', 'hire_clear_interview_feedback', args);
   if (!called.ok) return called;
   const word = wordOf(called.answer);
   if (word !== 'ok') return { ok: false, error: feedbackMessage(word, 'clear') };
