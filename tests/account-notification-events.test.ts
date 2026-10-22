@@ -39,3 +39,27 @@ describe('the manager notification events', () => {
     expect(prefs.events[DECIDED]).toEqual({ email: false, push: false, inapp: true });
   });
 });
+
+// The two Lekiu roster events the database passes to private.deliver_notification
+// (20261125090400_people_roster_notify_swaps.sql).
+describe('the roster and shift swap notification events', () => {
+  const ROSTER = 'hr_roster_changed';
+  const SWAP = 'hr_shift_swap';
+
+  it('lists both in the preferences screen, in-app only by default', () => {
+    const ids = NOTIFY_EVENTS.map((e) => e.id) as string[];
+    for (const id of [ROSTER, SWAP] as const) {
+      expect(ids).toContain(id);
+      expect(DEFAULT_NOTIFICATION_PREFS.events[id]).toEqual({ email: false, push: false, inapp: true });
+    }
+  });
+
+  it('resolves both on for a value stored before this release, and keeps a switch-off', () => {
+    const before = resolveNotificationPrefs({ events: { hr_request_filed: { email: false, push: false, inapp: true } } });
+    expect(before.events[ROSTER].inapp).toBe(true);
+    expect(before.events[SWAP].inapp).toBe(true);
+    const off = resolveNotificationPrefs({ events: { hr_shift_swap: { inapp: false } } });
+    expect(off.events[SWAP].inapp).toBe(false);
+    expect(off.events[ROSTER].inapp).toBe(true);
+  });
+});

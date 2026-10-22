@@ -101,6 +101,13 @@ import {
 import { fxSstRate } from '@/lib/finance/sst-rate';
 import { SST_NEEDS_SIGN_OFF, saveSstSettings, sstSettingsInput } from '@/lib/finance/sst';
 import {
+  SST_RETURN_NEEDS_SIGN_OFF,
+  markSstReturnFiled,
+  sstReturnInput,
+  unmarkSstReturnFiled,
+} from '@/lib/finance/sst-return-data';
+import { todayInMalaysia } from '@/lib/people/dates';
+import {
   INVOICE_MESSAGES,
   type InvoiceDetail,
   type SaveAndPostInvoiceResult,
@@ -1264,4 +1271,24 @@ export async function saveSstSettingsAction(input: unknown): Promise<FinResult<n
     const result = await saveSstSettings(ctx, parsed);
     return result.ok ? { ok: true, data: null } : result;
   }, SST_SETTINGS_SIGN_OFF);
+}
+
+/* ------------------------------------------------------------------ SST return filed (#222 stage 2) */
+
+const SST_RETURN_SIGN_OFF = { signOff: true, signOffError: SST_RETURN_NEEDS_SIGN_OFF } as const;
+
+/** Marks an SST return as filed with JKDM today (Malaysian), once its period has ended. An owner or admin only. */
+export async function markSstReturnFiledAction(input: unknown): Promise<FinResult<null>> {
+  return run(SST_SETTINGS_PATHS, sstReturnInput, input, async (ctx, parsed) => {
+    const result = await markSstReturnFiled(ctx, parsed, todayInMalaysia(new Date()));
+    return result.ok ? { ok: true, data: null } : result;
+  }, SST_RETURN_SIGN_OFF);
+}
+
+/** Takes the filed mark off an SST return. An owner or admin only. */
+export async function unmarkSstReturnFiledAction(input: unknown): Promise<FinResult<null>> {
+  return run(SST_SETTINGS_PATHS, sstReturnInput, input, async (ctx, parsed) => {
+    const result = await unmarkSstReturnFiled(ctx, parsed);
+    return result.ok ? { ok: true, data: null } : result;
+  }, SST_RETURN_SIGN_OFF);
 }

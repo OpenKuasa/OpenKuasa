@@ -10,6 +10,8 @@ const ZERO: NavBadges = {
   waitingTimeOff: 0,
   waitingClaims: 0,
   waitingOvertime: 0,
+  waitingSwaps: 0,
+  waitingSwapReplies: 0,
 };
 
 describe('AI Agents nav badge', () => {
@@ -19,7 +21,7 @@ describe('AI Agents nav badge', () => {
     expect(agents?.badge).toBe('pendingProposals');
   });
 
-  it('is one of exactly seven badged nav items across every product (the others are Lekiu Announcements, My Documents and the four approval pages)', () => {
+  it('is one of exactly nine badged nav items across every product (the others are Lekiu Announcements, My Documents, the five approval pages and Shift Calendar)', () => {
     const badged = PRODUCTS.flatMap((p) => p.sections.flatMap((s) => s.items)).filter((i) => i.badge);
     expect(badged.map((i) => [i.slug, i.badge]).sort()).toEqual([
       ['agents', 'pendingProposals'],
@@ -27,8 +29,10 @@ describe('AI Agents nav badge', () => {
       ['approve-claims', 'waitingClaims'],
       ['approve-leave', 'waitingLeave'],
       ['approve-overtime', 'waitingOvertime'],
+      ['approve-shift-swaps', 'waitingSwaps'],
       ['approve-time-off', 'waitingTimeOff'],
       ['my-documents', 'awaitingAcknowledgement'],
+      ['shift-calendar', 'waitingSwapReplies'],
     ]);
   });
 

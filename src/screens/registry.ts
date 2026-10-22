@@ -55,6 +55,7 @@ import ApproveLeaveScreen from '@/screens/people/approve-leave';
 import ApproveClaimsScreen from '@/screens/people/approve-claims';
 import ApproveOvertimeScreen from '@/screens/people/approve-overtime';
 import ApproveTimeOffScreen from '@/screens/people/approve-time-off';
+import ApproveShiftSwapsScreen from '@/screens/people/approve-shift-swaps';
 import PublicHolidaysScreen from '@/screens/people/public-holidays';
 import LettersScreen from '@/screens/people/letters';
 import TimesheetScreen from '@/screens/people/timesheet';
@@ -162,6 +163,7 @@ export const SCREENS: Record<string, ComponentType> = {
   'people/approve-claims': ApproveClaimsScreen,
   'people/approve-overtime': ApproveOvertimeScreen,
   'people/approve-time-off': ApproveTimeOffScreen,
+  'people/approve-shift-swaps': ApproveShiftSwapsScreen,
   'people/public-holidays': PublicHolidaysScreen,
   'people/letters': LettersScreen,
   'people/timesheet': TimesheetScreen,

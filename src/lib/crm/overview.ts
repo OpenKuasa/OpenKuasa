@@ -3,6 +3,7 @@ import {
   dailyDealReport,
   dealKpis,
   formatDay,
+  formatRM,
   klDay,
   weeklyDealTrend,
   type DealTrendWeek,
@@ -49,7 +50,82 @@ export type CrmOverviewModel = {
   closingSoonTotal: number;
   /** Open follow-ups, soonest due first. */
   followUps: { id: string; title: string; due: string; overdue: boolean }[];
+  /** The latest things that happened, newest first; at most five. */
+  activity: { text: string; when: string }[];
 };
+
+/** How many entries "Recent activity" lists. */
+export const ACTIVITY_LISTED = 5;
+
+/** A contact as "Recent activity" mentions it. */
+export type OverviewContactAdded = { name: string; source: string | null; createdAt: string };
+
+/** A logged call, message, meeting, note or follow-up as "Recent activity" reads it. */
+export type OverviewLoggedWork = {
+  type: string;
+  title: string;
+  createdAt: string;
+  completedAt: string | null;
+};
+
+export type OverviewRecent = { contacts: OverviewContactAdded[]; activities: OverviewLoggedWork[] };
+
+const LOGGED_LABELS: Record<string, string> = {
+  call: 'Call',
+  whatsapp: 'WhatsApp',
+  email: 'Email',
+  meeting: 'Meeting',
+};
+
+/** "30m", "3h", "2d": how long before `now`. */
+function ago(iso: string, now: Date): string {
+  const minutes = Math.floor((now.getTime() - Date.parse(iso)) / 60_000);
+  if (minutes < 60) return `${Math.max(1, minutes)}m`;
+  if (minutes < 60 * 24) return `${Math.floor(minutes / 60)}h`;
+  return `${Math.floor(minutes / (60 * 24))}d`;
+}
+
+function dealName(deal: CrmDeal) {
+  return deal.company && deal.company !== deal.title ? `${deal.company} — ${deal.title}` : deal.title;
+}
+
+/**
+ * The latest things that happened, read off the times the rows already hold:
+ * deals added, won and lost, contacts added, calls and messages logged, and
+ * follow-ups done. Nothing records a deal moving stage, so that is not listed.
+ * Notes are left out: what they say is not for the dashboard.
+ */
+export function recentCrmActivity(
+  deals: CrmDeal[],
+  contacts: OverviewContactAdded[],
+  activities: OverviewLoggedWork[],
+  now: Date,
+): { text: string; when: string }[] {
+  const events: { at: string | null; text: string }[] = [];
+  for (const deal of deals) {
+    events.push({ at: deal.createdAt, text: `New deal: ${dealName(deal)}` });
+    if (deal.status === 'won') events.push({ at: deal.wonAt, text: `Won ${dealName(deal)} · ${formatRM(deal.value)}` });
+    if (deal.status === 'lost') events.push({ at: deal.lostAt, text: `Lost ${dealName(deal)}` });
+  }
+  for (const contact of contacts) {
+    events.push({ at: contact.createdAt, text: `${contact.name} added${contact.source ? ` via ${contact.source}` : ''}` });
+  }
+  for (const work of activities) {
+    if (work.type === 'task') {
+      if (work.completedAt) events.push({ at: work.completedAt, text: `Follow-up done: ${work.title}` });
+    } else if (LOGGED_LABELS[work.type]) {
+      events.push({ at: work.createdAt, text: `${LOGGED_LABELS[work.type]} logged: ${work.title}` });
+    }
+  }
+  return events
+    .flatMap((event) => {
+      const time = event.at ? Date.parse(event.at) : NaN;
+      return Number.isNaN(time) || time > now.getTime() ? [] : [{ time, at: event.at as string, text: event.text }];
+    })
+    .sort((a, b) => b.time - a.time)
+    .slice(0, ACTIVITY_LISTED)
+    .map((event) => ({ text: event.text, when: ago(event.at, now) }));
+}
 
 /** Adds ringgit amounts in whole sen, so the total has no floating-point dust. */
 function sumValue(deals: CrmDeal[]) {
@@ -68,6 +144,7 @@ export function buildCrmOverview(
   pipelines: CrmPipeline[],
   followUps: OverviewFollowUp[],
   now: Date,
+  recent: OverviewRecent = { contacts: [], activities: [] },
 ): CrmOverviewModel {
   const kpis = dealKpis(deals);
   const today = klDay(now);
@@ -108,7 +185,7 @@ export function buildCrmOverview(
     owners,
     closingSoon: report.closingSoon.map((deal) => ({
       id: deal.id,
-      name: deal.company && deal.company !== deal.title ? `${deal.company} — ${deal.title}` : deal.title,
+      name: dealName(deal),
       stage: stageName.get(deal.stageId) ?? '',
       value: deal.value,
       closes: deal.expectedClose ? formatDay(deal.expectedClose, { year: false }) : '',
@@ -125,6 +202,51 @@ export function buildCrmOverview(
             : formatDay(followUp.dueDay, { year: false }),
       // Dates are `YYYY-MM-DD`, which compares as text.
       overdue: followUp.dueDay !== null && followUp.dueDay < today,
+    })),
+    activity: recentCrmActivity(deals, recent.contacts, recent.activities, now),
+  };
+}
+
+/** The newest contacts, and the newest logged work and follow-ups done, for "Recent activity". */
+async function listRecent(client: SupabaseClient, orgId: string): Promise<OverviewRecent> {
+  const [contacts, logged, done] = await Promise.all([
+    client
+      .from('crm_contacts')
+      .select('first_name,last_name,source,created_at')
+      .eq('org_id', orgId)
+      .order('created_at', { ascending: false })
+      .limit(ACTIVITY_LISTED),
+    client
+      .from('crm_activities')
+      .select('type,title,created_at,completed_at')
+      .eq('org_id', orgId)
+      .in('type', Object.keys(LOGGED_LABELS))
+      .order('created_at', { ascending: false })
+      .limit(ACTIVITY_LISTED),
+    client
+      .from('crm_activities')
+      .select('type,title,created_at,completed_at')
+      .eq('org_id', orgId)
+      .eq('type', 'task')
+      .not('completed_at', 'is', null)
+      .order('completed_at', { ascending: false })
+      .limit(ACTIVITY_LISTED),
+  ]);
+  for (const result of [contacts, logged, done]) if (result.error) throw result.error;
+
+  type ContactRow = { first_name: string; last_name: string | null; source: string | null; created_at: string };
+  type WorkRow = { type: string; title: string; created_at: string; completed_at: string | null };
+  return {
+    contacts: ((contacts.data ?? []) as ContactRow[]).map((row) => ({
+      name: [row.first_name, row.last_name].filter(Boolean).join(' '),
+      source: row.source,
+      createdAt: row.created_at,
+    })),
+    activities: [...((logged.data ?? []) as WorkRow[]), ...((done.data ?? []) as WorkRow[])].map((row) => ({
+      type: row.type,
+      title: row.title,
+      createdAt: row.created_at,
+      completedAt: row.completed_at,
     })),
   };
 }
@@ -154,10 +276,11 @@ export async function loadCrmOverview(
   orgId: string,
   now: Date,
 ): Promise<CrmOverviewModel> {
-  const [{ deals }, pipelines, followUps] = await Promise.all([
+  const [{ deals }, pipelines, followUps, recent] = await Promise.all([
     listCrmDeals(client, orgId, 500),
     listCrmPipelines(client, orgId),
     listNextFollowUps(client, orgId),
+    listRecent(client, orgId),
   ]);
-  return buildCrmOverview(deals, pipelines, followUps, now);
+  return buildCrmOverview(deals, pipelines, followUps, now, recent);
 }

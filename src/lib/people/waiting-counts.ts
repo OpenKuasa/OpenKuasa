@@ -1,10 +1,15 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { safeCount } from './documents-screens';
 
-/** Requests waiting for the signed-in person to decide, by kind: the figures on the four approval nav badges. */
-export type WaitingCounts = { leave: number; time_off: number; claims: number; overtime: number };
+/**
+ * What waits for the signed-in person, by kind: the figures on the five approval nav badges (`swaps` is accepted
+ * shift swaps they may approve), and `swap_replies`, shift swaps asking them as the colleague to accept or decline
+ * (the Shift Calendar badge). `swap_replies` is not a decision on someone else's request, so it is left out of
+ * {@link waitingTotal}.
+ */
+export type WaitingCounts = { leave: number; time_off: number; claims: number; overtime: number; swaps: number; swap_replies: number };
 
-export const ZERO_WAITING: WaitingCounts = { leave: 0, time_off: 0, claims: 0, overtime: 0 };
+export const ZERO_WAITING: WaitingCounts = { leave: 0, time_off: 0, claims: 0, overtime: 0, swaps: 0, swap_replies: 0 };
 
 /** What `hr_waiting_counts` returns, each figure a whole number from 0 up; anything else reads as zeros. */
 export function parseWaitingCounts(data: unknown): WaitingCounts {
@@ -15,11 +20,14 @@ export function parseWaitingCounts(data: unknown): WaitingCounts {
     time_off: safeCount(row.time_off),
     claims: safeCount(row.claims),
     overtime: safeCount(row.overtime),
+    swaps: safeCount(row.swaps),
+    swap_replies: safeCount(row.swap_replies),
   };
 }
 
+/** Requests waiting for the person's decision: the five approval queues, not the swaps asking them to reply. */
 export function waitingTotal(counts: WaitingCounts): number {
-  return counts.leave + counts.time_off + counts.claims + counts.overtime;
+  return counts.leave + counts.time_off + counts.claims + counts.overtime + counts.swaps;
 }
 
 /**
@@ -31,7 +39,7 @@ export function shouldReadWaiting(input: { isDemo: boolean; orgId: string | null
 }
 
 /**
- * The four counts, read so that a failure is a failure. (`readWaitingCounts` turns one into zeros, which is right for a
+ * The counts, read so that a failure is a failure. (`readWaitingCounts` turns one into zeros, which is right for a
  * navigation badge and wrong for a sentence: "nothing is waiting" must never be what a broken read says.)
  */
 export async function readWaitingCountsStrict(ctx: { client: SupabaseClient; orgId: string }): Promise<WaitingCounts> {
@@ -41,7 +49,7 @@ export async function readWaitingCountsStrict(ctx: { client: SupabaseClient; org
 }
 
 /**
- * The four counts in one database call. It runs on every Lekiu page load, so it never throws: any failure reads as
+ * The counts in one database call. It runs on every Lekiu page load, so it never throws: any failure reads as
  * zeros, and a log line carries the database's code and nothing else.
  */
 export async function readWaitingCounts(ctx: { client: SupabaseClient; orgId: string }): Promise<WaitingCounts> {

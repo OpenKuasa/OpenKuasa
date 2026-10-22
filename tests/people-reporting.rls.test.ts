@@ -233,7 +233,7 @@ testWithSupabase('the team and the waiting counts are the manager\'s own reports
   expect(await readMyTeam(report.c, orgId)).toEqual([third.employeeId]);
   expect(await readMyTeam(owner.c, orgId)).toEqual([]);
   // The report's four requests, none of the third's.
-  expect(await readWaitingCounts(ctx(manager))).toEqual({ leave: 1, time_off: 1, claims: 1, overtime: 1 });
+  expect(await readWaitingCounts(ctx(manager))).toEqual({ leave: 1, time_off: 1, claims: 1, overtime: 1, swaps: 0, swap_replies: 0 });
 });
 
 testWithSupabase('the manager approves the leave and rejects the claim with a note; a second decision is refused', async () => {
@@ -258,7 +258,7 @@ testWithSupabase('the manager approves the leave and rejects the claim with a no
     ok: false,
     error: LEAVE_REFUSALS.LEAVE_NOT_FOUND,
   });
-  expect(await readWaitingCounts(ctx(manager))).toEqual({ leave: 0, time_off: 1, claims: 0, overtime: 1 });
+  expect(await readWaitingCounts(ctx(manager))).toEqual({ leave: 0, time_off: 1, claims: 0, overtime: 1, swaps: 0, swap_replies: 0 });
   expect(timeOffId).toBeTruthy();
 });
 

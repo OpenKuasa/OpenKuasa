@@ -33,7 +33,7 @@ declare
   granted text[] := array['user_id', 'employee_no', 'name', 'work_email', 'department_id', 'designation', 'employment_type', 'join_date', 'status', 'date_of_birth_day', 'date_of_birth_month'];
   w uuid[]; x uuid; y uuid; z uuid; run uuid := gen_random_uuid(); slip uuid := gen_random_uuid(); trn uuid := gen_random_uuid(); dept uuid := gen_random_uuid();
   f_rep text; f_sub text; f_doc text; chain uuid[]; r record; c bigint; i int; k text; a text; b text; ctx text; fails text[] := '{}';
-  zeros text := '={"leave":0,"time_off":0,"claims":0,"overtime":0}';
+  zeros text := '={"leave":0,"time_off":0,"claims":0,"overtime":0,"swaps":0,"swap_replies":0}';
 begin
   begin
   -- ---- 0. the catalogue ----------------------------------------------------------------
@@ -96,9 +96,9 @@ begin
   select string_agg(p.policyname, ',' order by p.policyname), count(*) filter (where p.policyname = 'hr_receipts_select' and p.cmd = 'SELECT' and p.qual like '%is_manager_of(c.employee_id)%') into ctx, i
   from pg_policies p where p.schemaname = 'storage' and p.tablename = 'objects' and p.policyname like 'hr\_receipts%';
   if ctx is distinct from 'hr_receipts_insert_own,hr_receipts_mfa_required,hr_receipts_select' or i <> 1 then fails := fails || format('the receipt policies are %s, the read rule with the manager branch %s of 1', ctx, i); end if;
-  select count(*), string_agg(p.tablename, ',' order by p.tablename) filter (where not (p.tablename = any(five) or p.tablename in ('hr_shifts', 'hr_timesheet_entries') or p.policyname = 'hr_receipts_select')) into i, ctx
+  select count(*), string_agg(p.tablename, ',' order by p.tablename) filter (where not (p.tablename = any(five) or p.tablename in ('hr_shifts', 'hr_timesheet_entries', 'hr_shift_swaps') or p.policyname = 'hr_receipts_select')) into i, ctx
   from pg_policies p where coalesce(p.qual, '') || coalesce(p.with_check, '') like '%is_manager_of%';
-  if i <> 8 or ctx is not null then fails := fails || format('%s policies mention a manager (8: the five tables, shifts, timesheets and the receipts); others: %s', i, coalesce(ctx, 'none')); end if;
+  if i <> 9 or ctx is not null then fails := fails || format('%s policies mention a manager (9: the five tables, shifts, timesheets, shift swaps and the receipts); others: %s', i, coalesce(ctx, 'none')); end if;
   if cardinality(fails) > 0 then raise exception 'the catalogue is not as expected, so nothing else was tried'; end if;
 
   -- ---- helpers ----------------------------------------------------------------------------
@@ -210,7 +210,8 @@ begin
   $f$;
   execute $f$
     create function pg_temp.wc(l int, o int, cl int, ot int) returns text language sql as $b$
-      select '=' || jsonb_build_object('leave', l, 'time_off', o, 'claims', cl, 'overtime', ot)::text
+      -- No shift swaps are made here: people_roster_swaps_check.sql counts those.
+      select '=' || jsonb_build_object('leave', l, 'time_off', o, 'claims', cl, 'overtime', ot, 'swaps', 0, 'swap_replies', 0)::text
     $b$
   $f$;
 

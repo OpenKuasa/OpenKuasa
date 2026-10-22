@@ -327,6 +327,8 @@ describe('nav badges set from a page', () => {
     waitingTimeOff: 0,
     waitingClaims: 0,
     waitingOvertime: 0,
+    waitingSwaps: 0,
+    waitingSwapReplies: 0,
   };
   it('keeps the server value of the marketing badge whatever a page sets', () => {
     expect(mergeBadges(server, {})).toEqual(server);

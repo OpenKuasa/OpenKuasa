@@ -59,7 +59,7 @@ beforeEach(() => {
 
 describe('PEOPLE_PATHS', () => {
   it('covers every Lekiu page that shows employee data', () => {
-    expect(PEOPLE_PATHS).toHaveLength(27);
+    expect(PEOPLE_PATHS).toHaveLength(28);
     for (const path of ['/people/employees', '/people/assistant', '/people/payroll', '/people/my-payslips', '/people/records', '/people/attendance', '/people/calendar']) {
       expect(PEOPLE_PATHS).toContain(path);
     }

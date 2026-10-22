@@ -5,8 +5,8 @@ import { getProduct } from '@/config/nav';
 const slugs = getProduct('people')!.sections.flatMap((section) => section.items.map((item) => item.slug));
 
 describe('Lekiu live screens', () => {
-  it('marks all 30 Lekiu screens as live, so none carries a work-in-progress banner', () => {
-    expect(slugs).toHaveLength(30);
+  it('marks all 31 Lekiu screens as live, so none carries a work-in-progress banner', () => {
+    expect(slugs).toHaveLength(31);
     for (const slug of slugs) {
       expect(LIVE_SCREENS.has(`people/${slug}`), slug).toBe(true);
       expect(isSampleScreen(`/people/${slug}`), slug).toBe(false);
