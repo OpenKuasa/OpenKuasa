@@ -84,12 +84,13 @@ function olderHref(f: AuditFilters, before: string) {
 
 function Details({ entry }: { entry: AuditEntry }) {
   const { party, amount, amount_myr: amountMyr, currency } = entry.details;
-  const base = amountMyr ?? amount;
+  const foreign = !!currency && currency !== 'MYR';
   const parts: string[] = [];
   if (party) parts.push(party);
-  if (typeof base === 'number') {
-    const foreign = currency && currency !== 'MYR' && typeof amount === 'number' ? ` (${money(amount, currency)})` : '';
-    parts.push(`${rm(base)}${foreign}`);
+  if (typeof amountMyr === 'number') {
+    parts.push(`${rm(amountMyr)}${foreign && typeof amount === 'number' ? ` (${money(amount, currency)})` : ''}`);
+  } else if (typeof amount === 'number') {
+    parts.push(money(amount, foreign ? currency : 'MYR'));
   }
   return <>{parts.join(' · ')}</>;
 }

@@ -37,6 +37,8 @@ describe('the Audit Trail without a database', () => {
       SAMPLE_AUDIT_ENTRIES.map((e) => ({ created_at: e.createdAt, entity_type: e.entityType, actor_name: e.actorName, event: e.details.event })),
       SAMPLE_TODAY,
     );
+    expect(s.voidsThisMonth).toBeGreaterThan(0);
+    expect(s.deletionsThisMonth).toBeGreaterThan(0);
     const html = await render();
     const text = textOf(html);
     expect(text).toMatch(new RegExp(`Events today\\s*${s.today}\\b`));
@@ -56,6 +58,30 @@ describe('the Audit Trail without a database', () => {
   it('says so when the filters match nothing', async () => {
     const text = textOf(await render({ q: 'no-such-thing' }));
     expect(text).toContain('No events match these filters.');
+  });
+});
+
+describe('the Audit Trail details', () => {
+  const row = (details: Record<string, unknown>): AuditEntry => ({
+    id: 'x', createdAt: '2026-10-23T03:00:00Z', actorName: 'A', action: 'Posted', target: 'T-1',
+    entityType: 'finance_payment', entityId: null, details: { event: 'posted', ...details },
+  });
+  const show = async (e: AuditEntry) => {
+    state.env = true;
+    state.list = async () => ({ entries: [e], nextBefore: null });
+    state.rows = async () => [];
+    return textOf(await render());
+  };
+
+  it('labels a foreign amount with no ringgit value by its currency only', async () => {
+    const text = await show(row({ amount: 500, currency: 'USD' }));
+    expect(text).toContain('USD 500.00');
+    expect(text).not.toContain('RM 500.00');
+  });
+
+  it('shows the ringgit value then the foreign amount', async () => {
+    const text = await show(row({ amount: 500, currency: 'USD', amount_myr: 2350 }));
+    expect(text).toContain('RM 2,350.00 (USD 500.00)');
   });
 });
 
