@@ -24,7 +24,6 @@ export const LIVE_SCREENS: ReadonlySet<string> = new Set([
   'crm/deals',
   'crm/lead-forms',
   'crm/appointments',
-  // Shared with People (registry 'people/calendar'), which still shows the sample.
   'crm/calendar',
   // Reads Bendahara's invoices; they are created and changed on finance/invoices.
   'crm/billings',
@@ -52,7 +51,7 @@ export const LIVE_SCREENS: ReadonlySet<string> = new Set([
   'hire/talent-pool',
   'hire/careers-page',
 
-  // Lekiu: every screen reads the workspace's HR data. Its Calendar is the CRM's shared screen (see above).
+  // Lekiu: every screen reads the workspace's HR data.
   'people/assistant',
   'people/dashboard',
   'people/announcements',
@@ -75,6 +74,7 @@ export const LIVE_SCREENS: ReadonlySet<string> = new Set([
   'people/letters',
   'people/timesheet',
   'people/shift-calendar',
+  'people/calendar',
   'people/overtime',
   'people/payroll',
   'people/payment-vouchers',

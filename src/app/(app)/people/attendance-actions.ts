@@ -24,7 +24,7 @@ const NOT_LINKED: CapResult<never> = { ok: false, error: "Your account isn't lin
 const FORBIDDEN: CapResult<never> = { ok: false, error: 'Only owners and admins can do that.' };
 
 /** Pages outside {@link PEOPLE_PATHS} (they show no employee data) that a holiday or a setting changes. */
-const EXTRA_PATHS = ['/people/public-holidays', '/people/calendar', '/people/settings'];
+const EXTRA_PATHS = ['/people/public-holidays', '/people/settings'];
 
 type Guarded = { ctx: PeopleWriteContext; employeeId: string | null };
 

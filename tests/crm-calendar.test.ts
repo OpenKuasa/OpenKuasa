@@ -171,7 +171,7 @@ describe('buildCalendar', () => {
   });
 });
 
-test('the Kasturi Calendar is live; the People one still shows sample data', () => {
+test('the Kasturi and the Lekiu Calendars are both live', () => {
   expect(isSampleScreen('/crm/calendar')).toBe(false);
-  expect(isSampleScreen('/people/calendar')).toBe(true);
+  expect(isSampleScreen('/people/calendar')).toBe(false);
 });

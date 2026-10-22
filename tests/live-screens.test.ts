@@ -12,8 +12,8 @@ describe('live screens', () => {
   });
 
   it('marks a screen that is not connected as sample', () => {
-    expect(isSampleScreen('/people/calendar')).toBe(true);
     expect(isSampleScreen('/crm/plugins')).toBe(true);
+    expect(isSampleScreen('/hire/settings')).toBe(true);
   });
 
   it('leaves connected screens and Tuah alone', () => {

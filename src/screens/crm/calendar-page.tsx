@@ -51,9 +51,8 @@ function Muted({ children }: { children: React.ReactNode }) {
 
 /**
  * Kasturi's Calendar: the workspace's appointments, open follow-ups and
- * expected deal closes on a month grid. The People product shares the sample
- * screen in `./calendar`, which this falls back to when no database is
- * configured.
+ * expected deal closes on a month grid. It falls back to the sample screen in
+ * `./calendar` when no database is configured.
  */
 export default async function CalendarPage({
   searchParams,

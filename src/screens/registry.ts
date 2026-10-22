@@ -59,6 +59,7 @@ import PublicHolidaysScreen from '@/screens/people/public-holidays';
 import LettersScreen from '@/screens/people/letters';
 import TimesheetScreen from '@/screens/people/timesheet';
 import ShiftCalendarScreen from '@/screens/people/shift-calendar';
+import PeopleCalendarScreen from '@/screens/people/calendar';
 import OvertimeScreen from '@/screens/people/overtime';
 import PayrollScreen from '@/screens/people/payroll';
 import PaymentVouchersScreen from '@/screens/people/payment-vouchers';
@@ -144,7 +145,7 @@ export const SCREENS: Record<string, ComponentType> = {
   // Lekiu (HIRA Team)
   'people/assistant': HrAssistantScreen,
   'people/dashboard': DashboardScreen,
-  'people/calendar': CalendarScreen,
+  'people/calendar': PeopleCalendarScreen,
   'people/announcements': AnnouncementsScreen,
   'people/my-attendance': MyAttendanceScreen,
   'people/my-goals': MyGoalsScreen,

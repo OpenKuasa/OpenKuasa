@@ -1,7 +1,7 @@
 import { PRODUCTS } from '@/config/nav';
 
 /** Lekiu pages that show nothing about employees, so an employee change leaves them as they are. */
-const NO_EMPLOYEE_DATA = new Set(['public-holidays', 'announcements', 'settings', 'calendar']);
+const NO_EMPLOYEE_DATA = new Set(['public-holidays', 'announcements', 'settings']);
 
 /**
  * Every Lekiu page to load afresh after an employee or department changes.
