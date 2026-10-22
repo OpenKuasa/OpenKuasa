@@ -71,7 +71,7 @@ import {
   saveHoliday as capSaveHoliday,
   saveHolidayInput,
 } from '@/lib/people/attendance-writes';
-import { clockResultMessage } from '@/lib/people/attendance';
+import { clockResultMessage, knownWorkWeek } from '@/lib/people/attendance';
 import { clockAction, todayLine, todayState, toCorrectionInput } from '@/lib/people/attendance-forms';
 import { clockWords, looseAmount, payrollMonth } from '@/lib/chat/change-titles';
 import {
@@ -184,7 +184,7 @@ import {
 import { rm } from '@/lib/reach/format';
 import { managerLabel, reportsOf, teamIds } from '@/lib/people/reporting';
 import { type PeopleTier, peopleTier } from '@/lib/people/tier';
-import { readTeamOvertime } from '@/lib/people/supabase';
+import { readTeamOvertime, readWorkWeek } from '@/lib/people/supabase';
 import { readWaitingCountsStrict, waitingTotal } from '@/lib/people/waiting-counts';
 import { ownRows } from '@/lib/people/own';
 import { loadPeopleCalendar, parsePeopleMonth } from '@/lib/people/calendar';
@@ -2055,21 +2055,22 @@ export function createPeopleTools(
               'Whether the person you are talking to has clocked in today: not yet (and why, on a public holiday, a day that is ' +
               'not a working day or a day of approved leave), in since a time, or done with the times and the hours. The times ' +
               'are already worded ("8:52 am"): say them as they are. "status" is "on time" or "late" and is the database\'s ' +
-              'decision, so never work it out yourself. "working_day": "unknown" means this person cannot see the work week: then ' +
+              'decision, so never work it out yourself. "working_day": "unknown" means the work week could not be read: then ' +
               'do not say whether today is a working day. Takes no input.',
             inputSchema: z.object({}),
             execute: async () =>
               safe('getMyAttendanceToday', async () => {
                 const date = today();
-                const [rows, holidays, leave, workWeek] = await Promise.all([
+                const [rows, holidays, leave, week] = await Promise.all([
                   data.listAttendance(date, date),
                   data.listPublicHolidays(),
                   data.listLeaveRequests(),
-                  // Only an owner or admin can read the settings. For anyone else the week is unknown, so every day may be
-                  // a working day and the database refuses a day that is not, in its own sentence.
-                  hr ? data.getSettings().then((s) => s.work_week) : Promise.resolve([...WEEKDAYS]),
+                  // Only an owner or admin reads the settings; anyone else reads the week through the members' function.
+                  // If that fails the week is unknown: every day may be a working day and the database refuses the rest.
+                  knownWorkWeek(data, hr, () => readWorkWeek(ctx.client, ctx.orgId)),
                 ]);
                 const day = rows.find((r) => r.employee_id === ownId && r.work_date === date) ?? null;
+                const workWeek = week ?? [...WEEKDAYS];
                 const state = todayState({ today: date, day, workWeek, holidays, leave, employeeId: ownId });
                 const { kind, ...details } = state;
                 const status = day?.clock_in ? statusWords(day.status) : null;
@@ -2080,8 +2081,8 @@ export function createPeopleTools(
                   can_clock: clockAction(state),
                   ...details,
                   ...(status && (kind === 'in' || kind === 'done') ? { status } : {}),
-                  // A member cannot read the work week, so whether today is a working day is not theirs to be told.
-                  ...(hr ? {} : { working_day: 'unknown' as const }),
+                  // Without the week, whether today is a working day is not known, so it is not said.
+                  ...(week ? {} : { working_day: 'unknown' as const }),
                 };
               }),
           }),
