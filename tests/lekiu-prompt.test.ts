@@ -796,3 +796,21 @@ describe('LEKIU_SYSTEM, the three kinds of asker', () => {
     expect(lekiuSystem(now).startsWith(LEKIU_SYSTEM)).toBe(true);
   });
 });
+
+describe('the roster, hours and shift swap rules', () => {
+  it('say where each thing really is, and never name a screen that is not listed', async () => {
+    const { subAgentSystem } = await import('@/lib/ai/agents/prompts');
+    for (const text of [LEKIU_SYSTEM, subAgentSystem('people', true)]) {
+      expect(text).toContain('"Shift types" panel opened from the Shift Calendar');
+      expect(text).toContain('Timesheet screen');
+      expect(text).toContain('Approvals > Shift Swaps');
+      expect(text.toLowerCase()).toMatch(/never name a screen(, panel)? or menu (that is )?not listed/);
+      expect(text).not.toMatch(/Shifts screen|under Settings/);
+    }
+  });
+
+  it('word the line before logging hours as put up for approval, never as done', () => {
+    expect(LEKIU_SYSTEM).toContain('"I\'ll put those hours up for you to approve."');
+    expect(t).toContain('never "approving now", "done"');
+  });
+});
