@@ -13,16 +13,22 @@
  * rate for the invoice's own date (stage 3a), not at the quotation's rate.
  */
 import { z } from 'zod';
+import { DOC_DISCOUNT_LEAVES_NOTHING, docDiscountLeavesNothing } from './bill-math';
 import { BASE_CURRENCY, isDocumentCurrency } from './currencies';
 import { CURRENCY_MESSAGES, wholeUnitsError } from './document-currency';
 import {
   DOCUMENT_LINES_MAX,
+  DOC_DISCOUNT_KEYS,
+  DOC_DISCOUNT_MESSAGES,
   type DocumentLineRow,
   LINE_MESSAGES,
   SALES_LINE_COLUMNS,
+  docDiscountKeys,
+  docDiscountNotBoth,
   isoDate,
   optionalText,
   salesDocumentLine,
+  sharesInSen,
   toDocumentLine,
 } from './document-lines';
 import {
@@ -82,6 +88,8 @@ export const QUOTATION_MESSAGES = {
   // The assistant never edits a draft in another currency: its lines would be read as ringgit.
   foreignDraftByAssistant:
     'This quotation is not in ringgit. Edit it on the Quotations screen, where its currency and exchange rate are shown.',
+  // FIN62. The form says it first; the database says it for a direct call, or lines changed in another tab.
+  docDiscountLeavesNothing: DOC_DISCOUNT_LEAVES_NOTHING,
 } as const;
 
 const M = QUOTATION_MESSAGES;
@@ -112,23 +120,32 @@ const saveQuotationBase = z.object({
       .optional(),
     fx_rate_source: z.enum(['bnm', 'manual'], { error: M.rate }).nullable().optional(),
     fx_rate_date: isoDate.nullable().optional(),
+    // A discount on the whole quotation. Absent keeps a draft's stored discount; null clears it.
+    ...docDiscountKeys,
   });
 const validUntilNotBefore = (v: { quote_date: string; valid_until: string }) => v.valid_until >= v.quote_date;
 
 export const saveQuotationInput = saveQuotationBase
   .refine(validUntilNotBefore, { message: M.dates, path: ['valid_until'] })
+  .refine(docDiscountNotBoth, { message: DOC_DISCOUNT_MESSAGES.both, path: ['doc_discount_amount'] })
   .superRefine((v, ctx) => {
     // With no currency sent the draft keeps its own; saveQuotation checks that case against the stored one.
-    const problem = wholeUnitsError(v.currency ?? BASE_CURRENCY, v.lines);
+    const problem = wholeUnitsError(v.currency ?? BASE_CURRENCY, v.lines, v.doc_discount_amount);
     if (problem) ctx.addIssue({ code: 'custom', message: problem, path: ['lines'] });
+  })
+  // The lines array is in position order (the save numbers them so), which is how the split breaks ties.
+  .refine((v) => !docDiscountLeavesNothing(v.lines, { pct: v.doc_discount_pct ?? null, amount: v.doc_discount_amount ?? null }), {
+    message: M.docDiscountLeavesNothing,
+    path: ['doc_discount_pct'],
   });
 
 /**
- * What the finance assistant may send: the form's fields without a currency or a rate. It writes ringgit only,
- * so those keys are not in the schema the model sees and a call that carries them has them stripped.
+ * What the finance assistant may send: the form's fields without a currency, a rate or a discount on the whole
+ * quotation. It writes ringgit only, so those keys are not in the schema the model sees and a call that
+ * carries them has them stripped. With no discount keys a draft keeps its stored discount.
  */
 export const saveQuotationToolInput = saveQuotationBase
-  .omit({ currency: true, fx_rate: true, fx_rate_source: true, fx_rate_date: true })
+  .omit({ currency: true, fx_rate: true, fx_rate_source: true, fx_rate_date: true, ...DOC_DISCOUNT_KEYS })
   .refine(validUntilNotBefore, { message: M.dates, path: ['valid_until'] });
 
 export const quotationIdInput = z.object({ id: z.string({ error: M.gone }).uuid(M.gone) });
@@ -148,6 +165,7 @@ const REFUSALS: Record<string, string> = {
   FIN13: M.hasInvoice,
   FIN38: M.rateBeforeSending,
   FIN39: M.notBnmRate,
+  FIN62: M.docDiscountLeavesNothing,
   [PG_UNIQUE]: M.numberTaken,
   [PG_FOREIGN_KEY]: M.missing,
   [PG_FORBIDDEN]: NOT_ALLOWED,
@@ -209,7 +227,16 @@ export type QuotationListRow = {
 export type QuotationLine = DocumentLineRow;
 
 export type QuotationDetail = QuotationListRow & {
+  /** The lines after their own discounts, before the discount on the whole quotation. */
   subtotal: number;
+  /**
+   * The discount on the whole quotation as entered: a percentage or a fixed amount, at most one set. The reads
+   * always give them; they are optional so that rows made by hand (samples, tests) need not.
+   */
+  doc_discount_pct?: number | null;
+  doc_discount_amount?: number | null;
+  /** That discount in the quotation's currency: the sum of the lines' shares. 0 when there is none. */
+  doc_discount?: number;
   sst: number;
   notes: string | null;
   lines: QuotationLine[];
@@ -284,13 +311,28 @@ export async function getQuotation(ctx: FinanceWriteContext, id: string): Promis
     .order('position', { ascending: true })
     .order('id', { ascending: true });
   if (linesError) throw linesError;
+  // The totals view predates the discount on the whole quotation, so its header columns come from the table.
+  const { data: discount, error: discountError } = await ctx.client
+    .from('finance_quotations')
+    .select('doc_discount_pct,doc_discount_amount')
+    .eq('org_id', ctx.orgId)
+    .eq('id', id)
+    .maybeSingle();
+  if (discountError) throw discountError;
   const { subtotal, sst, notes, ...header } = quotation as unknown as Record<string, unknown>;
+  const rows = ((lines ?? []) as unknown as Record<string, unknown>[]).map(toDocumentLine);
+  const shares = sharesInSen(rows);
+  const d = (discount ?? {}) as { doc_discount_pct?: unknown; doc_discount_amount?: unknown };
   return {
     ...toListRow(header),
-    subtotal: Number(subtotal),
+    // The view's subtotal is after the shares; the quotation shows it before, then "Less: discount".
+    subtotal: (Math.round(Number(subtotal) * 100) + shares) / 100,
+    doc_discount_pct: numberOrNull(d.doc_discount_pct),
+    doc_discount_amount: numberOrNull(d.doc_discount_amount),
+    doc_discount: shares / 100,
     sst: Number(sst),
     notes: (notes as string | null) ?? null,
-    lines: ((lines ?? []) as unknown as Record<string, unknown>[]).map(toDocumentLine),
+    lines: rows,
   };
 }
 
@@ -306,7 +348,7 @@ export async function saveQuotation(
   if (quotation.id && quotation.currency === undefined) {
     const stored = await storedCurrency(ctx, quotation.id);
     if (!stored.ok) return stored;
-    const problem = stored.data ? wholeUnitsError(stored.data, lines) : null;
+    const problem = stored.data ? wholeUnitsError(stored.data, lines, quotation.doc_discount_amount) : null;
     if (problem) return { ok: false, error: problem };
   }
   const { data, error } = await ctx.client.rpc('finance_save_quotation', {

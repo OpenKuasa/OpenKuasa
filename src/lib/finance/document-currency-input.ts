@@ -74,13 +74,15 @@ type Checked = {
   fx_rate_provider?: (typeof RATE_PROVIDERS)[number] | null;
   fx_rate_reference?: string | null;
   lines: { unit_price: number; discount_amount?: number | null }[];
+  /** A fixed discount on the whole document (sales only). */
+  doc_discount_amount?: number | null;
 };
 
 /** The two rules, as a superRefine: whole units on the lines, and a typed rate's source. */
 export function currencyInputIssues(M: Pick<CurrencyInputMessages, 'rateSource'>) {
   return (v: Checked, ctx: z.RefinementCtx) => {
     // With no currency sent the draft keeps its own; the save checks that case against the stored one.
-    const problem = wholeUnitsError(v.currency ?? BASE_CURRENCY, v.lines);
+    const problem = wholeUnitsError(v.currency ?? BASE_CURRENCY, v.lines, v.doc_discount_amount);
     if (problem) ctx.addIssue({ code: 'custom', message: problem, path: ['lines'] });
     // A rate typed by hand names its source, and a bank, a central bank or a Customs approval its name.
     const manual = v.currency !== undefined && v.currency !== BASE_CURRENCY && v.fx_rate != null && v.fx_rate_source !== 'bnm';

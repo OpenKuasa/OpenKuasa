@@ -5,12 +5,17 @@
  * saveQuotationAction. Pure. What a bill and an invoice form share with it is
  * in document-form.ts.
  */
-import { addDaysIso, billTotals } from './bill-math';
+import { addDaysIso, documentTotals } from './bill-math';
 import { type CurrencyFields, currencyError, currencyPayload, ringgitFields, savedFields, withPartyCurrency } from './document-currency';
 import {
+  type DocDiscountDraft,
   type DocumentFormKind,
   type DocumentFormWords,
   type LineDraft,
+  docDiscountDraft,
+  docDiscountNumbers,
+  docDiscountPayload,
+  emptyDocDiscount,
   emptyLine,
   filledFromProduct,
   lineDraft,
@@ -37,6 +42,8 @@ export type QuotationForm = {
   lines: LineDraft[];
   /** The currency and rate. Ringgit for a new form until the person or the customer's default says otherwise. */
   fx: CurrencyFields;
+  /** The discount on the whole quotation, as typed. */
+  docDiscount: DocDiscountDraft;
 };
 
 /** The quotation date plus thirty days. A customer's payment terms say when an invoice is due, not how long a price holds. */
@@ -54,6 +61,7 @@ export function newQuotationForm(today: string, lineKey: string): QuotationForm 
     notes: '',
     lines: [emptyLine(lineKey)],
     fx: ringgitFields(),
+    docDiscount: emptyDocDiscount(),
   };
 }
 
@@ -68,6 +76,7 @@ export function quotationFormFromDetail(quotation: QuotationDetail): QuotationFo
     notes: quotation.notes ?? '',
     lines: quotation.lines.map(lineDraft),
     fx: savedFields(quotation),
+    docDiscount: docDiscountDraft(quotation),
   };
 }
 
@@ -120,6 +129,7 @@ export function quotationPayload(form: QuotationForm) {
     notes: form.notes,
     lines: form.lines.map(linePayload),
     ...currencyPayload(form.fx),
+    ...docDiscountPayload(form.docDiscount),
   };
 }
 
@@ -135,7 +145,9 @@ export function quotationFormError(form: QuotationForm, sending = false): string
   if (rate) return rate;
   const parsed = saveQuotationInput.safeParse(quotationPayload(form));
   if (!parsed.success) return parsed.error.issues[0]?.message ?? QUOTATION_MESSAGES.lines;
-  if (sending && billTotals(form.lines.map(lineNumbers)).total <= 0) return QUOTATION_MESSAGES.empty;
+  if (sending && documentTotals(form.lines.map(lineNumbers), docDiscountNumbers(form.docDiscount)).total <= 0) {
+    return QUOTATION_MESSAGES.empty;
+  }
   return null;
 }
 
@@ -165,6 +177,7 @@ export const QUOTATION_FORM_KIND: DocumentFormKind<QuotationForm> = {
   secondDate: { label: 'Valid until', get: (form) => form.valid_until, set: withValidUntil },
   words: QUOTATION_FORM_WORDS,
   discount: true,
+  docDiscount: { get: (form) => form.docDiscount, set: (form, docDiscount) => ({ ...form, docDiscount }) },
   currency: { get: (form) => form.fx, set: (form, fx) => ({ ...form, fx }), figure: 'selling' },
   withProduct: withQuotedProduct,
   error: quotationFormError,

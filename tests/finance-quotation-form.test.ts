@@ -48,6 +48,7 @@ describe('a new quotation form', () => {
       notes: '',
       lines: [emptyLine('k1')],
       fx: ringgitFields(),
+      docDiscount: { pct: '', amount: '' },
     });
     expect(defaultValidUntil('2026-01-31')).toBe('2026-03-02');
   });
@@ -95,6 +96,7 @@ describe('the valid-until date', () => {
         { key: 'line-2', product_id: '', description: 'Design work', quantity: '10', uom: '', pack_size: '', unit_price: '12.5', sst_rate: '0', discount_pct: '', discount_amount: '' },
       ],
       fx: ringgitFields(),
+      docDiscount: { pct: '', amount: '' },
     });
     expect(withQuoteDate(form, '2026-10-05').valid_until).toBe('2026-10-08');
   });
@@ -113,6 +115,9 @@ describe('what the quotation form sends', () => {
       fx_rate: null,
       fx_rate_source: null,
       fx_rate_date: null,
+      // Both keys always go: with no discount on the whole quotation, both null (which clears a saved one).
+      doc_discount_pct: null,
+      doc_discount_amount: null,
     });
     expect(quotationPayload(filled())).not.toHaveProperty('id');
     expect(quotationPayload(filled({ id: 'abc' }))).toMatchObject({ id: 'abc' });

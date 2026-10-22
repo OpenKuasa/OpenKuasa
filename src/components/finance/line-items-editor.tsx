@@ -6,8 +6,15 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { billTotals, lineAmounts } from '@/lib/finance/bill-math';
-import { type LineDraft, emptyLine, lineNumbers } from '@/lib/finance/document-form';
+import { documentTotals, lineAmounts } from '@/lib/finance/bill-math';
+import {
+  type DocDiscountDraft,
+  type LineDraft,
+  docDiscountNumbers,
+  docDiscountProblem,
+  emptyLine,
+  lineNumbers,
+} from '@/lib/finance/document-form';
 import { DOCUMENT_LINES_MAX } from '@/lib/finance/document-lines';
 import { currencyLabel } from '@/lib/finance/currencies';
 import { money } from '@/lib/finance/format';
@@ -30,6 +37,7 @@ export function LineItemsEditor({
   pricePlaceholder = '0.00',
   discount = false,
   currency = 'MYR',
+  docDiscount,
   onChange,
 }: {
   /** The document's currency: its amounts and labels read in it. Ringgit when absent, exactly as before. */
@@ -43,13 +51,26 @@ export function LineItemsEditor({
   pricePlaceholder?: string;
   /** Sales documents show a per-line discount (a percentage or a ringgit amount); others do not. */
   discount?: boolean;
+  /**
+   * A discount on the whole document (invoices and quotations): its box is drawn below the lines and the
+   * totals read Subtotal, "Less: discount", SST, Total. Absent, the totals are the lines' own.
+   */
+  docDiscount?: { label: string; draft: DocDiscountDraft; onChange: (draft: DocDiscountDraft) => void };
   onChange: (lines: LineDraft[]) => void;
 }) {
   const id = useId();
   const addButton = useRef<HTMLButtonElement>(null);
   /** The line just added, so its first box can take focus once it is on the page. */
   const justAdded = useRef<string | null>(null);
-  const totals = billTotals(lines.map(lineNumbers));
+  const docDraft = docDiscount?.draft;
+  const docNumbers = docDraft ? docDiscountNumbers(docDraft) : { pct: null, amount: null };
+  // The lines are in position order, which is how the split breaks ties.
+  const totals = documentTotals(lines.map(lineNumbers), docNumbers);
+  const docIsAmount = docDraft ? docDraft.amount.trim() !== '' : false;
+  const docProblem = docDraft ? docDiscountProblem(lines, docDraft) : null;
+  // "Less: discount 10%" for a percentage; a fixed amount is its own figure.
+  const lessLabel = docNumbers.pct != null && docNumbers.pct > 0 ? `Less: discount ${docNumbers.pct}%` : 'Less: discount';
+  const hasDocDiscount = (docNumbers.pct != null && docNumbers.pct > 0) || (docNumbers.amount != null && docNumbers.amount > 0);
 
   const change = (key: string, next: (line: LineDraft) => LineDraft) =>
     onChange(lines.map((line) => (line.key === key ? next(line) : line)));
@@ -272,14 +293,66 @@ export function LineItemsEditor({
           <Plus className="size-4" />
           Add line
         </Button>
-        <dl className="grid w-full grid-cols-[1fr_auto] gap-x-6 gap-y-1 text-sm sm:w-64" aria-live="polite">
-          <dt className="text-muted-foreground">Subtotal</dt>
-          <dd className="text-right tabular-nums">{money(totals.subtotal, currency)}</dd>
-          <dt className="text-muted-foreground">SST</dt>
-          <dd className="text-right tabular-nums">{money(totals.sst, currency)}</dd>
-          <dt className="font-semibold">Total</dt>
-          <dd className="text-right font-semibold tabular-nums">{money(totals.total, currency)}</dd>
-        </dl>
+        <div className="w-full space-y-3 sm:w-64">
+          {docDiscount && docDraft ? (
+            <div className="space-y-1">
+              <Label htmlFor={`${id}-doc-discount`} className="text-xs text-muted-foreground">
+                {docDiscount.label}
+              </Label>
+              <div className="flex gap-1">
+                <Input
+                  id={`${id}-doc-discount`}
+                  type="number"
+                  onWheel={(e) => e.currentTarget.blur()}
+                  inputMode="decimal"
+                  min={0}
+                  step="any"
+                  className="tabular-nums"
+                  value={docIsAmount ? docDraft.amount : docDraft.pct}
+                  aria-invalid={docProblem ? true : undefined}
+                  aria-describedby={docProblem ? `${id}-doc-discount-problem` : undefined}
+                  onChange={(e) =>
+                    docDiscount.onChange(docIsAmount ? { pct: '', amount: e.target.value } : { pct: e.target.value, amount: '' })
+                  }
+                />
+                <Select
+                  value={docIsAmount ? 'rm' : 'pct'}
+                  onValueChange={(u) => {
+                    const current = docIsAmount ? docDraft.amount : docDraft.pct;
+                    docDiscount.onChange(u === 'rm' ? { pct: '', amount: current } : { pct: current, amount: '' });
+                  }}
+                >
+                  <SelectTrigger className="w-16 shrink-0" aria-label={`${docDiscount.label}: unit`}>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="pct">%</SelectItem>
+                    <SelectItem value="rm">{currencyLabel(currency)}</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              {docProblem ? (
+                <p id={`${id}-doc-discount-problem`} className="text-xs text-destructive">
+                  {docProblem}
+                </p>
+              ) : null}
+            </div>
+          ) : null}
+          <dl className="grid w-full grid-cols-[1fr_auto] gap-x-6 gap-y-1 text-sm" aria-live="polite">
+            <dt className="text-muted-foreground">Subtotal</dt>
+            <dd className="text-right tabular-nums">{money(totals.subtotal, currency)}</dd>
+            {hasDocDiscount ? (
+              <>
+                <dt className="text-muted-foreground">{lessLabel}</dt>
+                <dd className="text-right tabular-nums">−{money(totals.discount, currency)}</dd>
+              </>
+            ) : null}
+            <dt className="text-muted-foreground">SST</dt>
+            <dd className="text-right tabular-nums">{money(totals.sst, currency)}</dd>
+            <dt className="font-semibold">Total</dt>
+            <dd className="text-right font-semibold tabular-nums">{money(totals.total, currency)}</dd>
+          </dl>
+        </div>
       </div>
     </div>
   );

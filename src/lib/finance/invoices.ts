@@ -12,18 +12,24 @@
  * arrive in the next stages.
  */
 import { z } from 'zod';
+import { DOC_DISCOUNT_LEAVES_NOTHING, docDiscountLeavesNothing } from './bill-math';
 import { BASE_CURRENCY } from './currencies';
 import { CURRENCY_MESSAGES, type RateSource, wholeUnitsError } from './document-currency';
 import { CURRENCY_INPUT_KEYS, currencyInputIssues, currencyInputKeys } from './document-currency-input';
 import { EINVOICE_RATE_MAX } from './einvoice-fields';
 import {
   DOCUMENT_LINES_MAX,
+  DOC_DISCOUNT_KEYS,
+  DOC_DISCOUNT_MESSAGES,
   type DocumentLineRow,
   LINE_MESSAGES,
   SALES_LINE_COLUMNS,
+  docDiscountKeys,
+  docDiscountNotBoth,
   isoDate,
   optionalText,
   salesDocumentLine,
+  sharesInSen,
   toDocumentLine,
 } from './document-lines';
 import {
@@ -98,6 +104,8 @@ export const INVOICE_MESSAGES = {
   // The assistant never edits a draft in another currency: its lines would be read as ringgit.
   foreignDraftByAssistant:
     'This invoice is not in ringgit. Edit it on the Invoices screen, where its currency and exchange rate are shown.',
+  // FIN62. The form says it first; the database says it for a direct call, or lines changed in another tab.
+  docDiscountLeavesNothing: DOC_DISCOUNT_LEAVES_NOTHING,
 } as const;
 
 const M = INVOICE_MESSAGES;
@@ -116,21 +124,29 @@ const saveInvoiceBase = z.object({
   ...currencyInputKeys(M),
   /** The date the goods were sold or the service provided, when not the invoice date. It sets the rate's date. */
   supply_date: isoDate.nullable().optional(),
+  // A discount on the whole invoice. Absent keeps a draft's stored discount; null clears it.
+  ...docDiscountKeys,
 });
 const dueNotBefore = (v: { invoice_date: string; due_date: string }) => v.due_date >= v.invoice_date;
 
 export const saveInvoiceInput = saveInvoiceBase
   .refine(dueNotBefore, { message: M.dates, path: ['due_date'] })
+  .refine(docDiscountNotBoth, { message: DOC_DISCOUNT_MESSAGES.both, path: ['doc_discount_amount'] })
   // Whole units, and a typed rate's source; with no currency sent saveInvoice checks the stored one.
-  .superRefine(currencyInputIssues(M));
+  .superRefine(currencyInputIssues(M))
+  // The lines array is in position order (the save numbers them so), which is how the split breaks ties.
+  .refine((v) => !docDiscountLeavesNothing(v.lines, { pct: v.doc_discount_pct ?? null, amount: v.doc_discount_amount ?? null }), {
+    message: M.docDiscountLeavesNothing,
+    path: ['doc_discount_pct'],
+  });
 
 /**
- * What the finance assistant may send: the form's fields without a currency, a rate or a date of supply. It
- * writes ringgit only, so those keys are not in the schema the model sees and a call that carries them has
- * them stripped.
+ * What the finance assistant may send: the form's fields without a currency, a rate, a date of supply or a
+ * discount on the whole invoice. It writes ringgit only, so those keys are not in the schema the model sees
+ * and a call that carries them has them stripped. With no discount keys a draft keeps its stored discount.
  */
 export const saveInvoiceToolInput = saveInvoiceBase
-  .omit({ ...CURRENCY_INPUT_KEYS, supply_date: true })
+  .omit({ ...CURRENCY_INPUT_KEYS, ...DOC_DISCOUNT_KEYS, supply_date: true })
   .refine(dueNotBefore, { message: M.dates, path: ['due_date'] });
 
 export const invoiceIdInput = z.object({ id: z.string({ error: M.gone }).uuid(M.gone) });
@@ -164,6 +180,7 @@ const REFUSALS: Record<string, string> = {
   FIN38: M.rateBeforePosting,
   FIN39: M.notBnmRate,
   FIN43: M.rateSource,
+  FIN62: M.docDiscountLeavesNothing,
   [PG_UNIQUE]: M.numberTaken,
   [PG_FOREIGN_KEY]: M.missing,
   [PG_FORBIDDEN]: NOT_ALLOWED,
@@ -261,7 +278,16 @@ export function invoicePaidRinggit(row: Pick<InvoiceListRow, 'paid' | 'paid_myr'
 export type InvoiceLine = DocumentLineRow;
 
 export type InvoiceDetail = InvoiceListRow & {
+  /** The lines after their own discounts, before the discount on the whole invoice. */
   subtotal: number;
+  /**
+   * The discount on the whole invoice as entered: a percentage or a fixed amount, at most one set. The reads
+   * always give them; they are optional so that rows made by hand (samples, tests) need not.
+   */
+  doc_discount_pct?: number | null;
+  doc_discount_amount?: number | null;
+  /** That discount in the invoice's currency: the sum of the lines' shares. 0 when there is none. */
+  doc_discount?: number;
   sst: number;
   notes: string | null;
   lines: InvoiceLine[];
@@ -346,13 +372,28 @@ export async function getInvoice(ctx: FinanceWriteContext, id: string): Promise<
     .order('position', { ascending: true })
     .order('id', { ascending: true });
   if (linesError) throw linesError;
+  // The totals view predates the discount on the whole invoice, so its header columns come from the table.
+  const { data: discount, error: discountError } = await ctx.client
+    .from('finance_invoices')
+    .select('doc_discount_pct,doc_discount_amount')
+    .eq('org_id', ctx.orgId)
+    .eq('id', id)
+    .maybeSingle();
+  if (discountError) throw discountError;
   const header = invoice as unknown as Record<string, unknown>;
+  const rows = ((lines ?? []) as unknown as Record<string, unknown>[]).map(toDocumentLine);
+  const shares = sharesInSen(rows);
+  const d = (discount ?? {}) as { doc_discount_pct?: unknown; doc_discount_amount?: unknown };
   return {
     ...toListRow(header),
-    subtotal: Number(header.subtotal),
+    // The view's subtotal is after the shares; the invoice shows it before, then "Less: discount".
+    subtotal: (Math.round(Number(header.subtotal) * 100) + shares) / 100,
+    doc_discount_pct: numberOrNull(d.doc_discount_pct),
+    doc_discount_amount: numberOrNull(d.doc_discount_amount),
+    doc_discount: shares / 100,
     sst: Number(header.sst),
     notes: (header.notes as string | null) ?? null,
-    lines: ((lines ?? []) as unknown as Record<string, unknown>[]).map(toDocumentLine),
+    lines: rows,
   };
 }
 
@@ -368,7 +409,7 @@ export async function saveInvoice(
   if (invoice.id && invoice.currency === undefined) {
     const stored = await storedCurrency(ctx, invoice.id);
     if (!stored.ok) return stored;
-    const problem = stored.data ? wholeUnitsError(stored.data, lines) : null;
+    const problem = stored.data ? wholeUnitsError(stored.data, lines, invoice.doc_discount_amount) : null;
     if (problem) return { ok: false, error: problem };
   }
   const { data, error } = await ctx.client.rpc('finance_save_invoice', {

@@ -109,6 +109,8 @@ describe('quotation reads', () => {
     const quotation = await getQuotation(ctx, ID);
     expect(quotation).toEqual({
       ...read(1), subtotal: 125, sst: 7.5, notes: 'Valid for 30 days',
+      // No discount on the whole quotation (the header read here answers nothing of it).
+      doc_discount_pct: null, doc_discount_amount: null, doc_discount: 0,
       lines: [{ ...lines[0], quantity: 10, unit_price: 12.5, sst_rate: 6, amount: 125, sst_amount: 7.5 }],
     });
     expect(calls[0].filters).toEqual({ org_id: 'org-1', id: ID });

@@ -22,7 +22,13 @@ import {
   withRateReference,
   withRateTyped,
 } from '@/lib/finance/document-currency';
-import { type DocumentFormKind, type DocumentFormState, type DocumentParty, documentFormWords } from '@/lib/finance/document-form';
+import {
+  type DocumentFormKind,
+  type DocumentFormState,
+  type DocumentParty,
+  docDiscountNumbers,
+  documentFormWords,
+} from '@/lib/finance/document-form';
 import type { FxDefault } from '@/lib/finance/fx-rates';
 import type { FinanceProduct } from '@/lib/finance/products';
 import type { FinResult } from '@/lib/finance/result';
@@ -134,7 +140,7 @@ export function DocumentFormCard<F extends DocumentFormState>({
     askRate(next, true);
   };
 
-  const { noun, party, reference, secondDate } = kind;
+  const { noun, party, reference, secondDate, docDiscount } = kind;
   const words = documentFormWords(kind);
   const terms = parties.find((p) => p.id === kind.partyId(form))?.payment_terms_days;
 
@@ -372,11 +378,20 @@ export function DocumentFormCard<F extends DocumentFormState>({
             pricePlaceholder={kind.pricePlaceholder}
             discount={kind.discount}
             currency={fx ? fx.get(form).currency : undefined}
+            docDiscount={
+              docDiscount
+                ? {
+                    label: `Discount on the whole ${noun}`,
+                    draft: docDiscount.get(form),
+                    onChange: (draft) => edit((f) => docDiscount.set(f, draft)),
+                  }
+                : undefined
+            }
             onChange={(lines) => edit((f) => ({ ...f, lines }))}
           />
           {fx ? (
             <p className="text-right text-xs text-muted-foreground" aria-live="polite">
-              {ringgitTotalNote(fx.get(form), form.lines)}
+              {ringgitTotalNote(fx.get(form), form.lines, docDiscount ? docDiscountNumbers(docDiscount.get(form)) : undefined)}
             </p>
           ) : null}
         </fieldset>

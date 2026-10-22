@@ -5,7 +5,7 @@
  * (`DocumentFormKind`) that the shared card draws. Pure. Every box is held as
  * the text the person typed.
  */
-import { addDaysIso, type LineNumbers } from './bill-math';
+import { type DocDiscount, DOC_DISCOUNT_LEAVES_NOTHING, addDaysIso, docDiscountLeavesNothing, type LineNumbers } from './bill-math';
 import { type DocumentLineRow, isIsoDate, roundRate } from './document-lines';
 import { typedNumber } from './format';
 import type { CurrencyFields, RateFigure } from './document-currency';
@@ -108,6 +108,41 @@ export function lineNumbers(line: LineDraft): LineNumbers {
     discount_pct: discountValue(line.discount_pct),
     discount_amount: discountValue(line.discount_amount),
   };
+}
+
+/**
+ * A discount on the whole document (invoices and quotations), as typed: a percentage or an amount in the
+ * document's currency. At most one box holds anything; both empty is no discount.
+ */
+export type DocDiscountDraft = { pct: string; amount: string };
+
+export function emptyDocDiscount(): DocDiscountDraft {
+  return { pct: '', amount: '' };
+}
+
+/** A saved document's discount on the whole of it, as the form shows it. */
+export function docDiscountDraft(saved: { doc_discount_pct?: number | null; doc_discount_amount?: number | null }): DocDiscountDraft {
+  return {
+    pct: saved.doc_discount_pct != null ? String(saved.doc_discount_pct) : '',
+    amount: saved.doc_discount_amount != null ? String(saved.doc_discount_amount) : '',
+  };
+}
+
+/** The discount as numbers, for the live totals; empty or 0 is none, and a box that is not a number is NaN. */
+export function docDiscountNumbers(draft: DocDiscountDraft): DocDiscount {
+  return { pct: discountValue(draft.pct), amount: discountValue(draft.amount) };
+}
+
+/** Both keys, always: a value or null. Null clears a saved discount; the form never leaves one as it was. */
+export function docDiscountPayload(draft: DocDiscountDraft): { doc_discount_pct: number | null; doc_discount_amount: number | null } {
+  const { pct, amount } = docDiscountNumbers(draft);
+  return { doc_discount_pct: pct, doc_discount_amount: amount };
+}
+
+/** DOC_DISCOUNT_LEAVES_NOTHING when the discount would leave nothing to pay on these lines, else null. */
+export function docDiscountProblem(lines: LineDraft[], draft: DocDiscountDraft): string | null {
+  // The form's lines are in position order, which is how the split breaks ties.
+  return docDiscountLeavesNothing(lines.map(lineNumbers), docDiscountNumbers(draft)) ? DOC_DISCOUNT_LEAVES_NOTHING : null;
 }
 
 /** One line as it is sent. Figures are numbers; a box that is not a number goes as NaN and is refused. */
@@ -244,6 +279,11 @@ export type DocumentFormKind<F extends DocumentFormState> = {
   pricePlaceholder?: string;
   /** Sales documents (invoices, quotations) show a per-line discount; others do not. */
   discount?: boolean;
+  /**
+   * A discount on the whole document, drawn below the lines with "Less: discount" in the totals: invoices and
+   * quotations. Absent for every other kind.
+   */
+  docDiscount?: { get: (form: F) => DocDiscountDraft; set: (form: F, draft: DocDiscountDraft) => F };
   /**
    * A document that may be in another currency (a quotation from stage 2, an invoice from stage 3a): the card
    * draws the currency picker and the rate, asks for Bank Negara's rate when the currency or the rate's date

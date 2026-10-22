@@ -149,6 +149,19 @@ export function documentTotals(lines: LineNumbers[], d: DocDiscount): DocumentTo
 }
 
 /**
+ * True when a discount on the whole document is set and leaves nothing to pay: D at least the lines' net
+ * total, including any discount on lines that already net to 0. The database refuses it (FIN62) with
+ * DOC_DISCOUNT_LEAVES_NOTHING. Pass the lines in position order.
+ */
+export function docDiscountLeavesNothing(lines: LineNumbers[], d: DocDiscount): boolean {
+  const set = (d.pct != null && d.pct > 0) || (d.amount != null && d.amount > 0);
+  if (!set) return false;
+  const totals = documentTotals(lines, d);
+  // D is capped at the subtotal, so nothing is left exactly when they are equal.
+  return Math.round(totals.subtotal * 100) - Math.round(totals.discount * 100) <= 0;
+}
+
+/**
  * One line's amount and SST. With no discount these mirror the generated columns
  * supplier_bill_lines.amount = round(quantity * unit_price, 2) and
  * .sst_amount = round(quantity * unit_price * sst_rate / 100, 2); with a sales

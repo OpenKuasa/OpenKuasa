@@ -120,6 +120,41 @@ export const salesDocumentLine = documentLine
     path: ['discount_amount'],
   });
 
+export const DOC_DISCOUNT_MESSAGES = {
+  pct: 'Enter a discount on the whole document above 0% and up to 100%, to two decimals at most.',
+  amount: 'Enter a discount on the whole document above 0, to two decimals at most.',
+  both: 'Give the discount on the whole document as a percentage or an amount, not both.',
+} as const;
+
+const DD = DOC_DISCOUNT_MESSAGES;
+/** No more than two decimals, as the column keeps; 0.001 is refused rather than rounded away. */
+const twoDecimals = (n: number) => Math.abs(n * 100 - Math.round(n * 100)) < 1e-6;
+
+/**
+ * A discount on a whole sales document (invoice or quotation): a percentage (above 0, up to 100) or a fixed
+ * amount (above 0), not both. Optional with no default: a caller that sends neither key (the finance
+ * assistant, or code deployed before this) leaves a draft's stored discount as it is; an explicit null clears it.
+ * The not-both rule is the caller's refine (`docDiscountNotBoth`).
+ */
+export const docDiscountKeys = {
+  doc_discount_pct: z.number({ error: DD.pct }).gt(0, DD.pct).max(100, DD.pct).refine(twoDecimals, DD.pct).nullable().optional(),
+  doc_discount_amount: z
+    .number({ error: DD.amount })
+    .gt(0, DD.amount)
+    .max(999_999_999_999.99, DD.amount)
+    .refine(twoDecimals, DD.amount)
+    .nullable()
+    .optional(),
+};
+
+/** The keys a caller that never sets a document discount (the finance assistant) leaves out, with `.omit`. */
+export const DOC_DISCOUNT_KEYS = { doc_discount_pct: true, doc_discount_amount: true } as const;
+
+/** At most one of the two is set. */
+export function docDiscountNotBoth(v: { doc_discount_pct?: number | null; doc_discount_amount?: number | null }): boolean {
+  return v.doc_discount_pct == null || v.doc_discount_amount == null;
+}
+
 /** A saved line, as it is read back: the amounts are the database's generated columns. */
 export type DocumentLineRow = {
   id: string;
@@ -135,12 +170,17 @@ export type DocumentLineRow = {
   /** Present only on sales lines (invoices, quotations). At most one is non-null. */
   discount_pct?: number | null;
   discount_amount?: number | null;
+  /**
+   * Sales lines only: this line's share of the discount on the whole document. `amount` and `sst_amount` are
+   * already after it, so amount + share is the line's net after its own discount.
+   */
+  doc_discount_share?: number;
 };
 
 export const DOCUMENT_LINE_COLUMNS = 'id,product_id,description,quantity,uom,pack_size,unit_price,sst_rate,amount,sst_amount';
 
-/** The columns above plus the sales-only discount; use for invoices and quotations. */
-export const SALES_LINE_COLUMNS = `${DOCUMENT_LINE_COLUMNS},discount_pct,discount_amount`;
+/** The columns above plus the sales-only discounts (its own, and its share of the whole document's); use for invoices and quotations. */
+export const SALES_LINE_COLUMNS = `${DOCUMENT_LINE_COLUMNS},discount_pct,discount_amount,doc_discount_share`;
 
 /** A line as read from the database, with its figures as numbers whatever form they arrived in. */
 export function toDocumentLine(row: Record<string, unknown>): DocumentLineRow {
@@ -155,5 +195,11 @@ export function toDocumentLine(row: Record<string, unknown>): DocumentLineRow {
   // Only sales lines are read with the discount columns; leave the field off other documents.
   if ('discount_pct' in row) line.discount_pct = row.discount_pct == null ? null : Number(row.discount_pct);
   if ('discount_amount' in row) line.discount_amount = row.discount_amount == null ? null : Number(row.discount_amount);
+  if ('doc_discount_share' in row) line.doc_discount_share = Number(row.doc_discount_share ?? 0);
   return line;
+}
+
+/** The lines' shares of the discount on the whole document, added up in sen. */
+export function sharesInSen(lines: { doc_discount_share?: number }[]): number {
+  return lines.reduce((sum, l) => sum + Math.round((l.doc_discount_share ?? 0) * 100), 0);
 }

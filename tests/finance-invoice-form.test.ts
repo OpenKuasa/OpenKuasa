@@ -67,6 +67,8 @@ describe('newInvoiceForm', () => {
       // In ringgit until the person or the customer's default says otherwise; no date of supply.
       fx: ringgitFields(),
       supplyDate: '',
+      // No discount on the whole invoice.
+      docDiscount: { pct: '', amount: '' },
     });
   });
 });
@@ -184,6 +186,9 @@ describe('invoicePayload', () => {
       fx_rate_provider: null,
       fx_rate_reference: null,
       supply_date: null,
+      // Both keys always go: with no discount on the whole invoice, both null (which clears a saved one).
+      doc_discount_pct: null,
+      doc_discount_amount: null,
     });
     expect('id' in payload).toBe(false);
     expect(saveInvoiceInput.parse(payload)).toMatchObject({ notes: 'Net 30', lines: [{ description: 'Gloves' }, { description: 'Delivery', product_id: null }] });
@@ -192,8 +197,8 @@ describe('invoicePayload', () => {
     const payload = invoicePayload(filled({ id: INVOICE }));
     expect(payload.id).toBe(INVOICE);
     expect(Object.keys(payload).sort()).toEqual([
-      'currency', 'customer_id', 'due_date', 'fx_rate', 'fx_rate_date', 'fx_rate_provider', 'fx_rate_reference', 'fx_rate_source',
-      'id', 'invoice_date', 'lines', 'notes', 'supply_date',
+      'currency', 'customer_id', 'doc_discount_amount', 'doc_discount_pct', 'due_date', 'fx_rate', 'fx_rate_date', 'fx_rate_provider',
+      'fx_rate_reference', 'fx_rate_source', 'id', 'invoice_date', 'lines', 'notes', 'supply_date',
     ]);
     expect(Object.keys(payload.lines[0]).sort()).toEqual(['description', 'pack_size', 'product_id', 'quantity', 'sst_rate', 'unit_price', 'uom']);
   });

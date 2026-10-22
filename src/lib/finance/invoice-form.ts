@@ -5,7 +5,7 @@
  * saveInvoiceAction. Also the small e-Invois form. Pure. What a bill form
  * shares is in document-form.ts.
  */
-import { billTotals } from './bill-math';
+import { documentTotals } from './bill-math';
 import { BASE_CURRENCY } from './currencies';
 import {
   CURRENCY_MESSAGES,
@@ -18,8 +18,13 @@ import {
   withPartyCurrency,
 } from './document-currency';
 import {
+  type DocDiscountDraft,
   type DocumentFormKind,
   type LineDraft,
+  docDiscountDraft,
+  docDiscountNumbers,
+  docDiscountPayload,
+  emptyDocDiscount,
   emptyLine,
   filledFromProduct,
   followedDueDate,
@@ -54,6 +59,8 @@ export type InvoiceForm = {
   fx: CurrencyFields;
   /** The date of supply as typed; empty means the invoice date. Drawn and sent for every currency: service tax on an unpaid invoice falls due 12 months after it. */
   supplyDate: string;
+  /** The discount on the whole invoice, as typed. */
+  docDiscount: DocDiscountDraft;
 };
 
 /** A new invoice dated today with one empty line. The due date follows once a customer is chosen. */
@@ -67,6 +74,7 @@ export function newInvoiceForm(today: string, lineKey: string): InvoiceForm {
     lines: [emptyLine(lineKey)],
     fx: ringgitFields(),
     supplyDate: '',
+    docDiscount: emptyDocDiscount(),
   };
 }
 
@@ -82,6 +90,7 @@ export function invoiceFormFromDetail(invoice: InvoiceDetail): InvoiceForm {
     lines: invoice.lines.map(lineDraft),
     fx: savedFields(invoice),
     supplyDate: invoice.supply_date ?? '',
+    docDiscount: docDiscountDraft(invoice),
   };
 }
 
@@ -143,6 +152,7 @@ export function invoicePayload(form: InvoiceForm) {
     lines: form.lines.map(linePayload),
     ...currencyPayloadWithSource(form.fx),
     supply_date: supply === '' ? null : supply,
+    ...docDiscountPayload(form.docDiscount),
   };
 }
 
@@ -158,7 +168,9 @@ export function invoiceFormError(form: InvoiceForm, posting = false): string | n
   if (rate) return rate;
   const parsed = saveInvoiceInput.safeParse(invoicePayload(form));
   if (!parsed.success) return parsed.error.issues[0]?.message ?? INVOICE_MESSAGES.lines;
-  if (posting && billTotals(form.lines.map(lineNumbers)).total <= 0) return INVOICE_MESSAGES.empty;
+  if (posting && documentTotals(form.lines.map(lineNumbers), docDiscountNumbers(form.docDiscount)).total <= 0) {
+    return INVOICE_MESSAGES.empty;
+  }
   return null;
 }
 
@@ -178,6 +190,7 @@ export const INVOICE_FORM_KIND: DocumentFormKind<InvoiceForm> = {
   withDate: withInvoiceDate,
   secondDate: { label: 'Due date', get: (form) => form.due_date, set: withDueDate },
   discount: true,
+  docDiscount: { get: (form) => form.docDiscount, set: (form, docDiscount) => ({ ...form, docDiscount }) },
   // One rate per invoice, the SST rule's: Bank Negara's 5 pm selling rate for the date of supply.
   currency: { get: (form) => form.fx, set: (form, fx) => ({ ...form, fx }), figure: 'selling', sources: true },
   rateDate: invoiceRateDate,

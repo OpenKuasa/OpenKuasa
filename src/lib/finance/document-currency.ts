@@ -13,7 +13,7 @@
  * BNM quotes (1 USD, 100 JPY), so the figure typed is the figure BNM
  * publishes.
  */
-import { lineSen } from './bill-math';
+import { type DocDiscount, docDiscountSen, lineSen } from './bill-math';
 import { BASE_CURRENCY, minorUnits, quoteUnit } from './currencies';
 import { type LineDraft, lineNumbers } from './document-form';
 import { isIsoDate } from './document-lines';
@@ -417,35 +417,45 @@ export function rateLabel(currency: string): string {
 
 /**
  * The document's total in ringgit at the rate in the box, as the database
- * will work it out: each line's amount and SST converted and rounded to the
- * sen, then added. null for ringgit (the total is already ringgit) and while
- * there is no usable rate.
+ * will work it out: each line's amount and SST, after its share of any
+ * discount on the whole document, converted and rounded to the sen, then
+ * added. null for ringgit (the total is already ringgit) and while there is
+ * no usable rate.
  */
-export function ringgitTotal(fields: CurrencyFields, lines: LineDraft[]): number | null {
+export function ringgitTotal(fields: CurrencyFields, lines: LineDraft[], discount?: DocDiscount): number | null {
   const rate = rateScaled(fields);
   if (fields.currency === BASE_CURRENCY || rate === null || rate === undefined) return null;
   // round(amount * rate, 2) on a two-decimal amount: the amount in sen times the rate, rounded half up.
   const sen = (amountSen: bigint) => (amountSen * rate + RATE_ONE / BigInt(2)) / RATE_ONE;
+  const numbers = lines.map(lineNumbers);
+  // The form's lines are in position order, which is how the split breaks ties.
+  const { shares } = docDiscountSen(numbers, discount ?? { pct: null, amount: null });
   let total = BigInt(0);
-  for (const line of lines) {
-    const { amount, sst } = lineSen(lineNumbers(line));
+  numbers.forEach((line, i) => {
+    const { amount, sst } = lineSen({ ...line, doc_discount_share: Number(shares[i]) / 100 });
     total += sen(amount) + sen(sst);
-  }
+  });
   return Number(total) / 100;
 }
 
 /** "About RM 4,081.50 at this rate." under the lines of a foreign document, or null. */
-export function ringgitTotalNote(fields: CurrencyFields, lines: LineDraft[]): string | null {
-  const total = ringgitTotal(fields, lines);
+export function ringgitTotalNote(fields: CurrencyFields, lines: LineDraft[], discount?: DocDiscount): string | null {
+  const total = ringgitTotal(fields, lines, discount);
   return total === null ? null : `About ${rm(total)} at this rate.`;
 }
 
 /**
  * The first line amount that has cents in a currency with none, as a
- * sentence, or null. A price box and a fixed discount are checked.
+ * sentence, or null. A price box and a fixed discount are checked, and so is
+ * a fixed discount on the whole document (`docDiscountAmount`), when given.
  */
-export function wholeUnitsError(currency: string, lines: { unit_price: number; discount_amount?: number | null }[]): string | null {
+export function wholeUnitsError(
+  currency: string,
+  lines: { unit_price: number; discount_amount?: number | null }[],
+  docDiscountAmount?: number | null,
+): string | null {
   if (minorUnits(currency) !== 0) return null;
   const whole = (n: number | null | undefined) => n === null || n === undefined || Number.isNaN(n) || Number.isInteger(n);
-  return lines.every((l) => whole(l.unit_price) && whole(l.discount_amount)) ? null : CURRENCY_MESSAGES.wholeUnits(currency);
+  const linesWhole = lines.every((l) => whole(l.unit_price) && whole(l.discount_amount));
+  return linesWhole && whole(docDiscountAmount) ? null : CURRENCY_MESSAGES.wholeUnits(currency);
 }
