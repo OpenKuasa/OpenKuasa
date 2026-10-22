@@ -23,7 +23,7 @@ vi.mock('@/lib/ai/provider', async (orig) => {
         doStream: async (options: { prompt: unknown }) => {
           seen.prompts.push(JSON.stringify(options.prompt));
           const calls = seen.script[seen.step++];
-          const chunks = calls
+          const chunks: Record<string, unknown>[] = calls
             ? [
                 ...calls.map(({ tool, input }, n) => ({ type: 'tool-call', toolCallId: `c-${seen.step}-${n}`, toolName: tool, input: JSON.stringify(input) })),
                 { type: 'finish', finishReason: { unified: 'tool-calls', raw: 'tool_calls' }, usage },
