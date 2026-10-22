@@ -332,6 +332,24 @@ describe('listApplications by a candidate name', () => {
     expect(result.applications).toHaveLength(20);
     expect(result.more_matches).toMatch(/More than 50 applications/);
     expect(result.several_match).toBeDefined();
+    // total counts only what was looked at, and the result says so.
+    expect(result.total).toBe(50);
+    expect(result.total_note).toBe('More applications match this name than total counts: total covers only the newest 50 that were looked at.');
+    expect((await listApplications(appsData(), { candidate: 'Zulaikha' }))).not.toHaveProperty('total_note');
+  });
+  it('without a provider search, says when the list it searched was cut', async () => {
+    const result = await listApplications(appsData({ searchApplications: undefined }), { candidate: 'Zulaikha' });
+    expect(result.total).toBe(0);
+    expect(result.read_capped).toBe(true);
+    expect(result.note).toBe(`Only the newest ${HIRE_READ_CAP} applications were searched, so an older application may be missing. Narrow the search or say so.`);
+    expect(await listApplications(appsData(), { candidate: 'Zulaikha' })).not.toHaveProperty('read_capped');
+    // Without a name, nothing changes.
+    expect(await listApplications(appsData({ searchApplications: undefined }), { jobTitle: 'sales' })).not.toHaveProperty('read_capped');
+  });
+  it('takes a candidate name of at most 100 characters', () => {
+    const schema = (createHireTools(seed, NOW).listApplications as unknown as { inputSchema: { safeParse: (v: unknown) => { success: boolean } } }).inputSchema;
+    expect(schema.safeParse({ candidate: 'a'.repeat(100) }).success).toBe(true);
+    expect(schema.safeParse({ candidate: 'a'.repeat(101) }).success).toBe(false);
   });
   it('with a job title as well, reads as many as the list would and names the job filter when even that was cut', async () => {
     const seen: unknown[] = [];

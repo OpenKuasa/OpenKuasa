@@ -391,7 +391,7 @@ export function createHireTools(
         'If the result has "several_match", the name fits more than one application: prepare no change and ask the user which one.',
       inputSchema: z.object({
         jobTitle,
-        candidate: z.string().optional().describe('Only applications from candidates whose name contains this.'),
+        candidate: lookupName('Only applications from candidates whose name contains this.'),
         stage: z.enum(['applied', 'screening', 'interview', 'offer', 'hired']).optional()
           .describe("Only applications whose furthest stage reached is this one, including rejected ones. Add outcome: 'active' for the ones still live."),
         outcome: z.enum(['active', 'rejected', 'withdrawn']).optional()
@@ -431,7 +431,17 @@ export function createHireTools(
             : null;
           return {
             total: rows.length,
-            ...(found?.more && { more_matches: moreMatches('applications', narrowed, 'job filter', APPLICATION_SEARCH_LIMIT) }),
+            ...(found?.more && {
+              more_matches: moreMatches('applications', narrowed, 'job filter', APPLICATION_SEARCH_LIMIT),
+              total_note: 'More applications match this name than total counts: total covers only the newest ' +
+                `${narrowed ? HIRE_READ_CAP : APPLICATION_SEARCH_LIMIT} that were looked at.`,
+            }),
+            // Without a search of its own, the provider's list was searched: at its ceiling, an older match may be missing.
+            ...(found?.capped && {
+              read_capped: true,
+              note: `Only the newest ${HIRE_READ_CAP} applications were searched, so an older application may be missing. ` +
+                'Narrow the search or say so.',
+            }),
             // A rule in the prompt alone was not enough for candidates (the worker picked the first match), so the result says it.
             ...(candidate?.trim() && rows.length > 1 && {
               several_match:
