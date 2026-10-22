@@ -10,6 +10,8 @@ import { listAgentConfigs } from '@/lib/agents/config';
 import { workspaceSpendCents } from '@/lib/agents/spend';
 import { listSchedules } from '@/lib/reach/schedule-capabilities';
 import { listPendingProposals, listRecentlyDecided } from '@/lib/agents/proposals';
+import { proposalNames } from '@/lib/agents/proposal-names';
+import type { KnownNames } from '@/lib/chat/change-titles';
 import {
   WEEKLY_STUDIO,
   type AgentConfig,
@@ -56,6 +58,7 @@ export default async function AgentsScreen() {
   let spentWeekCents = 0;
   let proposals: AgentProposal[] = [];
   let decided: AgentProposal[] = [];
+  let names: KnownNames = {};
 
   if (!viewer.isDemo && viewer.orgId) {
     const supabase = await createClient();
@@ -87,6 +90,8 @@ export default async function AgentsScreen() {
     spentTodayCents = daySpent;
     spentWeekCents = weekSpent;
     runs = (runsRes.data ?? []) as AgentRun[];
+    // What the pending suggestions point at, by name, for their cards.
+    names = await proposalNames(supabase, viewer.orgId, proposals);
     if (runs.length > 0) {
       const { data } = await supabase
         .from('agent_run_assets')
@@ -133,6 +138,7 @@ export default async function AgentsScreen() {
             canManage={canManage}
             schedules={schedules}
             proposals={proposals}
+            proposalNames={names}
             decided={decided}
             dailyCapCents={config.daily_cap_cents}
             weeklyCapCents={config.weekly_cap_cents}

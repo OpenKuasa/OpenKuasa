@@ -21,6 +21,7 @@ import {
   type AgentSchedule,
   type ScheduleStatus,
 } from '@/lib/agents/types';
+import type { KnownNames } from '@/lib/chat/change-titles';
 import { PendingApprovals } from '@/components/reach/pending-approvals';
 import { RecentlyDecided } from '@/components/reach/recently-decided';
 import {
@@ -589,6 +590,7 @@ export function AgentsPanel({
   canManage,
   schedules,
   proposals,
+  proposalNames,
   decided,
   dailyCapCents,
   weeklyCapCents,
@@ -606,6 +608,8 @@ export function AgentsPanel({
   canManage: boolean;
   schedules: AgentSchedule[];
   proposals: AgentProposal[];
+  /** Names of the rows the pending suggestions point at, by `kind:id`. */
+  proposalNames?: KnownNames;
   decided: AgentProposal[];
   dailyCapCents: number;
   weeklyCapCents: number;
@@ -724,7 +728,7 @@ export function AgentsPanel({
         </p>
       )}
 
-      <PendingApprovals proposals={proposals} canEdit={canEdit} />
+      <PendingApprovals proposals={proposals} names={proposalNames} canEdit={canEdit} />
 
       <RecentlyDecided decided={decided} />
 

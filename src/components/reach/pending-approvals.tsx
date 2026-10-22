@@ -4,6 +4,7 @@ import { useState, useTransition } from 'react';
 import { ChangeList } from '@/components/chat/tool-cards';
 import { Button } from '@/components/ui/button';
 import { changeRows } from '@/lib/chat/change-rows';
+import type { ItemKind, KnownNames } from '@/lib/chat/change-titles';
 import type { AgentProposal } from '@/lib/agents/types';
 import { applyProposalAction, rejectProposalAction } from '@/app/(app)/reach/actions';
 
@@ -11,11 +12,15 @@ type ActionResult = { ok: boolean; error?: string };
 
 export function PendingApprovals({
   proposals,
+  names,
   canEdit,
 }: {
   proposals: AgentProposal[];
+  /** Names of the rows the suggestions point at, by `kind:id`, read on the server. */
+  names?: KnownNames;
   canEdit: boolean;
 }) {
+  const find = (id: unknown, kind?: ItemKind) => (kind && typeof id === 'string' ? (names?.[`${kind}:${id}`] ?? null) : null);
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -52,7 +57,7 @@ export function PendingApprovals({
               {p.rationale && <p className="text-muted-foreground">{p.rationale}</p>}
               {p.detail && <p className="text-muted-foreground">{p.detail}</p>}
               {/* Every value the change carries, from the stored proposal itself. */}
-              <ChangeList rows={changeRows(p.action, p.input)} />
+              <ChangeList rows={changeRows(p.action, p.input, find)} />
               {canEdit ? (
                 <div className="flex gap-2 pt-1">
                   <Button
