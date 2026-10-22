@@ -2,21 +2,18 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { getCurrentOrg } from '@/lib/auth/current-org';
 import { hasSupabaseEnv } from '@/lib/auth/viewer';
 import { feedbackOf } from './interview-feedback';
+import { applicationColumns, readApplicationSearch, readContacts, toApplication } from './application-search';
 import { CANDIDATE_COLUMNS, readCandidateSearch, readPool } from './candidate-search';
 import { readInterviewCard, readNamesakes } from './namesakes';
 import { createSeedHireData } from './seed';
 import { DEFAULT_HIRE_SETTINGS, HIRE_READ_CAP, JOB_COLUMNS, SETTINGS_COLUMNS } from './types';
 import type {
-  Application, ApplicationOutcome, ApplicationStage, Candidate, HireData, HireSettings, Interview, Job, PoolStatus,
+  ApplicationOutcome, ApplicationStage, Candidate, HireData, HireSettings, Interview, Job, PoolStatus,
 } from './types';
 
 /** The API answers with at most this many rows per request. */
 const PAGE_SIZE = HIRE_READ_CAP;
 
-const APPLICATION_COLUMNS =
-  'id,candidate_id,job_id,stage,outcome,reject_reason,rating,source,applied_at,offered_at,hired_at,created_at,' +
-  'cover_letter,cv_url,cv_path,portfolio_url,expected_salary_cents,consented_at,' +
-  'candidate:hire_candidates(name,pool_status),job:hire_jobs(title)';
 const INTERVIEW_COLUMNS =
   'id,application_id,scheduled_at,duration_minutes,kind,place,interviewer_name,notes,status,created_at,updated_at,' +
   'feedback_rating,feedback_recommendation,feedback_comments,feedback_at,' +
@@ -24,8 +21,6 @@ const INTERVIEW_COLUMNS =
 
 type Named = { name?: string | null } | null | undefined;
 type Titled = { title?: string | null } | null | undefined;
-type Pooled = { name?: string | null; pool_status?: PoolStatus | null } | null | undefined;
-type ApplicationRow = Omit<Application, 'candidate_name' | 'job_title' | 'candidate_pool_status'> & { candidate: Pooled; job: Titled };
 type InterviewRow = Omit<Interview, 'candidate_name' | 'job_title' | 'application_stage' | 'application_outcome' | 'feedback'> & {
   feedback_rating?: number | null;
   feedback_recommendation?: string | null;
@@ -77,14 +72,8 @@ export function createSupabaseHireData(client: SupabaseClient, orgId: string): H
         (candidate) => ({ ...candidate, skills: candidate.skills ?? [] }),
       ),
     listApplications: async () =>
-      (await rows<ApplicationRow>('hire_applications', APPLICATION_COLUMNS, { col: 'applied_at', asc: false })).map(
-        ({ candidate, job, ...row }) => ({
-          ...row,
-          candidate_name: candidate?.name ?? UNKNOWN,
-          candidate_pool_status: candidate?.pool_status ?? 'none',
-          job_title: job?.title ?? UNKNOWN,
-        }),
-      ),
+      (await rows<Parameters<typeof toApplication>[0]>('hire_applications', applicationColumns(), { col: 'applied_at', asc: false }))
+        .map(toApplication),
     listInterviews: async () =>
       // Read newest-first so the row ceiling drops the oldest interviews, then hand back soonest-first.
       [...(await rows<InterviewRow>('hire_interviews', INTERVIEW_COLUMNS, { col: 'scheduled_at', asc: false }))]
@@ -114,6 +103,8 @@ export function createSupabaseHireData(client: SupabaseClient, orgId: string): H
     interviewCard: (id) => readInterviewCard(client, orgId, id),
     searchCandidates: (query) => readCandidateSearch(client, orgId, query),
     listPool: () => readPool(client, orgId),
+    searchApplications: (query) => readApplicationSearch(client, orgId, query),
+    contactsOf: (ids) => readContacts(client, orgId, ids),
   };
 }
 

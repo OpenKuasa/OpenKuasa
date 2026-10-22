@@ -1112,7 +1112,9 @@ describe('listApplications by candidate', () => {
     expect(expected.length).toBeLessThan(apps.length);
     for (const candidate of [part, part.toUpperCase(), part.toLowerCase()]) {
       const found = await run('listApplications')({ candidate, limit: 50 });
-      expect(found.total).toBe(expected.length);
+      // The database is asked for at most the newest 50 that match; beyond that the answer says there are more.
+      expect(found.total).toBe(Math.min(expected.length, 50));
+      expect(Boolean(found.more_matches)).toBe(expected.length > 50);
       expect(found.applications.every((a: { candidate: string }) => a.candidate.toLowerCase().includes(part.toLowerCase()))).toBe(true);
       expect(found.applications.map((a: { id: string }) => a.id)).toEqual(expected.slice(0, 50).map((a) => a.id));
     }

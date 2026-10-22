@@ -2,8 +2,13 @@
 import { describe, expect, it } from 'vitest';
 import { CANDIDATE_COLUMNS, readPool, readPoolPicker } from '@/lib/hire/candidate-search';
 import { latestOnly } from '@/lib/hire/latest-answer';
+import {
+  APPLICATION_SEARCH_LIMIT, findApplications, readApplicationSearch, readContacts, searchApplicationsFromList,
+} from '@/lib/hire/application-search';
+import { createHireTools } from '@/lib/ai/hire-tools';
 import { buildPoolModel } from '@/lib/hire/lists';
-import { HIRE_READ_CAP, type Candidate, type HireData } from '@/lib/hire/types';
+import { createSeedHireData } from '@/lib/hire/seed';
+import { HIRE_READ_CAP, type Application, type Candidate, type HireData } from '@/lib/hire/types';
 
 /**
  * The last lists that kept only the newest 1,000 rows. No database here: the
@@ -155,5 +160,187 @@ describe('latestOnly', () => {
     const asked = latest.begin();
     latest.cancel();
     expect(latest.isCurrent(asked)).toBe(false);
+  });
+});
+
+// ─── 3. Lekir's listApplications asks the database for a name ────────────────
+
+const app = (i: number, over: Partial<Application> = {}): Application => ({
+  id: `a${i}`, candidate_id: `c${i}`, job_id: 'j1', candidate_name: `Person ${i}`, job_title: 'Sales Executive', candidate_pool_status: 'none',
+  stage: 'applied', outcome: 'active', reject_reason: null, rating: null, source: null,
+  applied_at: new Date(NOW.getTime() - i * 60_000).toISOString(), offered_at: null, hired_at: null, created_at: '2026-01-01T00:00:00Z',
+  cover_letter: null, cv_url: null, cv_path: null, portfolio_url: null, expected_salary_cents: null, consented_at: null, ...over,
+});
+/** A row as the database hands it back: the joined name and title still nested. */
+const raw = (a: Application) => {
+  const { candidate_name, job_title, candidate_pool_status, ...row } = a;
+  return { ...row, candidate: { name: candidate_name, pool_status: candidate_pool_status }, job: { title: job_title } };
+};
+const selectOf = (q: Query) => String(q.calls.find((c) => c[0] === 'select')?.[1]);
+const byJob = (q: Query) => q.calls.some((c) => c[1] === 'job.title');
+
+describe('readApplicationSearch', () => {
+  it('asks for the newest applications whose candidate\'s name matches, in this workspace, one more than it keeps', async () => {
+    const { client, queries } = standIn(() => ({ data: [raw(app(1))] }));
+    const got = await readApplicationSearch(client, 'org1', { name: ' D.J. (Dee)* ' });
+    expect(queries).toHaveLength(1);
+    const [q] = queries;
+    expect(q.table).toBe('hire_applications');
+    expect(selectOf(q)).toContain('candidate:hire_candidates!inner(name,pool_status)');
+    expect(selectOf(q)).toContain('job:hire_jobs(title)');
+    expect(has(q, 'eq', 'org_id', 'org1')).toBe(true);
+    expect(has(q, 'filter', 'candidate.name', 'imatch', 'D\\.J\\. \\(Dee\\)\\*')).toBe(true);
+    expect(has(q, 'order', 'applied_at', { ascending: false })).toBe(true);
+    expect(has(q, 'limit', APPLICATION_SEARCH_LIMIT + 1)).toBe(true);
+    expect(JSON.stringify(q.calls)).not.toMatch(/ilike|"or"/);
+    expect(got.rows[0]).toMatchObject({ id: 'a1', candidate_name: 'Person 1', job_title: 'Sales Executive', candidate_pool_status: 'none' });
+    expect(got.rows[0]).not.toHaveProperty('candidate');
+  });
+  it('narrows by stage and outcome in the database, and reads up to the list cap when asked', async () => {
+    const { client, queries } = standIn(() => ({ data: [] }));
+    await readApplicationSearch(client, 'org1', { name: 'Lim', stage: 'offer', outcome: 'active', limit: HIRE_READ_CAP });
+    expect(has(queries[0], 'eq', 'stage', 'offer')).toBe(true);
+    expect(has(queries[0], 'eq', 'outcome', 'active')).toBe(true);
+    expect(has(queries[0], 'limit', HIRE_READ_CAP)).toBe(true);
+  });
+  it('with alsoJob, asks a second time by job title and merges the two, newest first, each once', async () => {
+    const named = [app(2, { candidate_name: 'Sales Sam' }), app(5)];
+    const titled = [app(1), app(2, { candidate_name: 'Sales Sam' })];
+    const { client, queries } = standIn((q) => ({ data: (byJob(q) ? titled : named).map(raw) }));
+    const got = await readApplicationSearch(client, 'org1', { name: 'sales', alsoJob: true });
+    expect(queries).toHaveLength(2);
+    const jobQuery = queries.find(byJob)!;
+    expect(selectOf(jobQuery)).toContain('job:hire_jobs!inner(title)');
+    expect(selectOf(jobQuery)).toContain('candidate:hire_candidates(name,pool_status)');
+    expect(has(jobQuery, 'filter', 'job.title', 'imatch', 'sales')).toBe(true);
+    expect(got.rows.map((a) => a.id)).toEqual(['a1', 'a2', 'a5']);
+    expect(got.more).toBe(false);
+  });
+  it('keeps the limit and says when there were more', async () => {
+    const many = Array.from({ length: APPLICATION_SEARCH_LIMIT + 1 }, (_, i) => raw(app(i)));
+    const got = await readApplicationSearch(standIn(() => ({ data: many })).client, 'org1', { name: 'Person' });
+    expect(got.rows).toHaveLength(APPLICATION_SEARCH_LIMIT);
+    expect(got.more).toBe(true);
+    expect((await readApplicationSearch(standIn(() => ({ data: many.slice(0, 3) })).client, 'org1', { name: 'Person' })).more).toBe(false);
+    // Two halves that only together overflow.
+    const halves = standIn((q) => ({ data: byJob(q) ? many.slice(0, 30) : many.slice(30) }));
+    const merged = await readApplicationSearch(halves.client, 'org1', { name: 'x', alsoJob: true });
+    expect(merged.rows).toHaveLength(APPLICATION_SEARCH_LIMIT);
+    expect(merged.more).toBe(true);
+  });
+  it('reads nothing for an empty name, and throws when a query fails', async () => {
+    const empty = standIn(() => ({ data: [] }));
+    expect(await readApplicationSearch(empty.client, 'org1', { name: ' \u0000 ' })).toEqual({ rows: [], more: false });
+    expect(empty.queries).toHaveLength(0);
+    await expect(readApplicationSearch(standIn(() => ({ error: { code: '42501' } })).client, 'org1', { name: 'Lim' })).rejects.toEqual({ code: '42501' });
+  });
+});
+
+describe('searchApplicationsFromList', () => {
+  const list = [app(1, { candidate_name: 'Aisyah Lim' }), app(2, { candidate_name: 'Tan', job_title: 'Lim Supervisor', outcome: 'rejected' }), app(3)];
+  it('matches the candidate\'s name, and the job title with alsoJob, with stage and outcome', () => {
+    expect(searchApplicationsFromList(list, { name: 'LIM' }).rows.map((a) => a.id)).toEqual(['a1']);
+    expect(searchApplicationsFromList(list, { name: 'lim', alsoJob: true }).rows.map((a) => a.id)).toEqual(['a1', 'a2']);
+    expect(searchApplicationsFromList(list, { name: 'lim', alsoJob: true, outcome: 'active' }).rows.map((a) => a.id)).toEqual(['a1']);
+    expect(searchApplicationsFromList(list, { name: 'person', stage: 'offer' }).rows).toEqual([]);
+    expect(searchApplicationsFromList(list, { name: '  ' })).toEqual({ rows: [], more: false });
+  });
+});
+
+describe('readContacts', () => {
+  it('reads only the email and phone of the ids asked for, in this workspace', async () => {
+    const { client, queries } = standIn(() => ({ data: [{ id: 'c1', email: 'a@example.com', phone: '012' }] }));
+    expect(await readContacts(client, 'org1', ['c1', 'c2', 'c1'])).toEqual([{ id: 'c1', email: 'a@example.com', phone: '012' }]);
+    const [q] = queries;
+    expect(q.table).toBe('hire_candidates');
+    expect(has(q, 'select', 'id,email,phone')).toBe(true);
+    expect(has(q, 'eq', 'org_id', 'org1')).toBe(true);
+    expect(has(q, 'in', 'id', ['c1', 'c2'])).toBe(true);
+  });
+  it('asks nothing for no ids', async () => {
+    const { client, queries } = standIn(() => ({ data: [] }));
+    expect(await readContacts(client, 'org1', [])).toEqual([]);
+    expect(queries).toHaveLength(0);
+  });
+});
+
+/** 1,300 applications: the list read sees only the newest HIRE_READ_CAP, the search sees them all. */
+const ALL_APPS = Array.from({ length: 1300 }, (_, i) => app(i, i === 1250 ? { candidate_name: 'Zulaikha Old', candidate_id: 'old' } : {}));
+const seed = createSeedHireData(NOW);
+const appsData = (over: Partial<HireData> = {}): HireData & { asked: string[] } => {
+  const asked: string[] = [];
+  return {
+    ...seed,
+    asked,
+    listApplications: async () => ALL_APPS.slice(0, HIRE_READ_CAP),
+    listCandidates: async () => { asked.push('listCandidates'); return [person(1, { email: 'p1@example.com' })]; },
+    searchApplications: async (query) => searchApplicationsFromList(ALL_APPS, query),
+    contactsOf: async (ids) => { asked.push(`contactsOf:${ids.join(',')}`); return ids.map((id) => ({ id, email: `${id}@example.com`, phone: '012' })); },
+    ...over,
+  };
+};
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type Loose = any;
+const listApplications = (data: HireData, input: Record<string, unknown>) =>
+  (createHireTools(data, NOW).listApplications as unknown as { execute: (i: unknown, o: unknown) => Promise<Loose> })
+    .execute(input, { toolCallId: 't', messages: [] });
+
+describe('findApplications', () => {
+  it('uses the provider\'s own search, else the list, and says when that list was cut', async () => {
+    expect((await findApplications(appsData(), { name: 'zulaikha' })).rows.map((a) => a.id)).toEqual(['a1250']);
+    const fallback = await findApplications(appsData({ searchApplications: undefined }), { name: 'zulaikha' });
+    expect(fallback).toEqual({ rows: [], more: false, capped: true });
+  });
+});
+
+describe('listApplications by a candidate name', () => {
+  it('finds an application older than the newest 1,000, with the same row shape', async () => {
+    const result = await listApplications(appsData(), { candidate: 'Zulaikha' });
+    expect(result.total).toBe(1);
+    expect(result.applications[0].id).toBe('a1250');
+    expect(Object.keys(result.applications[0]).sort()).toEqual(
+      ['applied_at', 'candidate', 'id', 'job', 'label', 'outcome', 'rating', 'reject_reason', 'source', 'stage'],
+    );
+    expect(result).not.toHaveProperty('more_matches');
+  });
+  it('says when more applications match the name than were looked at', async () => {
+    const result = await listApplications(appsData(), { candidate: 'Person' });
+    expect(result.applications).toHaveLength(20);
+    expect(result.more_matches).toMatch(/More than 50 applications/);
+    expect(result.several_match).toBeDefined();
+  });
+  it('with a job title as well, reads as many as the list would and names the job filter when even that was cut', async () => {
+    const seen: unknown[] = [];
+    const data = appsData({ searchApplications: async (query) => { seen.push(query); return searchApplicationsFromList(ALL_APPS, query); } });
+    const result = await listApplications(data, { candidate: 'Person', jobTitle: 'sales', stage: 'applied', outcome: 'active' });
+    expect(seen).toEqual([{ name: 'Person', stage: 'applied', outcome: 'active', limit: HIRE_READ_CAP }]);
+    expect(result.more_matches).toMatch(new RegExp(`newest ${HIRE_READ_CAP}`));
+    expect(result.more_matches).toMatch(/job/);
+  });
+  it('without a name, reads the list as before', async () => {
+    const data = appsData({ searchApplications: async () => { throw new Error('not asked'); } });
+    expect((await listApplications(data, { jobTitle: 'sales' })).total).toBe(HIRE_READ_CAP);
+  });
+});
+
+describe('listApplications contact details', () => {
+  it('reads the email and phone of the shown candidates only, not the capped candidates list', async () => {
+    const data = appsData();
+    const result = await listApplications(data, { candidate: 'Zulaikha', includeContact: true });
+    expect(result.applications[0]).toMatchObject({ email: 'old@example.com', phone: '012' });
+    expect(data.asked).toEqual(['contactsOf:old']);
+    const shown = await listApplications(appsData(), { includeContact: true, limit: 3 });
+    expect(shown.applications.map((a: Loose) => a.email)).toEqual(['c0@example.com', 'c1@example.com', 'c2@example.com']);
+  });
+  it('asks for no contact details without includeContact', async () => {
+    const data = appsData();
+    await listApplications(data, { candidate: 'Zulaikha' });
+    expect(data.asked).toEqual([]);
+  });
+  it('falls back to the candidates list for a provider without a contact read', async () => {
+    const data = appsData({ contactsOf: undefined });
+    const result = await listApplications(data, { includeContact: true, limit: 2 });
+    expect(data.asked).toEqual(['listCandidates']);
+    expect(result.applications.map((a: Loose) => a.email)).toEqual([null, 'p1@example.com']);
   });
 });

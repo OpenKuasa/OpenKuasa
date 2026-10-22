@@ -73,6 +73,7 @@ import { CV_MAX_BYTES } from '@/lib/hire/application-fields';
 import { applicationFormOf } from '@/lib/hire/application-form';
 import { applicationLabel, funnelCounts, matchesText } from '@/lib/hire/applications-view';
 import type { CvReader } from '@/lib/hire/cv-read';
+import { APPLICATION_SEARCH_LIMIT, findApplications } from '@/lib/hire/application-search';
 import { CANDIDATE_SEARCH_LIMIT, cleanSearchName, findCandidates } from '@/lib/hire/candidate-search';
 import { sameText } from '@/lib/hire/namesakes';
 import { timeToHire } from '@/lib/hire/dashboard';
@@ -285,11 +286,11 @@ const limit = limitSchema(`How many rows to return, at most ${LOOKUP_MAX}.`);
  * Said when a lookup by name matched more people than it read. `narrowed`: a skill or a place was also asked for, so
  * the wider read was used and the filter covered only its newest rows.
  */
-const moreMatches = (who: string, narrowed: boolean) =>
+const moreMatches = (who: string, narrowed: boolean, filters = 'skill and place filters', limit = CANDIDATE_SEARCH_LIMIT) =>
   narrowed
-    ? `At least ${HIRE_READ_CAP} ${who} match this name: the skill and place filters covered only the newest ` +
+    ? `At least ${HIRE_READ_CAP} ${who} match this name: the ${filters} covered only the newest ` +
       `${HIRE_READ_CAP} of them, so the one meant may be missing. Ask the user for more of the name.`
-    : `More than ${CANDIDATE_SEARCH_LIMIT} ${who} match this name: only the newest ${CANDIDATE_SEARCH_LIMIT} were looked at, ` +
+    : `More than ${limit} ${who} match this name: only the newest ${limit} were looked at, ` +
       'so the one meant may be missing. Ask the user for more of the name.';
 
 /** A name to look someone up by: at most 100 characters. */
@@ -400,19 +401,37 @@ export function createHireTools(
       }),
       execute: async ({ jobTitle: title, candidate, stage, outcome, includeContact: withContact, limit: requested }) =>
         safe('listApplications', async () => {
-          const apps = await data.listApplications();
-          const people = withContact
-            ? new Map((await data.listCandidates()).map((c) => [c.id, c]))
+          // By a candidate name, the database is asked (stage and outcome with it), so an application made long ago
+          // is found too. Otherwise the list. With a job title as well, as many rows are read as the list would give,
+          // then narrowed here.
+          const asked = cleanSearchName(candidate ?? '');
+          const narrowed = Boolean(title?.trim());
+          const found = asked
+            ? await findApplications(data, {
+              name: asked, ...(stage && { stage }), ...(outcome && { outcome }), ...(narrowed && { limit: HIRE_READ_CAP }),
+            })
             : null;
-          const rows = apps.filter(
+          const rows = (found ? found.rows : await data.listApplications()).filter(
             (a) =>
               matchesText(a.job_title, title) &&
-              matchesText(a.candidate_name, candidate) &&
+              matchesText(a.candidate_name, asked) &&
               (!stage || a.stage === stage) &&
               (!outcome || a.outcome === outcome),
           );
+          const shown = rows.slice(0, rowLimit(requested, 20));
+          // Contact details for the rows shown only, read by their candidates' ids: never from the list of everyone,
+          // which keeps only the newest people and could miss the candidate of an older application.
+          const people = withContact
+            ? new Map(
+              (data.contactsOf
+                ? await data.contactsOf([...new Set(shown.map((a) => a.candidate_id))])
+                : await data.listCandidates()
+              ).map((c) => [c.id, c]),
+            )
+            : null;
           return {
             total: rows.length,
+            ...(found?.more && { more_matches: moreMatches('applications', narrowed, 'job filter', APPLICATION_SEARCH_LIMIT) }),
             // A rule in the prompt alone was not enough for candidates (the worker picked the first match), so the result says it.
             ...(candidate?.trim() && rows.length > 1 && {
               several_match:
@@ -423,7 +442,7 @@ export function createHireTools(
                 // No "look again": a deletion from a second lookup in the same turn is refused, so the model must ask.
                 'Do not choose one. Prepare no change: say which applications match and ask the user which one they mean.',
             }),
-            applications: rows.slice(0, rowLimit(requested, 20)).map((a) => ({
+            applications: shown.map((a) => ({
               id: a.id,
               candidate: a.candidate_name,
               job: a.job_title,
