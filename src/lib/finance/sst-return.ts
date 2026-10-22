@@ -98,7 +98,7 @@ const TYPED_DEDUCTIONS: Record<SstReturnType, SstFormLine[]> = {
   service: [{ item: '13(c)', label: 'Approved service tax deduction', value: null, tax: 0, typed: true }, BAD_DEBT],
   sales: [
     { item: '13(b)', label: 'Sales tax deduction', value: null, tax: 0, typed: true },
-    { item: '13A', label: 'Adjustment to the sales tax deduction', value: null, tax: 0, typed: true },
+    { item: '13A', label: 'Adjustment under sales tax deduction', value: null, tax: 0, typed: true },
     BAD_DEBT,
   ],
 };

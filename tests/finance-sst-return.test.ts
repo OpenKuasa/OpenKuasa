@@ -120,7 +120,7 @@ describe('buildSstReturn: sales', () => {
     expect(r.deductions.map((d) => [d.item, d.label, d.typed ?? false])).toEqual([
       ['13(a)', 'Tax from credit notes', false],
       ['13(b)', 'Sales tax deduction', true],
-      ['13A', 'Adjustment to the sales tax deduction', true],
+      ['13A', 'Adjustment under sales tax deduction', true],
       ['13(d)', 'Bad debt relief (approved)', true],
     ]);
     expect(r.item14).toBe(250);
