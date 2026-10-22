@@ -1,18 +1,23 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
+import type { TeamMember } from '@/lib/account/data';
+import type { SettingsModel } from '@/lib/hire/settings-model';
+import { DEFAULT_HIRE_SETTINGS } from '@/lib/hire/types';
 
 /**
  * The hiring Settings screen, called as the function it is and rendered to a
- * string. The five preview cards are real components; the data readers and the
- * Application form card (which has its own tests) are replaced.
+ * string. The cards are real components; the data readers and the Application
+ * form card (which has its own tests) are replaced.
  */
 
 const mocks = vi.hoisted(() => ({
   getViewer: vi.fn(),
   loadHire: vi.fn(),
+  getTeam: vi.fn(),
 }));
 
 vi.mock('@/lib/auth/viewer', () => ({ getViewer: mocks.getViewer }));
+vi.mock('@/lib/account/data', () => ({ getTeam: mocks.getTeam }));
 vi.mock('@/screens/hire/parts', () => ({
   LOAD_FAILED: <p>load failed</p>,
   loadHire: mocks.loadHire,
@@ -24,134 +29,137 @@ vi.mock('@/screens/hire/application-form-card', () => ({
 vi.mock('@/app/(app)/hire/actions', () => ({ updateApplicationFormAction: vi.fn() }));
 
 import SettingsScreen from '@/screens/hire/settings';
-import {
-  EmailTemplatesPreview,
-  HiringTeamPreview,
-  JobBoardsPreview,
-  NotificationsPreview,
-  PipelinePreview,
-  settingsGreeting,
-} from '@/screens/hire/settings-previews';
+import { settingsGreeting } from '@/screens/hire/settings-cards';
 
 const viewer = (over: Record<string, unknown> = {}) => ({
   userId: 'u1', orgId: 'o1', name: 'Aisyah', email: null, initials: 'A', avatarUrl: null,
   orgName: 'Kedai Maju Sdn Bhd', role: 'owner', isDemo: false, ...over,
 });
 
+const model = (over: Partial<SettingsModel['board']> = {}): SettingsModel => ({
+  settings: { org_id: 'o1', ...DEFAULT_HIRE_SETTINGS },
+  stages: [
+    { stage: 'applied', label: 'Applied', count: 7 },
+    { stage: 'screening', label: 'Screening', count: 0 },
+    { stage: 'interview', label: 'Interview', count: 3 },
+    { stage: 'offer', label: 'Offer', count: 1 },
+    { stage: 'hired', label: 'Hired', count: 2 },
+  ],
+  board: { enabled: true, orgId: 'o1', listed: 4, hiddenOpen: 0, ...over },
+});
+
+const member = (over: Partial<TeamMember>): TeamMember => ({
+  userId: 'u', name: 'Someone', email: 's@example.com', initials: 'S', avatarUrl: null,
+  role: 'member', joinedAt: '2026-10-01T00:00:00Z', isYou: false, ...over,
+});
+
 const render = async () => renderToStaticMarkup(await SettingsScreen());
-
-const CARDS = [
-  { key: 'pipeline', Card: PipelinePreview },
-  { key: 'boards', Card: JobBoardsPreview },
-  { key: 'templates', Card: EmailTemplatesPreview },
-  { key: 'team', Card: HiringTeamPreview },
-  { key: 'notifications', Card: NotificationsPreview },
-] as const;
-
-const TITLES = {
-  pipeline: { title: 'Hiring pipeline', subtitle: 'Stages candidates move through' },
-  boards: { title: 'Job board integrations', subtitle: 'Where your roles get posted' },
-  templates: { title: 'Email templates', subtitle: 'Automated candidate messages' },
-  team: { title: 'Hiring team', subtitle: 'Managers and interviewers' },
-  notifications: { title: 'Notifications', subtitle: 'Choose what you get notified about' },
-} as const;
-
-const LINE = 'A preview of what is planned. Nothing here works or is saved yet.';
-
-/** Every opening tag that starts a button (a switch is a button with role="switch"). */
-const buttonTags = (html: string) => html.match(/<button\b[^>]*>/g) ?? [];
+/** The words a person reads, with the markup taken out and spaces closed up. */
+const words = (html: string) => html.replace(/<[^>]*>/g, ' ').replace(/&#x27;/g, "'").replace(/\s+/g, ' ');
 
 beforeEach(() => {
   mocks.getViewer.mockReset().mockResolvedValue(viewer());
-  mocks.loadHire.mockReset().mockResolvedValue({ model: {}, isDemo: false });
+  mocks.loadHire.mockReset().mockResolvedValue({ model: model(), isDemo: false });
+  mocks.getTeam.mockReset().mockResolvedValue([
+    member({ userId: 'u1', name: 'Aisyah', role: 'owner', isYou: true }),
+    member({ userId: 'u2', name: 'Farah', role: 'viewer' }),
+  ]);
 });
 
-describe('the five preview cards', () => {
-  for (const { key, Card } of CARDS) {
-    describe(key, () => {
-      const html = renderToStaticMarkup(<Card />);
-      const id = `settings-soon-${key}`;
-
-      it('says Coming soon and explains it in the card', () => {
-        expect(html).toContain('Coming soon');
-        expect(html).toContain(LINE);
-        expect(html).toMatch(new RegExp(`<[a-z]+[^>]*\\bid="${id}"[^>]*>${LINE}</`));
-      });
-
-      it('disables every control and points each at the explanation', () => {
-        const tags = buttonTags(html);
-        expect(tags.length).toBeGreaterThan(0);
-        const inert = tags.filter(
-          (tag) => /\sdisabled=""/.test(tag) && tag.includes(`aria-describedby="${id}"`),
-        );
-        expect(inert.length).toBe(tags.length);
-        const switches = html.match(/role="switch"/g) ?? [];
-        const inertSwitches = tags.filter(
-          (tag) => tag.includes('role="switch"') && /\sdisabled=""/.test(tag) && tag.includes(`aria-describedby="${id}"`),
-        );
-        expect(inertSwitches.length).toBe(switches.length);
-      });
-
-      it('lets the title and the subtitle wrap instead of being cut off', () => {
-        const title = TITLES[key];
-        const wraps = (text: string) =>
-          new RegExp(`<[a-z]+[^>]*class="[^"]*\\bwhitespace-normal\\b[^"]*"[^>]*>${text}</`).test(html);
-        expect(wraps(title.title)).toBe(true);
-        expect(wraps(title.subtitle)).toBe(true);
-      });
-
-      it('has no switch that is on', () => {
-        expect(html).not.toContain('aria-checked="true"');
-      });
-    });
-  }
-
-  it('names the pipeline grips', () => {
-    const html = renderToStaticMarkup(<PipelinePreview />);
-    for (const stage of ['Applied', 'Screening', 'Interview', 'Offer', 'Hired']) {
-      expect(html).toContain(`aria-label="Move ${stage} (coming soon)"`);
+describe('the screen', () => {
+  it('has no Coming soon card, no made-up board and no email cards left', async () => {
+    const html = await render();
+    expect(html.toLowerCase()).not.toContain('coming soon');
+    for (const gone of ['Example job board', 'Email templates', 'Notifications', 'Example template', 'Add stage']) {
+      expect(html).not.toContain(gone);
     }
-    expect(html).toContain('Add stage');
+    expect(html).toContain('data-application-form');
   });
 
-  it('names the job boards generically and connects none', () => {
-    const html = renderToStaticMarkup(<JobBoardsPreview />);
-    for (const letter of ['A', 'B', 'C']) {
-      expect(html).toContain(`Example job board ${letter}`);
-      expect(html).toContain(`aria-label="Connect Example job board ${letter}"`);
-    }
-    expect(html).toContain('Post your open roles here automatically');
-    expect(html).toContain('Not connected');
-    expect(html).not.toContain('role="switch"');
+  it('shows each stage with its live count, and links to Applications', async () => {
+    const text = words(await render());
+    for (const row of ['Applied 7', 'Screening 0', 'Interview 3', 'Offer 1', 'Hired 2']) expect(text).toContain(row);
+    expect(text).toContain('The five stages are the same in every workspace.');
+    expect(await render()).toMatch(/<a [^>]*href="\/hire\/applications"[^>]*>Open Applications<\/a>/);
   });
 
-  it('names the template edit buttons', () => {
-    const html = renderToStaticMarkup(<EmailTemplatesPreview />);
-    for (const name of ['Application received', 'Interview invitation', 'Offer letter', 'Not selected']) {
-      expect(html).toContain(`aria-label="Edit ${name} (coming soon)"`);
-    }
-    expect(html).toContain('Example template');
+  it('says the careers page is on, how many jobs it shows, and links to it and to its screen', async () => {
+    const html = await render();
+    expect(words(html)).toContain('On');
+    expect(words(html)).toContain('4 jobs are showing on it.');
+    expect(html).toMatch(/<a [^>]*href="\/careers\/o1"[^>]*>View the public page<\/a>/);
+    expect(html).toMatch(/<a [^>]*href="\/hire\/careers-page"[^>]*>Manage careers page<\/a>/);
   });
 
-  it('shows roles only in the team card, with a link to the real Team page', () => {
-    const html = renderToStaticMarkup(<HiringTeamPreview />);
-    for (const role of ['Admin', 'Hiring manager', 'Interviewer', 'Recruiter']) {
-      expect(html).toContain(role);
-    }
-    expect(html).toContain('Example');
-    expect(html).toContain('Invite member');
-    expect(html).toMatch(/<a [^>]*href="\/account\/team"[^>]*>Team in your account<\/a>/);
-    expect(html).toContain('To add people to your workspace today, use ');
-    expect(html).toContain('.</p>');
+  it('says when open jobs are left off the page for having no description', async () => {
+    mocks.loadHire.mockResolvedValue({ model: model({ listed: 1, hiddenOpen: 2 }), isDemo: false });
+    const text = words(await render());
+    expect(text).toContain('1 job is showing on it.');
+    expect(text).toContain('2 open jobs have no description, so the page leaves them out.');
   });
 
-  it('labels each notification switch', () => {
-    const html = renderToStaticMarkup(<NotificationsPreview />);
-    for (const label of ['Email me on new applications', 'Daily applicant digest', 'Interview reminders']) {
-      expect(html).toContain(label);
-    }
-    expect(html.match(/role="switch"/g)?.length).toBe(3);
-    expect(html.match(/<label\b[^>]*\bfor="/g)?.length).toBe(3);
+  it('says the careers page is off and offers no public link then', async () => {
+    mocks.loadHire.mockResolvedValue({ model: model({ enabled: false }), isDemo: false });
+    const html = await render();
+    expect(words(html)).toContain('Off');
+    expect(words(html)).toContain('No one outside your workspace can see it.');
+    expect(html).not.toContain('href="/careers/o1"');
+  });
+
+  it('lists the team with their roles, marks you, and links to the Team page', async () => {
+    const html = await render();
+    const text = words(html);
+    expect(text).toContain('Aisyah (you) Owner');
+    expect(text).toContain('Farah Viewer');
+    expect(text).toContain('Owners, admins and members can change hiring data. Viewers can only look.');
+    expect(html).toMatch(/<a [^>]*href="\/account\/team"[^>]*>Manage team<\/a>/);
+  });
+
+  it('shows the first eight people and says how many more there are', async () => {
+    mocks.getTeam.mockResolvedValue(
+      Array.from({ length: 11 }, (_, i) => member({ userId: `u${i}`, name: `Person ${i + 1}` })),
+    );
+    const text = words(await render());
+    expect(text).toContain('Person 8');
+    expect(text).not.toContain('Person 9 ');
+    expect(text).toContain('and 3 more');
+  });
+
+  it('says so on the team card alone when the team cannot be read', async () => {
+    mocks.getTeam.mockRejectedValue(new Error('down'));
+    const text = words(await render());
+    expect(text).toContain("Couldn't load your team, please refresh");
+    expect(text).toContain('Applied 7');
+  });
+
+  it('shows no one in the demo, and says where your own team shows', async () => {
+    mocks.getViewer.mockResolvedValue(viewer({ isDemo: true }));
+    const text = words(await render());
+    expect(text).toContain('In your own workspace, the people on your team show here.');
+    expect(text).not.toContain('Aisyah (you)');
+    expect(mocks.getTeam).not.toHaveBeenCalled();
+  });
+
+  it('says so on the hiring cards when the hiring data cannot be read', async () => {
+    mocks.loadHire.mockResolvedValue({ model: null, isDemo: false });
+    const html = await render();
+    expect(html.match(/load failed/g)?.length).toBe(3);
+    expect(words(html)).toContain('Aisyah (you)');
+  });
+
+  it('escapes names that contain markup', async () => {
+    mocks.getViewer.mockResolvedValue(viewer({ orgName: '<b>Kedai</b>' }));
+    mocks.getTeam.mockResolvedValue([member({ name: '<i>Zed</i>' })]);
+    const html = await render();
+    expect(html).toContain('&lt;b&gt;Kedai&lt;/b&gt;');
+    expect(html).toContain('&lt;i&gt;Zed&lt;/i&gt;');
+    expect(html).not.toContain('<i>Zed');
+  });
+
+  it('greets the workspace, or the demo company for a demo', async () => {
+    expect(await render()).toContain('Recruiting preferences for Kedai Maju Sdn Bhd, Saudara.');
+    mocks.loadHire.mockResolvedValue({ model: model(), isDemo: true });
+    expect(await render()).toContain('Recruiting preferences for Rimba Ventures, Saudara.');
   });
 });
 
@@ -170,46 +178,6 @@ describe('settingsGreeting', () => {
   });
   it('trims the name', () => {
     expect(settingsGreeting('  Kedai  ', false)).toBe('Recruiting preferences for Kedai, Saudara.');
-  });
-});
-
-describe('the screen', () => {
-  it('greets a real workspace by name and keeps none of the made-up content', async () => {
-    const html = await render();
-    expect(html).toContain('Recruiting preferences for Kedai Maju Sdn Bhd, Saudara.');
-    expect(html).not.toContain('Save changes');
-    for (const gone of ['Rimba', 'JobStreet', 'LinkedIn', 'Hiredly', 'Ahmad Zaki', 'Faiz Hakim', 'Nurul Huda']) {
-      expect(html).not.toContain(gone);
-    }
-    // The old stage count. Checked on the words a person reads: an icon's path data
-    // legitimately holds digits such as "3.128".
-    const words = html.replace(/<[^>]*>/g, ' ');
-    expect(words).not.toContain('128');
-    expect(html).not.toMatch(/(?<!Not )\bConnected\b/i);
-    expect(html.match(/Coming soon/g)?.length).toBe(5);
-    expect(html).toContain('data-application-form');
-  });
-
-  it('leaves the company out when the workspace has no name', async () => {
-    mocks.getViewer.mockResolvedValue(viewer({ orgName: '   ' }));
-    expect(await render()).toContain('Recruiting preferences, Saudara.');
-  });
-
-  it('keeps the demo name for a demo visitor', async () => {
-    mocks.getViewer.mockResolvedValue(viewer({ isDemo: true }));
-    expect(await render()).toContain('Recruiting preferences for Rimba Ventures, Saudara.');
-  });
-
-  it('keeps the demo name when the data reader says demo', async () => {
-    mocks.loadHire.mockResolvedValue({ model: {}, isDemo: true });
-    expect(await render()).toContain('Recruiting preferences for Rimba Ventures, Saudara.');
-  });
-
-  it('escapes a workspace name that contains markup', async () => {
-    mocks.getViewer.mockResolvedValue(viewer({ orgName: '<b>Kedai</b>' }));
-    const html = await render();
-    expect(html).toContain('&lt;b&gt;Kedai&lt;/b&gt;');
-    expect(html).not.toContain('<b>Kedai');
   });
 });
 

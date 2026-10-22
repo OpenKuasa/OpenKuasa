@@ -13,7 +13,6 @@ describe('live screens', () => {
 
   it('marks a screen that is not connected as sample', () => {
     expect(isSampleScreen('/crm/plugins')).toBe(true);
-    expect(isSampleScreen('/hire/settings')).toBe(true);
   });
 
   it('leaves connected screens and Tuah alone', () => {
@@ -23,11 +22,10 @@ describe('live screens', () => {
     expect(isSampleScreen('/command')).toBe(false);
   });
 
-  it('counts the eight connected Lekir screens as live, and Settings as sample', () => {
-    for (const slug of ['assistant', 'dashboard', 'jobs', 'candidates', 'applications', 'interviews', 'talent-pool', 'careers-page']) {
+  it('counts all nine Lekir screens as live', () => {
+    for (const slug of ['assistant', 'dashboard', 'jobs', 'candidates', 'applications', 'interviews', 'talent-pool', 'careers-page', 'settings']) {
       expect(isSampleScreen(`/hire/${slug}`), slug).toBe(false);
     }
-    expect(isSampleScreen('/hire/settings')).toBe(true);
   });
 
   it('counts Invoices and Payments In as live', () => {

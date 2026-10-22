@@ -41,7 +41,7 @@ export const LIVE_SCREENS: ReadonlySet<string> = new Set([
   'crm/settings',
 
   // Lekir: jobs, applications, candidates, interviews and the talent pool can be changed.
-  // Settings stays sample: only its application-form card is real so far.
+  // Settings saves the application form and links to where the rest is set.
   'hire/assistant',
   'hire/dashboard',
   'hire/jobs',
@@ -50,6 +50,7 @@ export const LIVE_SCREENS: ReadonlySet<string> = new Set([
   'hire/interviews',
   'hire/talent-pool',
   'hire/careers-page',
+  'hire/settings',
 
   // Lekiu: every screen reads the workspace's HR data.
   'people/assistant',
