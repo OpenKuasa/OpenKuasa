@@ -39,7 +39,7 @@ import { AGENTS } from '@/lib/agents/registry';
 import { z } from 'zod';
 import { promoteLeadToContact } from '@/lib/reach/capabilities';
 import { getViewer } from '@/lib/auth/viewer';
-import { applyProposalAction, rejectProposalAction } from '@/app/(app)/reach/actions';
+import { applyProposalAction, rejectProposalAction } from '@/app/(app)/agents/actions';
 
 const ctx = { client: {} as never, orgId: 'org-1' };
 

@@ -77,7 +77,6 @@ import {
 } from '@/lib/reach/schedule-capabilities';
 import { serviceClient } from '@/lib/supabase/service';
 import { runWeeklyStudio } from '@/lib/agents/weekly-studio';
-import { runProposalAction } from '@/lib/agents/apply-proposal';
 import { reapStaleRuns, startRefusal, type StartRefusal } from '@/lib/agents/runner';
 import { RunInProgressError, WEEKLY_STUDIO } from '@/lib/agents/types';
 import { createSupabaseReachData, getReachData } from '@/lib/reach/supabase';
@@ -427,77 +426,4 @@ export async function exportLeadsCsv(
   const inRange = leads.filter((l) => new Date(l.created_at).getTime() >= cutoff);
   const stamp = new Date().toISOString().slice(0, 10);
   return { ok: true, filename: `leads-${range}-${stamp}.csv`, csv: leadsToCsv(inRange) };
-}
-
-const proposalIdInput = z.object({ id: z.string().uuid() });
-
-/**
- * Approve a queued proposal, claim-first: atomically flip pending -> approved (pending and
- * unexpired only), and only the caller that wins the claim runs the reach capability, under
- * the OWNER's session (never the service-role worker). Postgres serializes concurrent
- * approvals on the row, so the change is applied exactly once. If the capability fails
- * after the claim, the row is corrected approved -> failed with the error.
- */
-export async function applyProposalAction(input: unknown): Promise<{ ok: boolean; error?: string }> {
-  const parsed = proposalIdInput.safeParse(input);
-  if (!parsed.success) return { ok: false, error: 'That input was not valid.' };
-  const ctx = await writeCtx();
-  if (!ctx) return { ok: false, error: 'You do not have permission to make changes here.' };
-  const { data: claimed } = await ctx.client
-    .from('agent_proposals')
-    .update({ status: 'approved', decided_at: new Date().toISOString(), decided_by: ctx.userId })
-    .eq('id', parsed.data.id)
-    .eq('org_id', ctx.orgId)
-    .eq('status', 'pending')
-    .gt('expires_at', new Date().toISOString())
-    .select('action, input, product')
-    .maybeSingle();
-  if (!claimed) return { ok: false, error: 'That suggestion has already been handled.' };
-  const applied = await runProposalAction(
-    claimed.product as string,
-    ctx,
-    claimed.action as string,
-    claimed.input,
-  );
-  if (!applied.ok) {
-    await ctx.client
-      .from('agent_proposals')
-      .update({ status: 'failed', result: { error: applied.error } as never })
-      .eq('id', parsed.data.id)
-      .eq('org_id', ctx.orgId);
-    for (const path of AGENTS_PATHS) revalidatePath(path);
-    return { ok: false, error: 'The change could not be applied.' };
-  }
-  // Record what the apply produced on the now-approved row (informational, best-effort:
-  // the change already landed, so a failed stamp must not fail the action).
-  try {
-    await ctx.client
-      .from('agent_proposals')
-      .update({ result: applied.result as never })
-      .eq('id', parsed.data.id)
-      .eq('org_id', ctx.orgId);
-  } catch (e) {
-    // the apply succeeded; the result column is informational. Log for ops only.
-    console.error('[agent-proposals] result stamp failed', e);
-  }
-  for (const path of AGENTS_PATHS) revalidatePath(path);
-  return { ok: true };
-}
-
-/** Reject a queued proposal: mark it rejected, apply nothing. */
-export async function rejectProposalAction(input: unknown): Promise<{ ok: boolean; error?: string }> {
-  const parsed = proposalIdInput.safeParse(input);
-  if (!parsed.success) return { ok: false, error: 'That input was not valid.' };
-  const ctx = await writeCtx();
-  if (!ctx) return { ok: false, error: 'You do not have permission to make changes here.' };
-  const { data } = await ctx.client
-    .from('agent_proposals')
-    .update({ status: 'rejected', decided_at: new Date().toISOString(), decided_by: ctx.userId })
-    .eq('id', parsed.data.id)
-    .eq('org_id', ctx.orgId)
-    .eq('status', 'pending')
-    .select('id')
-    .maybeSingle();
-  for (const path of AGENTS_PATHS) revalidatePath(path);
-  return data ? { ok: true } : { ok: false, error: 'That suggestion has already been handled.' };
 }

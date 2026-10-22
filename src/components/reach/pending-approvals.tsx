@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button';
 import { changeRows } from '@/lib/chat/change-rows';
 import type { ItemKind, KnownNames } from '@/lib/chat/change-titles';
 import type { AgentProposal } from '@/lib/agents/types';
-import { applyProposalAction, rejectProposalAction } from '@/app/(app)/reach/actions';
+import { applyProposalAction, rejectProposalAction } from '@/app/(app)/agents/actions';
 
 type ActionResult = { ok: boolean; error?: string };
 
