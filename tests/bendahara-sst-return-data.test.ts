@@ -10,7 +10,16 @@ import { invoicePayload, newInvoiceForm, withCustomer } from '@/lib/finance/invo
 import { postInvoice, saveInvoice, voidInvoice } from '@/lib/finance/invoices';
 import { sstPeriodFor } from '@/lib/finance/sst';
 import { buildSstReturn } from '@/lib/finance/sst-return';
-import { listSstFiled, markSstReturnFiled, readSstRows, unmarkSstReturnFiled } from '@/lib/finance/sst-return-data';
+import {
+  SST_FIGURES_FILED,
+  listSstFigures,
+  listSstFiled,
+  markSstReturnFiled,
+  readSstRows,
+  saveSstFigures,
+  sstFiguresInput,
+  unmarkSstReturnFiled,
+} from '@/lib/finance/sst-return-data';
 import { todayInMalaysia } from '@/lib/people/dates';
 
 // The rows an SST-02 return is built from, read from the hosted database (#222 stage 2) through the app's own
@@ -113,4 +122,44 @@ testWithSupabase('an owner marks a past return filed once, and can take the mark
   expect(await listSstFiled(ctx, 'sales')).toEqual({});
   expect(await unmarkSstReturnFiled(ctx, { type: 'service', period_start: '2024-01-01' })).toEqual({ ok: true });
   expect(await listSstFiled(ctx, 'service')).toEqual({});
+});
+
+// Stage 5 (20261125090400_bendahara_sst_return_figures.sql): runs once that migration is applied on hosted.
+testWithSupabase('typed-in figures count in item 14, stay with their own type, and are locked while filed', async () => {
+  const ctx = await owner(`SST figures ${Date.now()}`);
+  const key = { type: 'service', period_start: '2024-01-01' } as const;
+  const save = (raw: Record<string, unknown>) => saveSstFigures(ctx, sstFiguresInput.parse(raw));
+
+  // 4 cards (RM 100.00 in 11(e), so item 12), 13(c) RM 30.50 and 13(d) RM 9.50.
+  expect(await save({ ...key, cards_11e: '4', deduction_13c: '30.50', bad_debt_13d: '9.50' })).toEqual({ ok: true });
+  // The sales return of the same period has its own figures, which never reach the service return.
+  expect(await save({ type: 'sales', period_start: '2024-01-01', deduction_13b: '7', adjustment_13a: '1.25', bad_debt_13d: '2' }))
+    .toEqual({ ok: true });
+
+  const service = await listSstFigures(ctx, 'service');
+  expect(service).toEqual({ '2024-01-01': { cards11e: 4, deduction13b: 0, deduction13c: 30.5, badDebt13d: 9.5, adjustment13a: 0 } });
+  expect(await listSstFigures(ctx, 'sales')).toEqual({
+    '2024-01-01': { cards11e: 0, deduction13b: 7, deduction13c: 0, badDebt13d: 2, adjustment13a: 1.25 },
+  });
+
+  // No invoices: item 12 = 4 × RM 25.00 = 100.00; item 14 = 100.00 − 0 − 30.50 − 9.50 = 60.00.
+  const period = sstPeriodFor('2024-01-01', 1);
+  const rows = await readSstRows(ctx, period);
+  const r = buildSstReturn('service', period, rows.lines, rows.credits, service['2024-01-01']);
+  expect(r.item12).toBe(100);
+  expect(r.item14).toBe(60);
+
+  // Saving again updates in place.
+  expect(await save({ ...key, cards_11e: 2 })).toEqual({ ok: true });
+  expect((await listSstFigures(ctx, 'service'))['2024-01-01']).toEqual({
+    cards11e: 2, deduction13b: 0, deduction13c: 0, badDebt13d: 0, adjustment13a: 0,
+  });
+
+  // Marked filed: saving is refused and nothing changes. Undo the mark and it saves again.
+  expect(await markSstReturnFiled(ctx, key, '2024-03-10')).toEqual({ ok: true });
+  expect(await save({ ...key, cards_11e: 9 })).toEqual({ ok: false, error: SST_FIGURES_FILED });
+  expect((await listSstFigures(ctx, 'service'))['2024-01-01'].cards11e).toBe(2);
+  expect(await unmarkSstReturnFiled(ctx, key)).toEqual({ ok: true });
+  expect(await save({ ...key, cards_11e: 9 })).toEqual({ ok: true });
+  expect((await listSstFigures(ctx, 'service'))['2024-01-01'].cards11e).toBe(9);
 });
