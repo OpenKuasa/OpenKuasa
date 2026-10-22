@@ -144,6 +144,53 @@ describe('periods', () => {
     expect(periodFor('this_year', today, none)).toEqual(only('2027-01'));
     expect(periodFor('last_year', today, none)).toEqual({ from: '2026-01', to: '2026-12' });
   });
+  it('are the calendar periods with a December year end, as before, on every month of 2026', () => {
+    // The rule before the financial year existed, written out again here.
+    const calendar = (key: 'this_quarter' | 'this_year' | 'last_year', today: string) => {
+      const year = Number(today.slice(0, 4));
+      const index = Number(today.slice(5, 7)) - 1;
+      const now = today.slice(0, 7);
+      if (key === 'this_quarter') return { from: `${year}-${String(index - (index % 3) + 1).padStart(2, '0')}`, to: now };
+      if (key === 'this_year') return { from: `${year}-01`, to: now };
+      return { from: `${year - 1}-01`, to: `${year - 1}-12` };
+    };
+    for (let m = 1; m <= 12; m += 1) {
+      for (const day of ['01', '15', '28']) {
+        const today = `2026-${String(m).padStart(2, '0')}-${day}`;
+        for (const key of ['this_quarter', 'this_year', 'last_year'] as const) {
+          expect(periodFor(key, today, none), `${key} ${today}`).toEqual(calendar(key, today));
+          expect(periodFor(key, today, none, 12), `${key} ${today}`).toEqual(calendar(key, today));
+        }
+        for (const key of ['this_month', 'last_month', 'all_time'] as const) {
+          expect(periodFor(key, today, TOTALS, 6)).toEqual(periodFor(key, today, TOTALS));
+        }
+      }
+    }
+  });
+  it('follow a June year end', () => {
+    // 23 Oct 2026: the financial year began in July.
+    expect(periodFor('this_year', '2026-10-23', none, 6)).toEqual({ from: '2026-07', to: '2026-10' });
+    expect(periodFor('last_year', '2026-10-23', none, 6)).toEqual({ from: '2025-07', to: '2026-06' });
+    expect(periodFor('this_quarter', '2026-10-23', none, 6)).toEqual(only('2026-10'));
+    expect(periodFor('this_quarter', '2026-09-30', none, 6)).toEqual({ from: '2026-07', to: '2026-09' });
+    // Before July the year began the July before.
+    expect(periodFor('this_year', '2026-03-15', none, 6)).toEqual({ from: '2025-07', to: '2026-03' });
+    expect(periodFor('last_year', '2026-03-15', none, 6)).toEqual({ from: '2024-07', to: '2025-06' });
+    expect(periodFor('this_quarter', '2026-03-15', none, 6)).toEqual({ from: '2026-01', to: '2026-03' });
+    // The year end month itself is the last month of the year, and the next month starts a new one.
+    expect(periodFor('this_year', '2026-06-30', none, 6)).toEqual({ from: '2025-07', to: '2026-06' });
+    expect(periodFor('this_quarter', '2026-06-30', none, 6)).toEqual({ from: '2026-04', to: '2026-06' });
+    expect(periodFor('this_year', '2026-07-01', none, 6)).toEqual(only('2026-07'));
+  });
+  it('follow a year end that does not fall on a calendar quarter', () => {
+    // A March year end: quarters Apr–Jun, Jul–Sep, Oct–Dec, Jan–Mar, the same months as the calendar's.
+    expect(periodFor('this_quarter', '2026-05-10', none, 3)).toEqual({ from: '2026-04', to: '2026-05' });
+    // A January year end: quarters Feb–Apr, May–Jul, Aug–Oct, Nov–Jan.
+    expect(periodFor('this_year', '2026-01-10', none, 1)).toEqual({ from: '2025-02', to: '2026-01' });
+    expect(periodFor('this_quarter', '2026-01-10', none, 1)).toEqual({ from: '2025-11', to: '2026-01' });
+    expect(periodFor('this_quarter', '2026-10-23', none, 1)).toEqual({ from: '2026-08', to: '2026-10' });
+    expect(periodFor('last_year', '2026-10-23', none, 1)).toEqual({ from: '2025-02', to: '2026-01' });
+  });
   it('run all time from the earliest month with a line, or from this month when there is none', () => {
     expect(periodFor('all_time', '2026-05-20', TOTALS)).toEqual({ from: '2026-01', to: '2026-05' });
     expect(periodFor('all_time', '2026-05-20', none)).toEqual(only('2026-05'));

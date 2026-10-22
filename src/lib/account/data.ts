@@ -28,6 +28,8 @@ export type Company = {
   name: string;
   registrationNo: string;
   sstNo: string;
+  /** The tax identification number (TIN), or '' when none is saved. */
+  tin: string;
   website: string;
   industry: string;
   companySize: string;
@@ -94,6 +96,7 @@ export const getCompany = cache(async (): Promise<Company> => {
     name: viewer.orgName,
     registrationNo: '',
     sstNo: '',
+    tin: '',
     website: '',
     industry: '',
     companySize: '',
@@ -109,7 +112,7 @@ export const getCompany = cache(async (): Promise<Company> => {
   const { data, error } = await supabase
     .from('orgs')
     .select(
-      'name, registration_no, sst_no, website, industry, company_size, address, city, state, postcode, logo_path',
+      'name, registration_no, sst_no, tin, website, industry, company_size, address, city, state, postcode, logo_path',
     )
     .eq('id', viewer.orgId)
     .maybeSingle();
@@ -120,6 +123,7 @@ export const getCompany = cache(async (): Promise<Company> => {
     name: data.name,
     registrationNo: data.registration_no ?? '',
     sstNo: data.sst_no ?? '',
+    tin: data.tin ?? '',
     website: data.website ?? '',
     industry: data.industry ?? '',
     companySize: data.company_size ?? '',

@@ -4,6 +4,7 @@ const pl = vi.hoisted(() => ({
   period: { from: '2026-01', to: '2026-12' },
   rows: [{ name: 'Rent', amount: 1200 }],
   net: -1200,
+  periodArgs: [] as unknown[],
 }));
 
 // Hoisted by vitest above the import below, so the mocks reach createBendaharaTools.
@@ -11,7 +12,15 @@ vi.mock('@/lib/finance/reports', async (orig) => ({
   ...(await orig<typeof import('@/lib/finance/reports')>()),
   profitAndLoss: () => pl,
   monthlyTotals: () => ({ totals: [], unassigned: 0 }),
-  periodFor: () => pl.period,
+  periodFor: (...args: unknown[]) => {
+    pl.periodArgs = args;
+    return pl.period;
+  },
+}));
+// The workspace's financial year ends in June: the report tools pass it to periodFor.
+vi.mock('@/lib/finance/settings', async (orig) => ({
+  ...(await orig<typeof import('@/lib/finance/settings')>()),
+  financeSettingsOrDefault: async () => ({ yearEndMonth: 6, lockDate: null, updatedAt: null }),
 }));
 vi.mock('@/lib/finance/ledger', async (orig) => ({
   ...(await orig<typeof import('@/lib/finance/ledger')>()),
@@ -35,5 +44,14 @@ describe('Bendahara report read tools', () => {
   it('returns the P&L the library computes, not its own math', async () => {
     const out = await tools.profitAndLoss.execute({ period: 'this_year' }, opts);
     expect(out).toBe(pl); // the exact library object: statement shape (rows/period), not re-summed
+  });
+
+  it("works the period out from the workspace's financial year end", async () => {
+    for (const name of ['profitAndLoss', 'balanceSheet', 'trialBalance', 'cashFlow']) {
+      pl.periodArgs = [];
+      await tools[name].execute({ period: 'this_year' }, opts);
+      expect(pl.periodArgs[0], name).toBe('this_year');
+      expect(pl.periodArgs[3], name).toBe(6);
+    }
   });
 });

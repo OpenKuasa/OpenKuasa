@@ -168,13 +168,24 @@ export function monthlyTotals(lines: LedgerLine[]): { totals: MonthlyTotals; una
 }
 
 /**
- * The period a choice stands for, from the person's date (YYYY-MM-DD). Quarters are calendar quarters and the
- * year is the calendar year, and the quarter and the year run only to this month: a statement for next month
- * would be empty. All time runs from the earliest month with any line (or this month when there is none) to the later of this month and the latest month with any line.
+ * The period a choice stands for, from the person's date (YYYY-MM-DD) and the month the workspace's financial year
+ * ends (1–12, December by default). The year is the financial year, from the month after `yearEndMonth`, and its
+ * quarters are the 3-month blocks from that month; with December they are the calendar year and quarters. The
+ * quarter and the year run only to this month: a statement for next month would be empty. All time runs from the
+ * earliest month with any line (or this month when there is none) to the later of this month and the latest month
+ * with any line.
  */
-export function periodFor(key: Exclude<PeriodKey, 'custom'>, today: string, totals: MonthlyTotals): Period {
+export function periodFor(
+  key: Exclude<PeriodKey, 'custom'>,
+  today: string,
+  totals: MonthlyTotals,
+  yearEndMonth = 12,
+): Period {
   const now = today.slice(0, 7);
-  const { year, index } = parts(now);
+  const { index } = parts(now);
+  // How many months this month is into the financial year, and the month that year began.
+  const intoYear = (index - (yearEndMonth % 12) + 12) % 12;
+  const yearStart = shiftMonth(now, -intoYear);
   switch (key) {
     case 'this_month':
       return { from: now, to: now };
@@ -183,11 +194,11 @@ export function periodFor(key: Exclude<PeriodKey, 'custom'>, today: string, tota
       return { from: last, to: last };
     }
     case 'this_quarter':
-      return { from: `${year}-${String(index - (index % 3) + 1).padStart(2, '0')}`, to: now };
+      return { from: shiftMonth(yearStart, intoYear - (intoYear % 3)), to: now };
     case 'this_year':
-      return { from: `${year}-01`, to: now };
+      return { from: yearStart, to: now };
     case 'last_year':
-      return { from: `${year - 1}-01`, to: `${year - 1}-12` };
+      return { from: shiftMonth(yearStart, -12), to: shiftMonth(yearStart, -1) };
     case 'all_time': {
       const earliest = totals.reduce<Month | null>((min, t) => (min === null || t.month < min ? t.month : min), null);
       const latest = totals.reduce<Month | null>((max, t) => (max === null || t.month > max ? t.month : max), null);

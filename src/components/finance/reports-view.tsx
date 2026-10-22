@@ -562,6 +562,7 @@ export function ReportsView({
   fxBooks = null,
   today: serverToday,
   followClock = true,
+  yearEndMonth = 12,
 }: {
   accounts: ReportAccount[];
   /** Every account's debits and credits by month (monthlyTotals). */
@@ -583,14 +584,16 @@ export function ReportsView({
   today: string;
   /** False for the sample, whose day is fixed. */
   followClock?: boolean;
+  /** The month (1–12) the workspace's financial year ends, which "This quarter" and "This year" follow. December by default. */
+  yearEndMonth?: number;
 }) {
   const today = useLocalToday(serverToday, followClock);
   const [key, setKey] = useState<PeriodKey>('this_year');
   // The months typed under Custom, and the last range of them that was valid: a bad one keeps that on screen.
   const [custom, setCustom] = useState<Period>({ from: '', to: '' });
-  const [applied, setApplied] = useState<Period>(() => periodFor('this_year', serverToday, totals));
+  const [applied, setApplied] = useState<Period>(() => periodFor('this_year', serverToday, totals, yearEndMonth));
 
-  const period = key === 'custom' ? applied : periodFor(key, today, totals);
+  const period = key === 'custom' ? applied : periodFor(key, today, totals, yearEndMonth);
   const rangeError = key === 'custom' ? rangeMessage(custom) : null;
 
   const choose = (next: PeriodKey) => {

@@ -11,6 +11,7 @@ import { SAMPLE_TODAY } from '@/screens/finance/sales-sample';
 const state = vi.hoisted(() => ({
   env: false,
   load: null as null | (() => Promise<unknown>),
+  yearEndMonth: 12,
 }));
 
 vi.mock('@/lib/auth/viewer', () => ({
@@ -19,6 +20,10 @@ vi.mock('@/lib/auth/viewer', () => ({
 }));
 vi.mock('@/lib/supabase/server', () => ({ createClient: async () => ({}) }));
 vi.mock('@/lib/finance/dashboard-data', () => ({ loadDashboardInputs: () => state.load!() }));
+vi.mock('@/lib/finance/settings', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/finance/settings')>()),
+  financeSettingsOrDefault: async () => ({ yearEndMonth: state.yearEndMonth, lockDate: null, updatedAt: null }),
+}));
 vi.mock('@/lib/people/dates', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/lib/people/dates')>()),
   todayInMalaysia: () => '2026-10-10',
@@ -38,6 +43,7 @@ const sample: DashboardInputs = {
 beforeEach(() => {
   state.env = false;
   state.load = null;
+  state.yearEndMonth = 12;
 });
 
 describe('the Dashboard without a database', () => {
@@ -74,6 +80,18 @@ describe('the Dashboard with a database', () => {
     const text = textOf(renderToStaticMarkup(await DashboardScreen({})));
     expect(text).toContain("Couldn't load");
     expect(text).not.toContain('Cash position RM 0.00');
+  });
+
+  it("works This year out from the workspace's financial year end", async () => {
+    state.env = true;
+    state.load = async () => sample;
+    state.yearEndMonth = 9;
+    const september = buildDashboardModel(sample, '2026-10-10', 'this_year', 9);
+    const december = buildDashboardModel(sample, '2026-10-10', 'this_year');
+    expect(september.pl.totalIncome).not.toBe(december.pl.totalIncome);
+    const text = textOf(renderToStaticMarkup(await DashboardScreen({ searchParams: Promise.resolve({ period: 'this_year' }) })));
+    expect(text).toContain(rm(september.pl.totalIncome));
+    expect(text).not.toContain(rm(december.pl.totalIncome));
   });
 
   it('shows one friendly notice for an empty workspace', async () => {

@@ -130,11 +130,17 @@ const isCashMovement = (t: BankTransactionRow) => t.status === 'posted' && t.kin
 
 /**
  * Everything the Dashboard shows, worked out from the reads with the Reports screen's own functions, so the two
- * never disagree. Sums are in sen; a read that failed stays null instead of becoming zero.
+ * never disagree. Sums are in sen; a read that failed stays null instead of becoming zero. "This quarter" and
+ * "This year" follow the financial year ending in `yearEndMonth` (the accounting settings; December by default).
  */
-export function buildDashboardModel(inputs: DashboardInputs, today: string, periodKey: DashboardPeriodKey): DashboardModel {
+export function buildDashboardModel(
+  inputs: DashboardInputs,
+  today: string,
+  periodKey: DashboardPeriodKey,
+  yearEndMonth = 12,
+): DashboardModel {
   const { totals } = monthlyTotals(inputs.lines);
-  const period = periodFor(periodKey, today, totals);
+  const period = periodFor(periodKey, today, totals, yearEndMonth);
   const pl = profitAndLoss(inputs.accounts, totals, period);
   const before = profitAndLoss(inputs.accounts, totals, previousPeriod(period, periodKey));
 

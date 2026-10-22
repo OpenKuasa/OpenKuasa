@@ -13,6 +13,7 @@ import {
 import { COMPANY_SIZES, INDUSTRIES, MY_STATES } from '@/config/account';
 import { updateCompanyAction } from '@/app/account/actions';
 import type { Company } from '@/lib/account/data';
+import { TIN_MAX } from '@/lib/account/tin';
 import { ReadOnlyNotice, SaveBar, useSettingsForm } from './settings-form';
 
 function OptionSelect({
@@ -93,6 +94,16 @@ export function CompanyForm({
                 name="sstNo"
                 defaultValue={company.sstNo}
                 maxLength={40}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="tin">Tax identification number (TIN)</Label>
+              <Input
+                id="tin"
+                name="tin"
+                defaultValue={company.tin}
+                maxLength={TIN_MAX}
+                autoCapitalize="characters"
               />
             </div>
             <div className="space-y-2">

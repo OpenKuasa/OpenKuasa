@@ -10,6 +10,7 @@ import {
   PASSWORD_CHECK_ERRORS,
   verifyCurrentPassword,
 } from '@/lib/auth/verify-password';
+import { tinField } from '@/lib/account/tin';
 import { recordEvent } from '@/lib/events';
 import { passwordCheckLimited } from '@/lib/security/limits';
 import {
@@ -90,6 +91,7 @@ const companySchema = z.object({
   name: text(120).min(1, 'Please enter your company name.'),
   registrationNo: text(40),
   sstNo: text(40),
+  tin: tinField,
   website: text(200),
   industry: optionalOf(INDUSTRIES),
   companySize: optionalOf(COMPANY_SIZES),
@@ -113,6 +115,7 @@ export async function updateCompanyAction(
     name: field(formData, 'name'),
     registrationNo: field(formData, 'registrationNo'),
     sstNo: field(formData, 'sstNo'),
+    tin: field(formData, 'tin'),
     website: field(formData, 'website'),
     industry: field(formData, 'industry'),
     companySize: field(formData, 'companySize'),
@@ -131,6 +134,7 @@ export async function updateCompanyAction(
       name: v.name,
       registration_no: v.registrationNo || null,
       sst_no: v.sstNo || null,
+      tin: v.tin || null,
       website: v.website || null,
       industry: v.industry || null,
       company_size: v.companySize || null,

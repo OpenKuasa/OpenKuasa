@@ -135,6 +135,7 @@ import {
   profitAndLoss,
   trialBalance,
 } from '@/lib/finance/reports';
+import { financeSettingsOrDefault } from '@/lib/finance/settings';
 import {
   billFromPurchaseOrderInRinggit,
   billFromPurchaseOrderInput,
@@ -241,10 +242,17 @@ export function createBendaharaTools(access: FinanceAccess) {
       .enum(['this_month', 'last_month', 'this_quarter', 'this_year', 'last_year', 'all_time'])
       .describe('Which period to report on.'),
   });
+  // The books and the workspace's financial year end, read once per call: "This quarter" and "This year" follow
+  // the financial year as the Reports screen does (December when the settings cannot be read).
   const statementData = async () => {
-    const [lines, ledgerAccounts] = await Promise.all([listLedgerLines(ctx), listLedgerAccounts(ctx)]);
+    const [lines, ledgerAccounts, settings] = await Promise.all([
+      listLedgerLines(ctx),
+      listLedgerAccounts(ctx),
+      financeSettingsOrDefault(ctx, 'Bendahara report tool'),
+    ]);
     const { totals } = monthlyTotals(lines);
-    return { lines, ledgerAccounts, totals };
+    const period = (key: Parameters<typeof periodFor>[0]) => periodFor(key, todayIso(), totals, settings.yearEndMonth);
+    return { lines, ledgerAccounts, totals, period };
   };
 
   const read = {
@@ -445,8 +453,8 @@ export function createBendaharaTools(access: FinanceAccess) {
       description: 'Profit and loss (income statement) for a period. Returns the statement the books compute; amounts in ringgit.',
       inputSchema: periodInput,
       execute: async ({ period }) => {
-        const { ledgerAccounts, totals } = await statementData();
-        return profitAndLoss(reportAccounts(ledgerAccounts), totals, periodFor(period, todayIso(), totals));
+        const { ledgerAccounts, totals, period: periodOf } = await statementData();
+        return profitAndLoss(reportAccounts(ledgerAccounts), totals, periodOf(period));
       },
     }),
     balanceSheet: tool({
@@ -455,16 +463,16 @@ export function createBendaharaTools(access: FinanceAccess) {
         'except at a month end with a posted FX revaluation, where they are at its closing rates (it reverses the next day). You cannot post a revaluation.',
       inputSchema: periodInput,
       execute: async ({ period }) => {
-        const { ledgerAccounts, totals } = await statementData();
-        return balanceSheet(reportAccounts(ledgerAccounts), totals, periodFor(period, todayIso(), totals));
+        const { ledgerAccounts, totals, period: periodOf } = await statementData();
+        return balanceSheet(reportAccounts(ledgerAccounts), totals, periodOf(period));
       },
     }),
     trialBalance: tool({
       description: 'Trial balance for a period.',
       inputSchema: periodInput,
       execute: async ({ period }) => {
-        const { ledgerAccounts, totals } = await statementData();
-        return trialBalance(reportAccounts(ledgerAccounts), totals, periodFor(period, todayIso(), totals));
+        const { ledgerAccounts, totals, period: periodOf } = await statementData();
+        return trialBalance(reportAccounts(ledgerAccounts), totals, periodOf(period));
       },
     }),
     agedReceivables: tool({
@@ -481,8 +489,8 @@ export function createBendaharaTools(access: FinanceAccess) {
       description: 'Cash flow for a period.',
       inputSchema: periodInput,
       execute: async ({ period }) => {
-        const { lines, ledgerAccounts, totals } = await statementData();
-        return cashFlow(cashMovements(lines, ledgerAccounts), periodFor(period, todayIso(), totals));
+        const { lines, ledgerAccounts, period: periodOf } = await statementData();
+        return cashFlow(cashMovements(lines, ledgerAccounts), periodOf(period));
       },
     }),
     listFinanceItems: tool({

@@ -101,6 +101,14 @@ import {
 import { fxSstRate } from '@/lib/finance/sst-rate';
 import { SST_NEEDS_SIGN_OFF, saveSstSettings, sstSettingsInput } from '@/lib/finance/sst';
 import {
+  type FinanceSettings,
+  SETTINGS_NEEDS_SIGN_OFF,
+  financeSettingsInput,
+  saveFinanceSettings,
+  sequenceInput,
+  setSequence,
+} from '@/lib/finance/settings';
+import {
   SST_FIGURES_NEEDS_SIGN_OFF,
   SST_RETURN_NEEDS_SIGN_OFF,
   markSstReturnFiled,
@@ -1306,4 +1314,24 @@ export async function saveSstFiguresAction(input: unknown): Promise<FinResult<nu
     const result = await saveSstFigures(ctx, parsed);
     return result.ok ? { ok: true, data: null } : result;
   }, SST_FIGURES_SIGN_OFF);
+}
+
+/* ------------------------------------------------------------------ Accounting settings */
+
+// The year end moves Reports' and the Dashboard's (and the Overview's) quarter and year; the lock and the
+// numbering show on the Settings screen.
+const SETTINGS_PATHS = ['/finance/settings', '/finance/reports', '/finance/dashboard', '/finance/assistant'];
+const SETTINGS_SIGN_OFF = { signOff: true, signOffError: SETTINGS_NEEDS_SIGN_OFF } as const;
+
+/**
+ * Saves the month the financial year ends and the books lock date. An owner or admin only; a lock date after
+ * today in Malaysia is refused here and by the database (FIN64).
+ */
+export async function saveFinanceSettingsAction(input: unknown): Promise<FinResult<FinanceSettings>> {
+  return run(SETTINGS_PATHS, financeSettingsInput, input, saveFinanceSettings, SETTINGS_SIGN_OFF);
+}
+
+/** Changes a document's numbering prefix and next number. An owner or admin only; the number can't go back (FIN65). */
+export async function setSequenceAction(input: unknown): Promise<FinResult<null>> {
+  return run(SETTINGS_PATHS, sequenceInput, input, setSequence, SETTINGS_SIGN_OFF);
 }

@@ -22,6 +22,7 @@ import {
   type DashboardModel,
 } from '@/lib/finance/dashboard';
 import { loadDashboardInputs } from '@/lib/finance/dashboard-data';
+import { DEFAULT_FINANCE_SETTINGS, financeSettingsOrDefault } from '@/lib/finance/settings';
 import { cn } from '@/lib/utils';
 import { SAMPLE_BANK_ACCOUNTS, SAMPLE_BANK_TRANSACTIONS } from './banking-sample';
 import { SAMPLE_LEDGER_ACCOUNTS, SAMPLE_LEDGER_LINES, SAMPLE_PAYABLES, SAMPLE_RECEIVABLES } from './ledger-sample';
@@ -43,8 +44,11 @@ function Unavailable() {
   return <p className="text-sm text-muted-foreground">{CANT_LOAD}</p>;
 }
 
-/** The reads and today's date; null when the ledger could not be read. Without a database: the sample books. */
-async function loadInputs(): Promise<{ inputs: DashboardInputs; today: string } | null> {
+/**
+ * The reads, today's date and the month the financial year ends; null when the ledger could not be read. Without
+ * a database: the sample books and a December year end. A settings read that fails falls back to December.
+ */
+async function loadInputs(): Promise<{ inputs: DashboardInputs; today: string; yearEndMonth: number } | null> {
   if (!hasSupabaseEnv()) {
     return {
       inputs: {
@@ -56,12 +60,14 @@ async function loadInputs(): Promise<{ inputs: DashboardInputs; today: string } 
         bankTransactions: SAMPLE_BANK_TRANSACTIONS,
       },
       today: SAMPLE_TODAY,
+      yearEndMonth: DEFAULT_FINANCE_SETTINGS.yearEndMonth,
     };
   }
   try {
     const viewer = await getViewer();
     const ctx = { client: await createClient(), orgId: viewer.orgId };
-    return { inputs: await loadDashboardInputs(ctx), today: todayInMalaysia(new Date()) };
+    const [inputs, settings] = await Promise.all([loadDashboardInputs(ctx), financeSettingsOrDefault(ctx, 'DashboardScreen')]);
+    return { inputs, today: todayInMalaysia(new Date()), yearEndMonth: settings.yearEndMonth };
   } catch (error) {
     console.error('[finance] the dashboard could not be read:', error);
     return null;
@@ -117,7 +123,7 @@ export default async function DashboardScreen({
     );
   }
 
-  const m = buildDashboardModel(loaded.inputs, loaded.today, periodKey);
+  const m = buildDashboardModel(loaded.inputs, loaded.today, periodKey, loaded.yearEndMonth);
   return (
     <ScreenContainer>
       <Header periodKey={periodKey} label={label} />
