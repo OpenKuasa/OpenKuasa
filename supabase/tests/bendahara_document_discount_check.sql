@@ -1,5 +1,6 @@
 -- Bendahara document discount check (#272). Run it after
--- 20261125110000_bendahara_document_discount.sql, in the same transaction for a
+-- 20261125110000_bendahara_document_discount.sql and
+-- 20261125110100_bendahara_document_discount_saves.sql, in the same transaction for a
 -- dry run, or by itself once applied. It leaves nothing behind either way: the
 -- block always ends with RAISE, so every row and the helper function below are
 -- rolled back. Read the message:
@@ -29,8 +30,10 @@ declare
   owner_claims text;
   cust uuid;
   i2 uuid; q2 uuid; q6 uuid; q7 uuid; i3 uuid; i4 uuid; i5 uuid; i6 uuid; i7 uuid; i8 uuid; i9 uuid; q9 uuid; ie uuid;
+  i11 uuid; q12 uuid; i12 uuid;
   n integer;
   t text;
+  t2 text;
   r record;
   fails text[] := '{}';
   three_lines jsonb := '[{"description":"A","quantity":1,"unit_price":100,"sst_rate":8},
@@ -279,6 +282,95 @@ begin
   select string_agg(amount || ':' || sst_amount, ' / ' order by position) into t
     from public.finance_invoice_lines where invoice_id = i2;
   if t is distinct from '100.00:8.00 / 50.00:3.00 / 0.01:0.00' then fails := fails || format('10: the cleared lines read %s', t); end if;
+
+  -- ==== 11: the save functions carry the discount (20261125110100) ==============================
+  i11 := public.finance_save_invoice(org, jsonb_build_object('customer_id', cust, 'invoice_date', current_date,
+    'due_date', current_date + 30, 'notes', 'case 11', 'doc_discount_pct', 10), three_lines);
+  select string_agg(doc_discount_share || ':' || amount || ':' || sst_amount, ' / ' order by position) into t
+    from public.finance_invoice_lines where invoice_id = i11;
+  if t is distinct from '10.00:90.00:7.20 / 5.00:45.00:2.70 / 0.00:0.01:0.00' then
+    fails := fails || format('11: saved with 10%%, the invoice lines read %s', t);
+  end if;
+  -- Saved again without the keys and with other lines: the discount is kept and split over them.
+  perform public.finance_save_invoice(org, jsonb_build_object('id', i11, 'customer_id', cust, 'invoice_date', current_date,
+    'due_date', current_date + 30, 'notes', 'case 11 again'), tens);
+  select i.doc_discount_pct || ':' || coalesce(i.doc_discount_amount::text, '-') || ' ' ||
+         string_agg(l.doc_discount_share::text, ' / ' order by l.position) into t
+    from public.finance_invoices i join public.finance_invoice_lines l on l.invoice_id = i.id
+   where i.id = i11 group by i.doc_discount_pct, i.doc_discount_amount;
+  if t is distinct from '10.00:- 1.00 / 1.00 / 1.00' then
+    fails := fails || format('11: saved without the keys, the invoice reads %s', t);
+  end if;
+  -- Only the fixed amount sent: the percentage is cleared with it.
+  perform public.finance_save_invoice(org, jsonb_build_object('id', i11, 'customer_id', cust, 'invoice_date', current_date,
+    'due_date', current_date + 30, 'notes', 'case 11', 'doc_discount_amount', 15), three_lines);
+  select coalesce(i.doc_discount_pct::text, '-') || ':' || i.doc_discount_amount || ' ' ||
+         string_agg(l.doc_discount_share::text, ' / ' order by l.position) into t
+    from public.finance_invoices i join public.finance_invoice_lines l on l.invoice_id = i.id
+   where i.id = i11 group by i.doc_discount_pct, i.doc_discount_amount;
+  if t is distinct from '-:15.00 10.00 / 5.00 / 0.00' then
+    fails := fails || format('11: saved with a fixed amount only, the invoice reads %s', t);
+  end if;
+  -- FIN62 from the function itself, not at commit (no "set constraints all immediate" here).
+  fails := fails || public.bendahara_check_try('11: a new invoice whose fixed discount equals its lines', 'FIN62',
+    format('select public.finance_save_invoice(%L, %L::jsonb, %L::jsonb)', org,
+      jsonb_build_object('customer_id', cust, 'invoice_date', current_date, 'due_date', current_date + 30,
+        'notes', 'case 11 fin62', 'doc_discount_amount', 150.01), three_lines));
+  fails := fails || public.bendahara_check_try('11: a new invoice at 100%', 'FIN62',
+    format('select public.finance_save_invoice(%L, %L::jsonb, %L::jsonb)', org,
+      jsonb_build_object('customer_id', cust, 'invoice_date', current_date, 'due_date', current_date + 30,
+        'notes', 'case 11 fin62', 'doc_discount_pct', 100), three_lines));
+  fails := fails || public.bendahara_check_try('11: a draft''s kept discount over its new lines', 'FIN62',
+    format('select public.finance_save_invoice(%L, %L::jsonb, %L::jsonb)', org,
+      jsonb_build_object('id', i11, 'customer_id', cust, 'invoice_date', current_date, 'due_date', current_date + 30,
+        'notes', 'case 11 fin62'),
+      '[{"description":"A","quantity":1,"unit_price":20,"sst_rate":0,"discount_amount":5.5}]'));
+  fails := fails || public.bendahara_check_try('11: a new quotation whose fixed discount is over its lines', 'FIN62',
+    format('select public.finance_save_quotation(%L, %L::jsonb, %L::jsonb)', org,
+      jsonb_build_object('customer_id', cust, 'quote_date', current_date, 'valid_until', current_date + 30,
+        'notes', 'case 11 fin62', 'doc_discount_amount', 200), three_lines));
+  select count(*) into n from public.finance_invoices where org_id = org and notes = 'case 11 fin62';
+  if n <> 0 then fails := fails || format('11: %s invoices were written by refused saves', n); end if;
+  select doc_discount_amount into r from public.finance_invoices where id = i11;
+  if r.doc_discount_amount is distinct from 15.00 then
+    fails := fails || format('11: after a refused save the discount reads %s, not 15.00', r.doc_discount_amount);
+  end if;
+  -- Explicit nulls clear it.
+  perform public.finance_save_invoice(org, jsonb_build_object('id', i11, 'customer_id', cust, 'invoice_date', current_date,
+    'due_date', current_date + 30, 'notes', 'case 11', 'doc_discount_pct', null, 'doc_discount_amount', null), three_lines);
+  select num_nonnulls(i.doc_discount_pct, i.doc_discount_amount) || ' ' ||
+         string_agg(l.doc_discount_share || ':' || l.amount || ':' || l.sst_amount, ' / ' order by l.position) into t
+    from public.finance_invoices i join public.finance_invoice_lines l on l.invoice_id = i.id
+   where i.id = i11 group by i.doc_discount_pct, i.doc_discount_amount;
+  if t is distinct from '0 0.00:100.00:8.00 / 0.00:50.00:3.00 / 0.00:0.01:0.00' then
+    fails := fails || format('11: saved with explicit nulls, the invoice reads %s', t);
+  end if;
+
+  -- ==== 12: a quotation saved with 10%, kept, sent, accepted and converted ==========================
+  q12 := public.finance_save_quotation(org, jsonb_build_object('customer_id', cust, 'quote_date', current_date,
+    'valid_until', current_date + 30, 'notes', 'case 12', 'doc_discount_pct', 10), three_lines);
+  perform public.finance_save_quotation(org, jsonb_build_object('id', q12, 'customer_id', cust, 'quote_date', current_date,
+    'valid_until', current_date + 30, 'notes', 'case 12'), three_lines);
+  select string_agg(doc_discount_share || ':' || amount || ':' || sst_amount || ':' || amount_myr || ':' || sst_amount_myr,
+    ' / ' order by position) into t
+    from public.finance_quotation_lines where quotation_id = q12;
+  if t is distinct from '10.00:90.00:7.20:90.00:7.20 / 5.00:45.00:2.70:45.00:2.70 / 0.00:0.01:0.00:0.01:0.00' then
+    fails := fails || format('12: the quotation lines read %s', t);
+  end if;
+  perform public.finance_send_quotation(org, q12);
+  update public.finance_quotations set status = 'accepted', accepted_at = now() where id = q12;
+  i12 := public.finance_convert_quotation(org, q12, current_date);
+  select coalesce(doc_discount_pct::text, '-') || ':' || coalesce(doc_discount_amount::text, '-') into t2
+    from public.finance_invoices where id = i12;
+  if t2 is distinct from '10.00:-' then fails := fails || format('12: the converted invoice''s discount reads %s', t2); end if;
+  select string_agg(doc_discount_share || ':' || amount || ':' || sst_amount || ':' || amount_myr || ':' || sst_amount_myr,
+    ' / ' order by position) into t2
+    from public.finance_invoice_lines where invoice_id = i12;
+  if t2 is distinct from t then fails := fails || format('12: the converted invoice''s lines read %s, the quotation''s %s', t2, t); end if;
+  select subtotal, sst into r from public.finance_invoice_totals where id = i12;
+  if r.subtotal is distinct from 135.01 or r.sst is distinct from 9.90 then
+    fails := fails || format('12: the converted invoice''s totals read %s + %s, not 135.01 + 9.90', r.subtotal, r.sst);
+  end if;
 
   -- ---- both at once, and out of range -----------------------------------------------------------
   fails := fails || public.bendahara_check_try('a percentage and a fixed amount together', '23514',
