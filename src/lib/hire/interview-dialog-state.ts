@@ -17,7 +17,7 @@ import {
   offerMoveToInterview, stillScheduledMessage, type InterviewMenuItem,
 } from './interviews';
 import type { InterviewRow, PanelInterview, PickerApplication } from './lists';
-import type { InterviewKind } from './types';
+import { APPLICATION_STAGES, type InterviewKind } from './types';
 
 // ─── the form's values ───────────────────────────────────────────────────────
 
@@ -326,14 +326,83 @@ export function pickerNotes(
     none: empty ? (past ? 'There are no applications to record an interview for.' : 'There are no active applications to schedule for.') : null,
     noMatch: !empty && options.length === 0 ? (past ? 'No application matches.' : 'No active application matches.') : null,
     more: more ? 'Showing the first 200. Type more of the name.' : null,
-    cut: cut
-      ? `Only the newest 1,000 applications are listed here. If the one you want is missing, ${past ? 'record it' : 'schedule'} from its row on the Applications screen.`
-      : null,
+    // Once something is typed, the server is asked instead (see pickerChoices), so this is said only for an empty box.
+    cut: cut ? CUT_NOTE : null,
   };
 }
 
-/** The chosen application once the list has been narrowed: kept while it is still drawn, otherwise nothing is chosen. */
-export const keptChoice = (options: PickerOption[], id: string): string => (options.some((option) => option.id === id) ? id : '');
+const CUT_NOTE = 'Only the newest 1,000 applications are listed here. Type a name or a job to search them all.';
+
+/** The chosen application stays a choice, first in the list, when what is drawn no longer shows it: a native select can only hold one of its options. */
+export function keepChosen(options: PickerOption[], chosen: PickerApplication | null): PickerOption[] {
+  if (!chosen || options.some((option) => option.id === chosen.id)) return options;
+  return [{ id: chosen.id, label: pickerLabel(chosen) }, ...options];
+}
+
+/** How many applications the server sends for one search. */
+export const SERVER_PICKER_MAX = 50;
+export const PICKER_SEARCHING = 'Searching all applications…';
+export const PICKER_SEARCH_FAILED = 'The search could not be finished, so only the newest 1,000 applications were searched.';
+export const PICKER_SERVER_MORE = 'More match than are shown. Type more of the name or job.';
+
+/**
+ * Whether what is typed is searched for on the server: only once the newest-1,000 read was cut (otherwise every
+ * application is already in the list) and something is typed.
+ */
+export const searchesServer = (cut: boolean, query: string): boolean => cut && query.trim() !== '';
+
+/** The server's answer to a search for `query`. `failed`: it did not come back, or came back malformed. */
+export type ServerFound = { query: string; applications: PickerApplication[]; more: boolean } | { query: string; failed: true };
+
+const OUTCOMES = ['active', 'rejected', 'withdrawn'] as const;
+
+/** The answer of the picker's search as the form uses it. Only the five fields of an application are kept. Anything malformed fails closed. */
+export function foundFrom(result: unknown, query: string): ServerFound {
+  const failed: ServerFound = { query, failed: true };
+  if (!result || typeof result !== 'object') return failed;
+  const answer = result as { ok?: unknown; data?: unknown };
+  if (answer.ok !== true || !answer.data || typeof answer.data !== 'object') return failed;
+  const data = answer.data as { applications?: unknown; more?: unknown };
+  if (!Array.isArray(data.applications)) return failed;
+  const applications: PickerApplication[] = [];
+  for (const row of data.applications as unknown[]) {
+    const a = (row && typeof row === 'object' ? row : {}) as Record<string, unknown>;
+    if (typeof a.id !== 'string' || typeof a.name !== 'string' || typeof a.job !== 'string') return failed;
+    const stage = APPLICATION_STAGES.find((value) => value === a.stage);
+    const outcome = OUTCOMES.find((value) => value === a.outcome);
+    if (!stage || !outcome) return failed;
+    applications.push({ id: a.id, name: a.name, job: a.job, stage, outcome });
+  }
+  return { query, applications, more: data.more === true };
+}
+
+/**
+ * What the picker's select offers and the one line under it. Without a cut, or with nothing typed: the list read,
+ * filtered here, as it always was. Once the list was cut and something is typed, the server's answer for exactly
+ * that text, newest first as sent (the list read stands in while it is on its way, or if it failed). The chosen
+ * application is always kept.
+ */
+export function pickerChoices(input: {
+  applications: PickerApplication[];
+  cut: boolean;
+  query: string;
+  mode: InterviewFormMode;
+  found: ServerFound | null;
+  chosen: PickerApplication | null;
+}): { options: PickerOption[]; said: string } {
+  const { applications, cut, query, mode, found, chosen } = input;
+  const local = () => pickerOptions(applications, query, mode).options;
+  if (!searchesServer(cut, query)) {
+    const notes = pickerNotes(applications, query, mode, cut);
+    return { options: keepChosen(local(), chosen), said: [notes.none, notes.noMatch, notes.more, notes.cut].filter(Boolean).join(' ') };
+  }
+  const answer = found && found.query === query ? found : null;
+  if (!answer) return { options: keepChosen(local(), chosen), said: PICKER_SEARCHING };
+  if ('failed' in answer) return { options: keepChosen(local(), chosen), said: PICKER_SEARCH_FAILED };
+  const matches = offered(answer.applications, mode).map((a) => ({ id: a.id, label: pickerLabel(a) }));
+  const said = matches.length === 0 ? (mode === 'past' ? 'No application matches.' : 'No active application matches.') : answer.more ? PICKER_SERVER_MORE : '';
+  return { options: keepChosen(matches, chosen), said };
+}
 
 // ─── what an action answered ─────────────────────────────────────────────────
 

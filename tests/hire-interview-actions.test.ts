@@ -16,6 +16,9 @@ const ctl = vi.hoisted(() => ({
   result: null as unknown,
   real: false,
   asked: [] as string[],
+  searches: [] as { client: unknown; orgId: string; query: unknown }[],
+  found: { rows: [] as unknown[], more: false },
+  searchThrows: null as unknown,
 }));
 
 vi.mock('next/cache', () => ({ revalidatePath: (path: string) => { ctl.revalidated.push(path); } }));
@@ -34,6 +37,17 @@ vi.mock('@/lib/supabase/server', () => ({
   }),
 }));
 vi.mock('@/lib/supabase/service', () => ({ serviceClient: () => { throw new Error('the service role is never used for an interview'); } }));
+vi.mock('@/lib/hire/application-search', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/hire/application-search')>();
+  return {
+    ...actual,
+    readApplicationSearch: async (client: unknown, orgId: string, query: unknown) => {
+      ctl.searches.push({ client, orgId, query });
+      if (ctl.searchThrows) throw ctl.searchThrows;
+      return ctl.found;
+    },
+  };
+});
 vi.mock('@/lib/hire/capabilities', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/hire/capabilities')>();
   const record = (fn: 'scheduleInterview' | 'recordPastInterview' | 'rescheduleInterview' | 'cancelInterview' | 'setInterviewOutcome' | 'reopenInterview' | 'interviewInvitation' | 'interviewForEdit') =>
@@ -57,7 +71,7 @@ vi.mock('@/lib/hire/capabilities', async (importOriginal) => {
 
 const {
   cancelInterviewAction, getInterviewForEditAction, getInterviewInvitationAction, recordPastInterviewAction, reopenInterviewAction, rescheduleInterviewAction, scheduleInterviewAction,
-  setInterviewOutcomeAction,
+  searchInterviewPickerAction, setInterviewOutcomeAction,
 } = await import('@/app/(app)/hire/actions');
 
 const APP = '44444444-4444-4444-8444-444444444444';
@@ -95,6 +109,9 @@ beforeEach(() => {
   ctl.result = SAVED;
   ctl.real = false;
   ctl.asked = [];
+  ctl.searches = [];
+  ctl.found = { rows: [], more: false };
+  ctl.searchThrows = null;
 });
 
 describe('who may change an interview', () => {
@@ -275,5 +292,50 @@ describe('getInterviewForEditAction: the interview as it stands now, for a form 
     ctl.real = true;
     for (const odd of [undefined, null, 'nope', {}, { id: 'not-an-id' }]) expect((await getInterviewForEditAction(odd)).ok, JSON.stringify(odd)).toBe(false);
     expect(ctl.asked).toEqual([]);
+  });
+});
+
+describe('searchInterviewPickerAction', () => {
+  const found = {
+    id: APP, candidate_id: 'c1', job_id: 'j1', candidate_name: 'Zulaikha Old', job_title: 'Driver', stage: 'screening', outcome: 'active',
+    cv_path: 'org1/secret.pdf', cover_letter: 'Dear team', expected_salary_cents: 500000, applied_at: '2020-01-01T00:00:00Z',
+  };
+  it('refuses a viewer and the demo workspace before anything is read', async () => {
+    for (const viewer of [
+      { orgId: 'org1', orgName: 'R', role: 'viewer', isDemo: false },
+      { orgId: 'org1', orgName: 'R', role: 'owner', isDemo: true },
+    ]) {
+      ctl.viewer = viewer;
+      expect(await searchInterviewPickerAction({ query: 'zul', mode: 'schedule' })).toEqual(FORBIDDEN);
+    }
+    expect(ctl.searches).toEqual([]);
+  });
+  it('asks by name or job, active only for a schedule, with the member\'s own client, and sends back who, which job and where it stands', async () => {
+    ctl.found = { rows: [found], more: true };
+    const result = await searchInterviewPickerAction({ query: '  Zul ', mode: 'schedule' });
+    expect(result).toEqual({ ok: true, data: { applications: [{ id: APP, name: 'Zulaikha Old', job: 'Driver', stage: 'screening', outcome: 'active' }], more: true } });
+    expect(ctl.searches).toEqual([{ client: expect.objectContaining({ marker: 'session' }), orgId: 'org1', query: { name: 'Zul', alsoJob: true, outcome: 'active' } }]);
+    expect(JSON.stringify(result)).not.toMatch(/secret|Dear team|500000|candidate_id/);
+    expect(ctl.revalidated).toEqual([]);
+  });
+  it('a past interview may be for any application; any other mode is read as a schedule', async () => {
+    await searchInterviewPickerAction({ query: 'zul', mode: 'past' });
+    await searchInterviewPickerAction({ query: 'zul', mode: 'whatever' });
+    expect(ctl.searches.map((s) => s.query)).toEqual([{ name: 'zul', alsoJob: true }, { name: 'zul', alsoJob: true, outcome: 'active' }]);
+  });
+  it('answers an empty or odd search with nothing, without reading, and cuts a long one to 100 characters', async () => {
+    for (const odd of [undefined, null, 'zul', {}, { query: '   ' }, { query: 42 }]) {
+      expect(await searchInterviewPickerAction(odd), JSON.stringify(odd)).toEqual({ ok: true, data: { applications: [], more: false } });
+    }
+    expect(ctl.searches).toEqual([]);
+    await searchInterviewPickerAction({ query: 'z'.repeat(300), mode: 'past' });
+    expect((ctl.searches[0].query as { name: string }).name).toHaveLength(100);
+  });
+  it('answers with a sentence and logs only a code when the read fails', async () => {
+    const said = vi.spyOn(console, 'error').mockImplementation(() => {});
+    ctl.searchThrows = Object.assign(new Error('Zulaikha could not be read'), { code: '57014' });
+    expect(await searchInterviewPickerAction({ query: 'zul', mode: 'past' })).toEqual({ ok: false, error: 'The search could not be finished. Check your connection and try again.' });
+    expect(JSON.stringify(said.mock.calls)).not.toContain('Zulaikha');
+    said.mockRestore();
   });
 });

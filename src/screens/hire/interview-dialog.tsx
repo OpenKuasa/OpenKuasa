@@ -8,18 +8,20 @@ import {
   recordPastInterviewAction,
   rescheduleInterviewAction,
   scheduleInterviewAction,
+  searchInterviewPickerAction,
 } from '@/app/(app)/hire/actions';
 import type { InterviewChange } from '@/lib/hire/capabilities';
 import { DELETION_NOTICE_ID } from '@/lib/hire/delete-dialog-state';
 import {
   COPY_FAILED, DONE, DOWNLOAD_HELP, LOAD_CURRENT, LOAD_CURRENT_HELP, DOWNLOAD_LABEL, FIND_HELP, ICS_MIME, INTERVIEWER_HELP, MOVED, NOTES_HELP, NOTHING_CHANGED, OUTCOME_HELP,
   canSubmit, copyLabel, dateBounds, dateHelper, dialogDescription, dialogTitle, discardTitle, durationOptions, emptyValues, fieldId,
-  fieldOfRefusal, focusIdAfter, interviewProblems, interviewResult, inviteLead, inviteTitle, isDirty, keptChoice,
-  moveInput, moveLabel, moveResult, noticeOf, offersMove, onOf, pickerNotes, pickerOptions, placeHelper, placeLabel, refreshAfter, refusalWord,
+  fieldOfRefusal, focusIdAfter, interviewProblems, interviewResult, inviteLead, inviteTitle, isDirty, foundFrom,
+  moveInput, moveLabel, moveResult, noticeOf, offersMove, onOf, pickerChoices, searchesServer, placeHelper, placeLabel, refreshAfter, refusalWord,
   calendarOf, clockAt, currentResult, offersReload, rowWithCurrent, stepAfter, submission, submitLabel, timeHelper, valuesFrom,
-  type CalendarFile, type FieldPart, type InterviewField, type InterviewFormMode, type InterviewFormValues, type InterviewProblems, type PastOutcome, type Submission,
+  type CalendarFile, type FieldPart, type InterviewField, type InterviewFormMode, type InterviewFormValues, type InterviewProblems, type PastOutcome, type ServerFound, type Submission,
 } from '@/lib/hire/interview-dialog-state';
 import { INTERVIEW_KINDS, INTERVIEW_SAVE_FAILED, KIND_WORDS } from '@/lib/hire/interviews';
+import { SEARCH_PAUSE_MS, latestOnly } from '@/lib/hire/latest-answer';
 import type { InterviewRow, PickerApplication } from '@/lib/hire/lists';
 import { cn } from '@/lib/utils';
 import { SELECT_CLASS } from '@/screens/crm/crm-form';
@@ -122,6 +124,10 @@ export type InterviewFormViewProps = {
   fixed: { name: string; job: string } | null;
   picker: { applications: PickerApplication[]; cut: boolean };
   query: string;
+  /** The server's answer to the newest search, once the list was cut. */
+  found?: ServerFound | null;
+  /** The application chosen in the picker: it stays in the select whatever is searched next. */
+  chosen?: PickerApplication | null;
   values: InterviewFormValues;
   problems: InterviewProblems;
   /** A refusal from the server: at the field it is about, else in the alert at the top. */
@@ -148,7 +154,8 @@ export type InterviewFormViewProps = {
  * each part.
  */
 export function InterviewFormView({
-  base, mode, fixed, picker, query, values, problems, refusal, unchanged, pending, today, storedDuration, onQuery, onChange, onSubmit, onCancel, onLoadCurrent,
+  base, mode, fixed, picker, query, found = null, chosen = null, values, problems, refusal, unchanged, pending, today, storedDuration, onQuery, onChange,
+  onSubmit, onCancel, onLoadCurrent,
 }: InterviewFormViewProps) {
   const id = (part: FieldPart) => fieldId(base, part);
   const helpId = (part: FieldPart) => `${id(part)}-help`;
@@ -167,9 +174,8 @@ export function InterviewFormView({
     ) : null;
   const invalid = (field: InterviewField) => (wrong(field) ? true : undefined);
   const bounds = dateBounds(mode, today);
-  const picked = fixed ? null : pickerOptions(picker.applications, query, mode);
-  const notes = fixed ? null : pickerNotes(picker.applications, query, mode, picker.cut);
-  const pickerSaid = notes ? [notes.none, notes.noMatch, notes.more, notes.cut].filter(Boolean).join(' ') : '';
+  const picked = fixed ? null : pickerChoices({ ...picker, query, mode, found, chosen });
+  const pickerSaid = picked?.said ?? '';
   const waiting = pending || undefined;
 
   return (
@@ -468,7 +474,7 @@ function InterviewForm({
   onDirtyChange: (dirty: boolean) => void;
   onClearRefusal: () => void;
   /** The application chosen in the picker changed: the dialog's description names its job. */
-  onPick: (applicationId: string) => void;
+  onPick: (application: PickerApplication | null) => void;
   onCancel: () => void;
   onSend: (plan: Send) => void;
 }) {
@@ -477,6 +483,12 @@ function InterviewForm({
   const [initial] = useState<InterviewFormValues>(() => (stored ? valuesFrom(stored) : emptyValues()));
   const [values, setValues] = useState<InterviewFormValues>(initial);
   const [query, setQuery] = useState('');
+  /** The server's answer to the newest search (only once the list read was cut). */
+  const [found, setFound] = useState<ServerFound | null>(null);
+  /** The chosen application itself: a search may have found it, and the next search may not list it. */
+  const [chosen, setChosen] = useState<PickerApplication | null>(null);
+  /** Only the answer to the newest search is used: an older one that comes back late is dropped. */
+  const latest = useRef(latestOnly());
   const [problems, setProblems] = useState<InterviewProblems>({});
   /** True once a submit was refused by the form's own checks: from then on they run as the form is corrected. */
   const [checked, setChecked] = useState(false);
@@ -491,6 +503,28 @@ function InterviewForm({
     const first = focusIdAfter({ after: 'open', picking }, base);
     if (first) document.getElementById(first)?.focus();
   }, [base, picking]);
+  // Once the list read was cut, what is typed is searched for on the server, after a pause in typing.
+  const asksServer = picking && searchesServer(picker.cut, query);
+  useEffect(() => {
+    const questions = latest.current;
+    if (!asksServer) {
+      questions.cancel();
+      return;
+    }
+    const text = query;
+    const timer = window.setTimeout(() => {
+      const n = questions.begin();
+      const settle = (result: unknown) => {
+        if (questions.isCurrent(n)) setFound(foundFrom(result, text));
+      };
+      searchInterviewPickerAction({ query: text, mode }).then(settle, () => settle(null));
+    }, SEARCH_PAUSE_MS);
+    return () => window.clearTimeout(timer);
+  }, [asksServer, query, mode]);
+  useEffect(() => {
+    const questions = latest.current;
+    return () => questions.cancel();
+  }, []);
   // A refusal takes focus: to the field it is about, else to the alert at the top of the form.
   useEffect(() => {
     if (!refusal) return;
@@ -509,15 +543,17 @@ function InterviewForm({
 
   const change = <K extends InterviewField>(field: K, value: InterviewFormValues[K]) => {
     apply({ ...values, [field]: value });
-    if (field === 'application_id') onPick(String(value));
+    if (field === 'application_id') {
+      const id = String(value);
+      const answered = found && !('failed' in found) ? found.applications : [];
+      const application = id ? [...answered, ...picker.applications, ...(chosen ? [chosen] : [])].find((a) => a.id === id) ?? null : null;
+      setChosen(application);
+      onPick(application);
+    }
   };
 
-  function search(text: string) {
-    setQuery(text);
-    // A chosen application the narrowed list no longer shows is no longer chosen: the select could not show it.
-    const kept = keptChoice(pickerOptions(picker.applications, text, mode).options, values.application_id);
-    if (kept !== values.application_id) change('application_id', kept);
-  }
+  // The chosen application stays chosen whatever is typed next: the select keeps it as an option.
+  const search = (text: string) => setQuery(text);
 
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -546,6 +582,8 @@ function InterviewForm({
       fixed={fixed ?? (stored ? { name: stored.name, job: stored.role } : null)}
       picker={picker}
       query={query}
+      found={found}
+      chosen={chosen}
       values={values}
       problems={problems}
       refusal={refusal}
@@ -768,7 +806,8 @@ export function InterviewDialogHost({
   /** The saved change whose invitation is showing, or null while the form is. */
   const [saved, setSaved] = useState<InterviewChange | null>(null);
   const [moving, setMoving] = useState(false);
-  const [pickedId, setPickedId] = useState('');
+  /** The application chosen in the picker, as the picker had it: the dialog's description names its job. */
+  const [pickedApp, setPickedApp] = useState<PickerApplication | null>(null);
   /** The interview as it is stored now, read after a save was refused because someone else had changed it. */
   const [fresh, setFresh] = useState<InterviewRow | null>(null);
   const [formKey, setFormKey] = useState(0);
@@ -786,7 +825,7 @@ export function InterviewDialogHost({
   const mode: InterviewFormMode = req?.mode ?? 'schedule';
   const row = req?.mode === 'change' ? req.row : null;
   const application = req && req.mode !== 'change' ? req.application : null;
-  const picked = !row && !application ? picker.applications.find((a) => a.id === pickedId) ?? null : null;
+  const picked = !row && !application ? pickedApp : null;
   const name = row?.name ?? application?.name ?? null;
   const job = row?.role ?? application?.job ?? picked?.job ?? null;
 
@@ -796,7 +835,7 @@ export function InterviewDialogHost({
     setFresh(null);
     setSaved(null);
     setMoving(false);
-    setPickedId('');
+    setPickedApp(null);
     closeInterview();
   }
 
@@ -900,7 +939,7 @@ export function InterviewDialogHost({
             refusal={refusal}
             onDirtyChange={setDirty}
             onClearRefusal={() => setRefusal(null)}
-            onPick={setPickedId}
+            onPick={setPickedApp}
             onCancel={requestClose}
             onSend={save}
             onLoadCurrent={fresh ? loadCurrent : undefined}

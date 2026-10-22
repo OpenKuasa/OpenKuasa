@@ -39,6 +39,7 @@ vi.mock('@/app/(app)/hire/actions', () => ({
   setPoolStatusAction: mocks.action,
   moveToPipelineAction: mocks.action,
   searchPoolPickerAction: mocks.action,
+  searchInterviewPickerAction: mocks.action,
   scheduleInterviewAction: mocks.action,
   recordPastInterviewAction: mocks.action,
   rescheduleInterviewAction: mocks.action,
@@ -405,11 +406,26 @@ describe('the form\'s inner content', () => {
     expect(options(view({ query: 'nobody' }), 'f-application_id')).toEqual(['Choose an application']);
     expect(text(view({ picker: { applications: [APPS[2]], cut: false } }))).toContain('There are no active applications to schedule for.');
     expect(text(view({ picker: { applications: APPS, cut: true } })))
-      .toContain('Only the newest 1,000 applications are listed here. If the one you want is missing, schedule from its row on the Applications screen.');
+      .toContain('Only the newest 1,000 applications are listed here. Type a name or a job to search them all.');
     const many = Array.from({ length: 201 }, (_, i) => ({ id: `a${i}`, name: `Person ${i}`, job: 'Barista', stage: 'applied' as const, outcome: 'active' as const }));
     const crowded = view({ picker: { applications: many, cut: false } });
     expect(options(crowded, 'f-application_id')).toHaveLength(201);
     expect(text(crowded)).toContain('Showing the first 200. Type more of the name.');
+  });
+  it('once the list was cut, draws the server\'s matches for what is typed, and keeps the chosen application', () => {
+    const old = { id: 'app-old', name: 'Zulaikha Old', job: 'Driver', stage: 'applied' as const, outcome: 'active' as const };
+    const cut = { applications: APPS, cut: true };
+    const waiting = view({ picker: cut, query: 'zul' });
+    expect(text(waiting)).toContain('Searching all applications…');
+    const answered = view({ picker: cut, query: 'zul', found: { query: 'zul', applications: [old], more: true } });
+    expect(options(answered, 'f-application_id')).toEqual(['Choose an application', 'Zulaikha Old — Driver (Applied)']);
+    expect(text(answered)).toContain('More match than are shown. Type more of the name or job.');
+    const kept = view({
+      picker: cut, query: 'ben', found: { query: 'ben', applications: [APPS[1]], more: false }, chosen: old,
+      values: { ...emptyValues(), application_id: 'app-old' },
+    });
+    expect(options(kept, 'f-application_id')).toEqual(['Choose an application', 'Zulaikha Old — Driver (Applied)', 'Ben Tan — Cashier (Applied)']);
+    expect(kept).toMatch(/<option[^>]*value="app-old"[^>]*selected=""|<option[^>]*selected=""[^>]*value="app-old"/);
   });
   it('a fixed application (from a card or a panel): shown as text, with no search field and no select for it', () => {
     const html = view({ fixed: { name: 'Aina Rahman', job: 'Sales Executive' } });

@@ -7,9 +7,9 @@ import {
   INTERVIEWER_HELP, INTERVIEWER_TOO_LONG, KEEP_INTERVIEW, MENU_WORDS, MOVED, NOTES_HELP, NOTES_TOO_LONG, NOTHING_CHANGED, OUTCOME_HELP, PANEL_EMPTY,
   PANEL_HEADING, PANEL_ROWS, PICKER_MAX, PLACE_TOO_LONG, REAL_DATE, canSubmit, cancelBody, cancelLabel, cancelTitle, changesFrom, copyLabel,
   dateBounds, dateHelper, dialogDescription, dialogTitle, discardTitle, durationOptions, emptyValues, fieldId, fieldOfRefusal, firstWrongField,
-  focusIdAfter, interviewProblems, interviewResult, inviteLead, inviteTitle, isDirty, keptChoice, mayClose,
+  focusIdAfter, foundFrom, interviewProblems, interviewResult, inviteLead, inviteTitle, isDirty, keepChosen, mayClose,
   menuGroups, menuName, moveInput, moveLabel, moveResult, noticeOf, offersMove, onOf, openerId, outcomeInput, panelLine, panelMore, panelRows,
-  pastInput, pickerLabel, pickerNotes, pickerOptions, placeHelper, placeLabel, refreshAfter, refusalWord, rowMenu, sayOnNotice, scheduleInput,
+  pastInput, pickerChoices, pickerLabel, pickerNotes, pickerOptions, searchesServer, placeHelper, placeLabel, refreshAfter, refusalWord, rowMenu, sayOnNotice, scheduleInput,
   stepAfter, stillScheduledNotice, submission, submitLabel, tagsFor, timeCell, timeHelper, valuesFrom, type InterviewFormValues,
   GETTING_INVITATION, LOAD_CURRENT, LOAD_CURRENT_HELP, calendarOf, clockAt, currentResult, offersReload, rowWithCurrent, handoverAfter, handoverResult, mayAskHandover, rowWaitingWord,
 } from '@/lib/hire/interview-dialog-state';
@@ -306,7 +306,7 @@ describe('the application picker', () => {
     expect(pickerNotes(many, '', 'schedule', true)).toEqual({
       ...QUIET,
       more: 'Showing the first 200. Type more of the name.',
-      cut: 'Only the newest 1,000 applications are listed here. If the one you want is missing, schedule from its row on the Applications screen.',
+      cut: 'Only the newest 1,000 applications are listed here. Type a name or a job to search them all.',
     });
   });
   it('the past form\'s notes do not say "active" or "schedule"', () => {
@@ -314,13 +314,68 @@ describe('the application picker', () => {
     expect(pickerNotes(list, 'farid', 'past', false).noMatch).toBeNull();
     expect(pickerNotes([], '', 'past', false).none).toBe('There are no applications to record an interview for.');
     expect(pickerNotes(list, '', 'past', true).cut)
-      .toBe('Only the newest 1,000 applications are listed here. If the one you want is missing, record it from its row on the Applications screen.');
+      .toBe('Only the newest 1,000 applications are listed here. Type a name or a job to search them all.');
   });
-  it('drops a choice the narrowed list no longer shows', () => {
-    const { options } = pickerOptions(list, 'aina', 'schedule');
-    expect(keptChoice(options, '2')).toBe('2');
-    expect(keptChoice(options, '3')).toBe('');
-    expect(keptChoice(options, '')).toBe('');
+  it('keeps the chosen application in the list, first, when a search no longer shows it', () => {
+    const { options } = pickerOptions(list, 'zarina', 'schedule');
+    expect(keepChosen(options, list[0]).map((o) => o.id)).toEqual(['3']);
+    expect(keepChosen(options, list[2]).map((o) => o.id)).toEqual(['2', '3']);
+    expect(keepChosen(options, list[2])[0]).toEqual({ id: '2', label: 'Aina Rahman — Barista (Interview)' });
+    expect(keepChosen(options, null)).toEqual(options);
+  });
+});
+
+describe('the application picker asks the server once the list was cut', () => {
+  const list = [application('1', 'Aina Rahman', 'Sales Executive'), application('2', 'Ben Tan', 'Cashier', { outcome: 'rejected' })];
+  const old = application('9', 'Zulaikha Old', 'Driver');
+  it('asks only when the newest-1,000 read was cut and something is typed', () => {
+    expect(searchesServer(true, 'zul')).toBe(true);
+    expect(searchesServer(true, '   ')).toBe(false);
+    expect(searchesServer(false, 'zul')).toBe(false);
+  });
+  it('reads the server\'s answer as the text it was for, failing closed on anything malformed', () => {
+    expect(foundFrom({ ok: true, data: { applications: [{ ...old, email: 'x@example.com' }], more: true } }, 'zul'))
+      .toEqual({ query: 'zul', applications: [old], more: true });
+    for (const odd of [null, 'x', { ok: false, error: 'No.' }, { ok: true, data: { applications: 'no' } },
+      { ok: true, data: { applications: [{ id: 1, name: 'x', job: 'y', stage: 'applied', outcome: 'active' }] } },
+      { ok: true, data: { applications: [{ id: 'a', name: 'x', job: 'y', stage: 'nowhere', outcome: 'active' }] } }]) {
+      expect(foundFrom(odd, 'zul')).toEqual({ query: 'zul', failed: true });
+    }
+  });
+  const choices = (over: Partial<Parameters<typeof pickerChoices>[0]> = {}) =>
+    pickerChoices({ applications: list, cut: true, query: 'zul', mode: 'schedule', found: null, chosen: null, ...over });
+  it('until the answer comes, shows the matches among those read and says it is searching', () => {
+    expect(choices({ query: 'aina' })).toEqual({ options: [{ id: '1', label: 'Aina Rahman — Sales Executive (Screening)' }], said: 'Searching all applications…' });
+    // An answer to an older text is not used.
+    expect(choices({ found: { query: 'zu', applications: [old], more: false } }).said).toBe('Searching all applications…');
+  });
+  it('draws the server\'s matches, newest first as sent, and says when there are more', () => {
+    const newer = application('8', 'Zul Newer', 'Barista');
+    const got = choices({ found: { query: 'zul', applications: [newer, old], more: true } });
+    expect(got.options.map((o) => o.id)).toEqual(['8', '9']);
+    expect(got.said).toBe('More match than are shown. Type more of the name or job.');
+    expect(choices({ found: { query: 'zul', applications: [old], more: false } }).said).toBe('');
+  });
+  it('a schedule never offers a closed application, even one the server sent', () => {
+    const closed = application('7', 'Zul Closed', 'Driver', { outcome: 'withdrawn' });
+    expect(choices({ found: { query: 'zul', applications: [closed], more: false } })).toEqual({ options: [], said: 'No active application matches.' });
+    expect(choices({ mode: 'past', found: { query: 'zul', applications: [closed], more: false } }).options.map((o) => o.id)).toEqual(['7']);
+    expect(choices({ mode: 'past', found: { query: 'zul', applications: [], more: false } }).said).toBe('No application matches.');
+  });
+  it('when the search fails, falls back to those read and says so', () => {
+    const got = choices({ query: 'aina', found: { query: 'aina', failed: true } });
+    expect(got.options.map((o) => o.id)).toEqual(['1']);
+    expect(got.said).toBe('The search could not be finished, so only the newest 1,000 applications were searched.');
+  });
+  it('keeps the chosen application whatever is searched next', () => {
+    const got = choices({ query: 'ben', found: { query: 'ben', applications: [], more: false }, chosen: old });
+    expect(got.options.map((o) => o.id)).toEqual(['9']);
+    expect(choices({ cut: false, query: 'ben', chosen: old }).options.map((o) => o.id)).toEqual(['9']);
+  });
+  it('without a cut, or with nothing typed, is the list it always was', () => {
+    expect(choices({ cut: false, query: 'aina' })).toEqual({ options: pickerOptions(list, 'aina', 'schedule').options, said: '' });
+    expect(choices({ query: '' }).said).toBe('Only the newest 1,000 applications are listed here. Type a name or a job to search them all.');
+    expect(choices({ cut: false, query: 'nobody' }).said).toBe('No active application matches.');
   });
 });
 
