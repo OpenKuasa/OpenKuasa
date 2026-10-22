@@ -67,6 +67,8 @@ let owner: Owned;
 let other: Owned;
 let jobs: string[] = [];
 let otherJob: string;
+/** A job that took none of the 500, so its own limit of 30 a minute cannot answer before the cap. */
+let spareJob: string;
 
 const apply = (orgId: string, jobId: string, email = uniqueEmail()) =>
   writer.rpc('submit_public_application', {
@@ -113,6 +115,7 @@ beforeAll(async () => {
   jobs = [];
   for (let i = 0; i < JOBS; i++) jobs.push(await openJob(owner, `${i}`));
   otherJob = await openJob(other, 'other');
+  spareJob = await openJob(owner, 'spare');
   expect(Math.ceil(CAP / JOBS)).toBeLessThanOrEqual(PER_JOB_MINUTE);
 }, 120_000);
 
@@ -138,9 +141,9 @@ testWithSupabase('takes 500 public applications across the jobs, then answers da
     applications: await count('hire_applications', owner),
   };
   const email = uniqueEmail();
-  // Any job, a new email: the workspace's day is full.
-  expect(word(await apply(owner.orgId, jobs[JOBS - 1], email))).toBe('day_full');
-  expect(word(await apply(owner.orgId, jobs[3]))).toBe('day_full');
+  // A job with no applications yet, a new email: the workspace's day is full.
+  expect(word(await apply(owner.orgId, spareJob, email))).toBe('day_full');
+  expect(word(await apply(owner.orgId, spareJob))).toBe('day_full');
   // Nothing was kept for the refused ones.
   expect(await count('hire_candidates', owner)).toBe(before.candidates);
   expect(await count('hire_applications', owner)).toBe(before.applications);
