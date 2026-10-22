@@ -11,6 +11,7 @@ import { getViewer, hasSupabaseEnv } from '@/lib/auth/viewer';
 import {
   AUDIT_ENTITY_TYPES,
   AUDIT_PERIODS,
+  AUDIT_SUMMARY_DAYS,
   buildAuditSummary,
   listFinanceAudit,
   parseAuditFilters,
@@ -29,8 +30,14 @@ const ACTIVITY_SERIES: Series[] = [{ key: 'events', label: 'Events', color: 'var
 const SLICE_COLORS = ['var(--chart-1)', 'var(--chart-2)', 'var(--chart-5)', 'var(--chart-3)', 'var(--chart-4)', 'var(--muted-foreground)'];
 
 const CANT_LOAD = "Couldn't load the audit trail — please refresh";
-const NOTHING_YET = 'Nothing recorded yet. The audit trail starts on 23 Oct 2026; earlier changes were not recorded.';
+const STARTS = 'The audit trail starts on 23 Oct 2026; earlier changes were not recorded.';
+const NOTHING_YET = `Nothing recorded yet. ${STARTS}`;
 const NO_MATCH = 'No events match these filters.';
+const DEFAULT_PERIOD = parseAuditFilters({}).period;
+const DEFAULT_PERIOD_DAYS = AUDIT_PERIODS.find((p) => p.value === DEFAULT_PERIOD)?.days ?? AUDIT_SUMMARY_DAYS;
+const NOTHING_IN_PERIOD = `Nothing recorded in the last ${DEFAULT_PERIOD_DAYS} days. ${STARTS}`;
+/** The KPI strip and the charts count every finance event of these days, whatever the table's filters. */
+const SUMMARY_SPAN = `Last ${AUDIT_SUMMARY_DAYS} days`;
 
 const SELECT_CLASS =
   'h-9 w-full rounded-md border border-input bg-transparent px-2.5 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 sm:w-44';
@@ -40,7 +47,7 @@ type Loaded = { entries: AuditEntry[]; nextBefore: string | null; summary: Audit
 const toSummaryRows = (entries: AuditEntry[]) =>
   entries.map((e) => ({ created_at: e.createdAt, entity_type: e.entityType, actor_name: e.actorName, event: e.details.event }));
 
-/** Without a database: the sample log, narrowed by the same filters the database applies. */
+/** Without a database: the sample log, narrowed by the same filters the database applies (search: the target only). */
 function sampleLoad(filters: AuditFilters): Loaded {
   const days = AUDIT_PERIODS.find((p) => p.value === filters.period)?.days ?? null;
   const from = days === null ? null : addDays(SAMPLE_TODAY, -days);
@@ -50,7 +57,7 @@ function sampleLoad(filters: AuditFilters): Loaded {
       (!filters.type || e.entityType === filters.type) &&
       (!filters.actor || e.actorName === filters.actor) &&
       (from === null || malaysiaDate(e.createdAt) >= from) &&
-      (!q || `${e.action} ${e.target ?? ''} ${e.details.party ?? ''}`.toLowerCase().includes(q)),
+      (!q || (e.target ?? '').toLowerCase().includes(q)),
   );
   return { entries, nextBefore: null, summary: buildAuditSummary(toSummaryRows(SAMPLE_AUDIT_ENTRIES), SAMPLE_TODAY) };
 }
@@ -69,14 +76,20 @@ async function load(filters: AuditFilters): Promise<Loaded | null> {
   }
 }
 
-const isFiltered = (f: AuditFilters) => f.type !== null || f.actor !== null || f.q !== '' || f.period !== parseAuditFilters({}).period;
+/** What an empty table says: nothing at all, nothing in the default period, or nothing matching the filters. */
+function emptyMessage(f: AuditFilters): string {
+  const narrowed = f.type !== null || f.actor !== null || f.q !== '' || f.before !== null;
+  if (!narrowed && f.period === 'all') return NOTHING_YET;
+  if (!narrowed && f.period === DEFAULT_PERIOD) return NOTHING_IN_PERIOD;
+  return NO_MATCH;
+}
 
 /** The link to the next older page, keeping the filters. */
 function olderHref(f: AuditFilters, before: string) {
   const p = new URLSearchParams();
   if (f.type) p.set('type', f.type);
   if (f.actor) p.set('actor', f.actor);
-  if (f.period !== parseAuditFilters({}).period) p.set('period', f.period);
+  if (f.period !== DEFAULT_PERIOD) p.set('period', f.period);
   if (f.q) p.set('q', f.q);
   p.set('before', before);
   return `/finance/audit-trail?${p.toString()}`;
@@ -153,12 +166,17 @@ function AuditBody({ data, filters }: { data: Loaded; filters: AuditFilters }) {
         <BentoStat label="Deletions this month" value={String(summary.deletionsThisMonth)} />
       </BentoCard>
 
-      <BentoCard title="Activity over time" subtitle="Logged events · last 14 days" icon={Activity} className="col-span-2 md:col-span-8">
+      <BentoCard
+        title="Activity over time"
+        subtitle={`${SUMMARY_SPAN} · all documents and people`}
+        icon={Activity}
+        className="col-span-2 md:col-span-8"
+      >
         <AreaTrend data={trend} series={ACTIVITY_SERIES} height={240} />
       </BentoCard>
-      <BentoCard title="By document type" subtitle="All logged events" icon={PieChart} className="col-span-2 md:col-span-4">
+      <BentoCard title="By document type" subtitle={`${SUMMARY_SPAN} · all documents and people`} icon={PieChart} className="col-span-2 md:col-span-4">
         {slices.length === 0 ? (
-          <p className="text-sm text-muted-foreground">Nothing recorded yet.</p>
+          <p className="text-sm text-muted-foreground">Nothing recorded in the last {AUDIT_SUMMARY_DAYS} days.</p>
         ) : (
           <DonutStat data={slices} height={240} centerValue={String(total)} centerLabel="events" />
         )}
@@ -191,7 +209,7 @@ function AuditBody({ data, filters }: { data: Loaded; filters: AuditFilters }) {
           </select>
           <div className="relative w-full sm:w-64">
             <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-            <Input type="search" name="q" aria-label="Search activity" placeholder="Search activity…" defaultValue={filters.q} className="pl-8" />
+            <Input type="search" name="q" aria-label="Search document numbers" placeholder="Search document numbers…" defaultValue={filters.q} className="pl-8" />
           </div>
           <Button type="submit">Apply</Button>
           <Link href="/finance/audit-trail" className="text-sm text-muted-foreground underline-offset-4 hover:underline">
@@ -214,7 +232,7 @@ function AuditBody({ data, filters }: { data: Loaded; filters: AuditFilters }) {
               {entries.length === 0 && (
                 <TableRow>
                   <TableCell colSpan={5} className="py-8 text-center text-sm text-muted-foreground">
-                    {isFiltered(filters) || filters.before ? NO_MATCH : NOTHING_YET}
+                    {emptyMessage(filters)}
                   </TableCell>
                 </TableRow>
               )}

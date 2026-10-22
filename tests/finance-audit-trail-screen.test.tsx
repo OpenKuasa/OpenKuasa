@@ -50,7 +50,7 @@ describe('the Audit Trail without a database', () => {
   it('narrows to one document type, and links a document to its screen', async () => {
     const html = await render({ type: 'finance_invoice' });
     expect(html).toContain('INV-1042');
-    expect(html).not.toContain('EXP-320');
+    expect(html).not.toContain('Approved an expense');
     expect(html).not.toContain('BILL-088');
     expect(html).toContain('href="/finance/invoices"');
   });
@@ -58,6 +58,41 @@ describe('the Audit Trail without a database', () => {
   it('says so when the filters match nothing', async () => {
     const text = textOf(await render({ q: 'no-such-thing' }));
     expect(text).toContain('No events match these filters.');
+  });
+
+  it('searches the document number (the target) only, as the database does', async () => {
+    const byNumber = textOf(await render({ q: 'inv-104', period: 'all' }));
+    expect(byNumber).toContain('INV-1042');
+    expect(byNumber).toContain('INV-1041');
+    expect(byNumber).not.toContain('BILL-088');
+    // A party name or an action sentence that is not a target matches nothing.
+    expect(textOf(await render({ q: 'Aisyah Trading', period: 'all' }))).toContain('No events match these filters.');
+    expect(textOf(await render({ q: 'Posted', period: 'all' }))).toContain('No events match these filters.');
+    expect(await render()).toContain('placeholder="Search document numbers…"');
+  });
+
+  it('uses the sentences and events the database writes', () => {
+    const real: Record<string, string> = {
+      'Posted an invoice': 'posted',
+      'Voided an invoice': 'voided',
+      'Deleted a draft invoice': 'deleted',
+      'Deleted a draft quotation': 'deleted',
+      'Posted a supplier bill': 'posted',
+      'Voided a supplier bill': 'voided',
+      'Approved an expense': 'approved',
+      'Recorded money in': 'recorded',
+      'Posted a journal': 'posted',
+    };
+    for (const e of SAMPLE_AUDIT_ENTRIES) {
+      expect(real[e.action], e.action).toBe(e.details.event);
+    }
+  });
+
+  it('says the KPI strip and the charts cover the last 30 days, whatever the filters', async () => {
+    const text = textOf(await render({ type: 'finance_invoice' }));
+    expect(text).toContain('Last 30 days · all documents and people');
+    expect(text).not.toContain('last 14 days');
+    expect(text).not.toContain('All logged events');
   });
 });
 
@@ -86,12 +121,31 @@ describe('the Audit Trail details', () => {
 });
 
 describe('the Audit Trail with a database', () => {
-  it('says the log starts on 23 Oct 2026 when it is empty and unfiltered', async () => {
+  const empty = async (params: Record<string, string>) => {
     state.env = true;
     state.list = async () => ({ entries: [], nextBefore: null });
     state.rows = async () => [];
-    const text = textOf(await render());
+    return textOf(await render(params));
+  };
+
+  it('says nothing was recorded in the last 30 days when only the default period is set', async () => {
+    const text = await empty({});
+    expect(text).toContain(
+      'Nothing recorded in the last 30 days. The audit trail starts on 23 Oct 2026; earlier changes were not recorded.',
+    );
+    expect(text).not.toContain('No events match these filters.');
+  });
+
+  it('says the log starts on 23 Oct 2026 when it is empty for all time and unfiltered', async () => {
+    const text = await empty({ period: 'all' });
     expect(text).toContain('Nothing recorded yet. The audit trail starts on 23 Oct 2026; earlier changes were not recorded.');
+  });
+
+  it('says no events match when anything else narrows the table', async () => {
+    const narrowed: Record<string, string>[] = [{ period: '7d' }, { type: 'finance_invoice' }, { actor: 'Aisyah' }, { q: 'INV', period: 'all' }];
+    for (const params of narrowed) {
+      expect(await empty(params)).toContain('No events match these filters.');
+    }
   });
 
   it('links to older events when there are more', async () => {
