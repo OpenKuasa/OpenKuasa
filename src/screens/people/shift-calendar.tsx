@@ -1,22 +1,17 @@
 import { CalendarDays, Moon } from 'lucide-react';
 import { BentoCard, BentoGrid, BentoStat } from '@/components/bento/bento';
 import { RosterGrid } from '@/components/people/roster-grid';
+import { ShiftPill } from '@/components/people/shift-pill';
+import { ShiftTypesPanel } from '@/components/people/shift-types-panel';
 import { PageHeader } from '@/components/screen/page-header';
 import { ScreenContainer } from '@/components/screen/screen-container';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { SHIFT_LABEL, buildShiftCalendar, type WeekView } from '@/lib/people/attendance';
+import { buildShiftCalendar, type WeekView } from '@/lib/people/attendance';
 import { addDays, formatDay, todayInMalaysia } from '@/lib/people/dates';
 import { parseWeek } from '@/lib/people/roster';
-import type { ShiftKind } from '@/lib/people/types';
-import { cn } from '@/lib/utils';
+import { ensureShiftTypes } from '@/lib/people/roster-writes';
 import { EmployeeCell, LOAD_FAILED, Muted, loadPeople } from './parts';
 import { WeekNav } from './week-nav';
-
-const SHIFT_CLASS: Record<ShiftKind, string> = {
-  morning: 'bg-primary/10 text-primary',
-  night: 'bg-slate-500/10 text-slate-600',
-  off: 'bg-muted text-muted-foreground',
-};
 
 const SUBTITLE: Record<WeekView, string> = {
   hr: 'Weekly shift schedule',
@@ -41,8 +36,17 @@ export default async function ShiftCalendarScreen({
     const week = parseWeek(raw, today);
     // HR also reads last week, for "Copy last week".
     const from = ctx.viewer.isHr && !ctx.viewer.isDemo ? addDays(week, -7) : week;
-    const [shifts, employees] = await Promise.all([data.listShifts(from, addDays(week, 6)), data.listEmployees()]);
-    return buildShiftCalendar({ shifts, employees, viewer: ctx.viewer, today, week });
+    const [shifts, employees, listed] = await Promise.all([
+      data.listShifts(from, addDays(week, 6)),
+      data.listEmployees(),
+      data.listShiftTypes(),
+    ]);
+    let types = listed;
+    // A workspace made after shift types arrived has none until an owner or admin first opens this screen.
+    if (types.length === 0 && ctx.viewer.isHr && !ctx.viewer.isDemo && ctx.orgId) {
+      if ((await ensureShiftTypes({ client: ctx.client, orgId: ctx.orgId })) > 0) types = await data.listShiftTypes();
+    }
+    return buildShiftCalendar({ shifts, employees, viewer: ctx.viewer, today, week, types });
   });
 
   const dash = '—';
@@ -64,10 +68,10 @@ export default async function ShiftCalendarScreen({
         {team ? (
           <>
             <BentoCard tone="primary" className="col-span-1 md:col-span-6">
-              <BentoStat label="Morning shifts" value={model ? model.morning_count : dash} onPrimary />
+              <BentoStat label="Shifts this week" value={model ? model.working_count : dash} onPrimary />
             </BentoCard>
             <BentoCard className="col-span-1 md:col-span-6">
-              <BentoStat label="Night shifts" value={model ? model.night_count : dash} />
+              <BentoStat label="Days off this week" value={model ? model.off_count : dash} />
             </BentoCard>
           </>
         ) : null}
@@ -90,14 +94,19 @@ export default async function ShiftCalendarScreen({
           {!model ? (
             LOAD_FAILED
           ) : model.editable ? (
-            <RosterGrid
-              key={model.week_start}
-              weekStart={model.week_start}
-              days={model.days}
-              rows={model.rows}
-              previous={model.previous}
-              disabled={false}
-            />
+            <>
+              <RosterGrid
+                key={model.week_start}
+                weekStart={model.week_start}
+                days={model.days}
+                rows={model.rows}
+                previous={model.previous}
+                types={model.types}
+                activeTypes={model.active_types}
+                disabled={false}
+              />
+              <ShiftTypesPanel types={model.type_list} />
+            </>
           ) : model.rows.length === 0 ? (
             <Muted>No shifts are set for this week</Muted>
           ) : (
@@ -119,16 +128,7 @@ export default async function ShiftCalendarScreen({
                       </TableCell>
                       {row.cells.map((cell, i) => (
                         <TableCell key={model.days[i].date}>
-                          {cell ? (
-                            <span
-                              className={cn(
-                                'inline-flex whitespace-nowrap rounded px-1.5 py-0.5 text-xs font-medium',
-                                SHIFT_CLASS[cell],
-                              )}
-                            >
-                              {SHIFT_LABEL[cell]}
-                            </span>
-                          ) : null}
+                          {cell && model.types[cell] ? <ShiftPill type={model.types[cell]} /> : null}
                         </TableCell>
                       ))}
                     </TableRow>
@@ -139,17 +139,21 @@ export default async function ShiftCalendarScreen({
           )}
         </BentoCard>
 
-        <BentoCard title="Shift types" subtitle="Used in this roster" icon={Moon} className="col-span-2 md:col-span-12">
-          <ul className="flex flex-wrap gap-2">
-            {(Object.keys(SHIFT_LABEL) as ShiftKind[]).map((kind) => (
-              <li
-                key={kind}
-                className={cn('inline-flex items-center rounded px-2 py-1 text-xs font-medium', SHIFT_CLASS[kind])}
-              >
-                {SHIFT_LABEL[kind]}
-              </li>
-            ))}
-          </ul>
+        <BentoCard title="Shift types" subtitle="Used this week · times are Malaysia time" icon={Moon} className="col-span-2 md:col-span-12">
+          {!model ? (
+            LOAD_FAILED
+          ) : model.by_type.length === 0 ? (
+            <Muted>No shifts are set for this week</Muted>
+          ) : (
+            <ul className="flex flex-wrap gap-3">
+              {model.by_type.map(({ type, count }) => (
+                <li key={type.id} className="flex items-center gap-2 text-sm">
+                  <ShiftPill type={type} />
+                  <span className="tabular-nums text-muted-foreground">× {count}</span>
+                </li>
+              ))}
+            </ul>
+          )}
         </BentoCard>
       </BentoGrid>
     </ScreenContainer>

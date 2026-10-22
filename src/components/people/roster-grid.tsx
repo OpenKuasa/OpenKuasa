@@ -8,26 +8,21 @@ import { type CapResult, WRITE_FAILED } from '@/lib/people/capabilities';
 import {
   type Cell,
   type RosterEdits,
+  SHIFT_COLOR_CLASS,
   cellKey,
   cellValue,
   changedCells,
   copyLastWeek,
   pickCell,
+  shiftTypeLabel,
 } from '@/lib/people/roster';
-import type { ShiftKind } from '@/lib/people/types';
+import type { ShiftType } from '@/lib/people/types';
 import { cn } from '@/lib/utils';
+import { ShiftPill } from './shift-pill';
 import { useUnsavedGuard } from './use-unsaved-guard';
 
-const LABEL: Record<ShiftKind, string> = { morning: 'Morning', night: 'Night', off: 'Off' };
-
-const SHIFT_CLASS: Record<ShiftKind, string> = {
-  morning: 'bg-primary/10 text-primary',
-  night: 'bg-slate-500/10 text-slate-600',
-  off: 'bg-muted text-muted-foreground',
-};
-
 const SELECT_CLASS =
-  'h-7 w-[5.5rem] rounded-lg border border-input bg-transparent px-1.5 text-xs outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-input/30';
+  'h-7 w-28 rounded-lg border border-input bg-transparent px-1.5 text-xs outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-input/30';
 
 export type RosterGridRow = {
   employee_id: string;
@@ -48,12 +43,18 @@ export function RosterGrid({
   days,
   rows,
   previous,
+  types,
+  activeTypes,
   disabled,
 }: {
   weekStart: string;
   days: { date: string; label: string }[];
   rows: RosterGridRow[];
-  previous: Record<string, ShiftKind>;
+  previous: Record<string, string>;
+  /** Every type by id, archived ones too, to draw what a cell holds. */
+  types: Record<string, ShiftType>;
+  /** The types a cell may be set to. */
+  activeTypes: ShiftType[];
   disabled: boolean;
 }) {
   const [edits, setEdits] = useState<RosterEdits>({});
@@ -178,16 +179,9 @@ export function RosterGrid({
                     const unsaved = Object.hasOwn(edits, key);
                     if (!row.editable) {
                       const cell = row.cells[i];
-                      return (
-                        <TableCell key={d.date}>
-                          {cell ? (
-                            <span className={cn('inline-flex rounded px-1.5 py-0.5 text-xs font-medium', SHIFT_CLASS[cell])}>
-                              {LABEL[cell]}
-                            </span>
-                          ) : null}
-                        </TableCell>
-                      );
+                      return <TableCell key={d.date}>{cell && types[cell] ? <ShiftPill type={types[cell]} /> : null}</TableCell>;
                     }
+                    const held = value ? types[value] : undefined;
                     return (
                       <TableCell key={d.date}>
                         <div className="relative inline-flex">
@@ -195,7 +189,7 @@ export function RosterGrid({
                             aria-label={`${row.name}, ${d.label} ${d.date}${unsaved ? ' (unsaved)' : ''}`}
                             className={cn(
                               SELECT_CLASS,
-                              value ? SHIFT_CLASS[value] : null,
+                              held ? SHIFT_COLOR_CLASS[held.color] : null,
                               unsaved && 'border-amber-500 ring-2 ring-amber-500/30',
                             )}
                             value={value ?? ''}
@@ -203,9 +197,16 @@ export function RosterGrid({
                             onChange={(event) => pick(key, (event.target.value || null) as Cell)}
                           >
                             <option value="">—</option>
-                            <option value="morning">Morning</option>
-                            <option value="night">Night</option>
-                            <option value="off">Off</option>
+                            {activeTypes.map((t) => (
+                              <option key={t.id} value={t.id}>
+                                {shiftTypeLabel(t)}
+                              </option>
+                            ))}
+                            {held && held.archived ? (
+                              <option value={held.id} disabled>
+                                {held.name} (archived)
+                              </option>
+                            ) : null}
                           </select>
                           {unsaved ? (
                             <span aria-hidden className="absolute -right-1 -top-1 size-2 rounded-full bg-amber-500" />
