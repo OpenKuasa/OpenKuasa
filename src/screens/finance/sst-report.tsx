@@ -206,9 +206,10 @@ export function SstReturnBody({ ret, settings, companyName }: { ret: SstReturn; 
                 <TableHeader>
                   <TableRow className="bg-muted/40">
                     <TableHead>Description</TableHead>
-                    <TableHead>{service ? 'Service type code' : 'Tariff code'}</TableHead>
-                    <TableHead className="text-right">{service ? 'Value of taxable service (10)' : 'Value of goods sold (8)'}</TableHead>
-                    <TableHead className="text-right">Own use or free</TableHead>
+                    {/* The long column names wrap, so the four columns fit the card without a sideways scroll. */}
+                    <TableHead className="h-auto py-2 whitespace-normal">{service ? 'Service type code' : 'Tariff code'}</TableHead>
+                    <TableHead className="h-auto py-2 text-right whitespace-normal">{service ? 'Value of taxable service (10)' : 'Value of goods sold (8)'}</TableHead>
+                    <TableHead className="h-auto py-2 text-right whitespace-normal">Own use or free</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
