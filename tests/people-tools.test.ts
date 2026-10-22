@@ -35,7 +35,7 @@ const EMPTY: PeopleData = {
   listDepartments: async () => [], listEmployees: async () => [], getEmployeePrivate: async () => null,
   listLeaveRequests: async () => [], listLeaveBalances: async () => [], listTimeOffRequests: async () => [],
   listClaims: async () => [], listOvertime: async () => [], listAttendance: async () => [],
-  listTimesheet: async () => [], listShifts: async () => [], listPublicHolidays: async () => [],
+  listTimesheet: async () => [], listShifts: async () => [], listShiftTypes: async () => [], listPublicHolidays: async () => [],
   listPayrollRuns: async () => [], listPayslips: async () => [], listGoals: async () => [],
   listReviews: async () => [], listTrainings: async () => [],
   listTrainingEnrolments: async () => [], listAnnouncements: async () => [],
@@ -189,6 +189,32 @@ describe('people tools', () => {
     expect(week).toMatchObject({ from: '2026-10-05', to: '2026-10-11', total: 35 });
     expect(week.shifts[0]).toHaveProperty('employee');
     expect((await run('listShifts')({ week: 'next' })).from).toBe('2026-10-12');
+  });
+
+  it('reads any week of the roster and of the timesheet', async () => {
+    expect(await run('listShifts')({ week: 'last' })).toMatchObject({ from: '2026-09-28', to: '2026-10-04' });
+    expect(await run('listShifts')({ week: 'next', weekOf: '2026-08-13' })).toMatchObject({ from: '2026-08-10', to: '2026-08-16' });
+    const week = await run('getTimesheet')({ weekOf: '2026-10-07' });
+    expect(week).toMatchObject({ from: '2026-10-05', to: '2026-10-11' });
+    const sum = week.by_employee.reduce((s: number, r: { hours: number }) => s + r.hours, 0);
+    expect(week.total_hours).toBe(Math.round(sum * 100) / 100);
+  });
+
+  it("narrows the roster and hours to a member's own, and says a manager's cover their reports", async () => {
+    const member = runner(data, MEMBER);
+    const shifts = await member('listShifts')({});
+    expect(shifts.scope).toBe('your own records only');
+    const names = new Set(shifts.shifts.map((s: { employee: string }) => s.employee));
+    expect(names.size).toBeLessThanOrEqual(1);
+    const hours = await member('getTimesheet')({ days: 7 });
+    expect(hours.scope).toBe('your own records only');
+    expect(hours.by_employee.length).toBeLessThanOrEqual(1);
+
+    const manager = runner(data, { employeeId: 'seed-emp-12', isHr: false, isDemo: false, managesTeam: true });
+    const team = await manager('listShifts')({});
+    expect(team.scope).toBe('your own records and those of the people who report to you');
+    for (const s of team.shifts) expect(typeof s.yours).toBe('boolean');
+    expect((await manager('getTimesheet')({})).scope).toBe('your own records and those of the people who report to you');
   });
 
   it('lists public holidays, all or only those still ahead', async () => {

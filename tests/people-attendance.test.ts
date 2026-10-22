@@ -16,6 +16,8 @@ import { todayState } from '@/lib/people/attendance-forms';
 import { createSeedPeopleData } from '@/lib/people/seed';
 import {
   DEMO_EMPLOYEE_ID,
+  type Employee,
+  type ShiftType,
   type AttendanceDay,
   type OvertimeRecord,
   type PeopleViewer,
@@ -215,31 +217,39 @@ describe('buildTimesheet', () => {
 describe('buildShiftCalendar', () => {
   it("rosters the week's employees with morning, night and off, and counts", async () => {
     const [shifts, employees] = await Promise.all([data.listShifts('2026-10-05', '2026-10-11'), data.listEmployees()]);
-    const model = buildShiftCalendar({ shifts, employees, viewer: HR3, today: TODAY });
+    const model = buildShiftCalendar({ shifts, employees, viewer: DEMO, today: TODAY });
     expect(model.team).toBe(true);
+    expect(model.editable).toBe(false);
     expect(model.rows).toHaveLength(5);
     expect(model.rows.every((r) => r.cells.length === 7)).toBe(true);
-    expect(model.morning_count).toBe(shifts.filter((s) => s.shift === 'morning').length);
-    expect(model.night_count).toBe(shifts.filter((s) => s.shift === 'night').length);
+    const types = await data.listShiftTypes();
+    const withTypes = buildShiftCalendar({ shifts, employees, viewer: DEMO, today: TODAY, types });
+    const off = types.find((t) => t.is_off)!.id;
+    expect(withTypes.off_count).toBe(shifts.filter((s) => s.shift_type_id === off).length);
+    expect(withTypes.working_count).toBe(shifts.length - withTypes.off_count);
+    expect(withTypes.by_type.reduce((n, b) => n + b.count, 0)).toBe(shifts.length);
   });
 
-  it('gives an empty roster, not blank rows for every employee, when the week has no shifts', async () => {
+  it('gives an empty roster, not blank rows for every employee, when the week has no shifts and nobody edits', async () => {
     const employees = await data.listEmployees();
-    const model = buildShiftCalendar({ shifts: [], employees, viewer: HR3, today: TODAY });
+    const model = buildShiftCalendar({ shifts: [], employees, viewer: DEMO, today: TODAY });
     expect(model.rows).toEqual([]);
-    expect(model.morning_count).toBe(0);
-    expect(model.night_count).toBe(0);
+    expect(model.working_count).toBe(0);
+    expect(model.off_count).toBe(0);
   });
 
   it('leaves a day blank (null) when no shift is set for it', () => {
     const model = buildShiftCalendar({
-      shifts: [{ id: 's', employee_id: 'e1', work_date: '2026-10-07', shift: 'night' }],
+      shifts: [{ id: 's', employee_id: 'seed-emp-5', work_date: '2026-10-07', shift_type_id: 'night' }],
       employees: [],
       viewer: MEMBER,
       today: TODAY,
     });
     expect(model.team).toBe(false);
+    expect(model.editable).toBe(false);
     expect(model.rows[0].cells).toEqual([null, null, 'night', null, null, null, null]);
+    // A type the list lacks is still drawn, by name only.
+    expect(model.types.night).toMatchObject({ name: 'Unknown', archived: true });
   });
 });
 
@@ -430,5 +440,128 @@ describe('My Attendance: the work week for a member', () => {
     const screen = readFileSync(resolve('src/screens/people/my-attendance.tsx'), 'utf8');
     expect(screen).toContain("import { readWorkWeek } from '@/lib/people/supabase';");
     expect(screen).toMatch(/knownWorkWeek\([\s\S]*?readWorkWeek\(ctx\.client, orgId\)/);
+  });
+});
+
+describe('week screens: any week, and who sees which rows', () => {
+  const emp = (id: string, over: Partial<Employee> = {}): Employee => ({
+    id, user_id: null, employee_no: id, name: id.toUpperCase(), work_email: null, department_id: null, department_name: null,
+    designation: null, employment_type: 'full_time', reports_to: null, join_date: null, status: 'active',
+    date_of_birth_day: null, date_of_birth_month: null, created_at: '2026-01-01T00:00:00Z', ...over,
+  });
+  // m manages r1 and r2 (r2 inactive); p is a peer; x left.
+  const staff = [emp('m'), emp('r1', { reports_to: 'm' }), emp('r2', { reports_to: 'm', status: 'inactive' }), emp('p'), emp('x', { status: 'inactive' })];
+  const MANAGER: PeopleViewer = { employeeId: 'm', isHr: false, isDemo: false, managesTeam: true };
+  const SELF: PeopleViewer = { employeeId: 'p', isHr: false, isDemo: false };
+  const HR: PeopleViewer = { employeeId: null, isHr: true, isDemo: false };
+  const WEEK = '2026-09-28'; // the Monday before TODAY's week
+  const type = (id: string, over: Partial<ShiftType> = {}): ShiftType => ({
+    id, name: id[0].toUpperCase() + id.slice(1), start_time: null, end_time: null, is_off: false, color: 'sky', archived: false, ...over,
+  });
+  const TYPES = [
+    type('morning', { start_time: '09:00', end_time: '18:00' }),
+    type('night', { start_time: '21:00', end_time: '06:00' }),
+    type('off', { is_off: true }),
+    type('split', { archived: true }),
+  ];
+  const shift = (employee_id: string, work_date: string, kind: string) => ({ id: `${employee_id}${work_date}`, employee_id, work_date, shift_type_id: kind });
+  const entry = (employee_id: string, work_date: string, hours: number, billable_hours = 0): TimesheetEntry => ({
+    id: `${employee_id}${work_date}`, employee_id, work_date, hours, billable_hours,
+  });
+  const shifts = [
+    shift('m', '2026-09-28', 'morning'), shift('r1', '2026-09-29', 'night'), shift('p', '2026-09-30', 'off'),
+    shift('x', '2026-10-01', 'morning'), shift('p', '2026-09-22', 'night'), shift('r1', '2026-09-21', 'off'),
+    shift('m', '2026-09-23', 'split'),
+  ];
+
+  it('shows the week asked for, with its navigation', () => {
+    const model = buildShiftCalendar({ shifts, employees: staff, viewer: HR, today: TODAY, week: WEEK });
+    expect(model.week_start).toBe(WEEK);
+    expect(model.week_end).toBe('2026-10-04');
+    expect(model.nav).toMatchObject({ previous: '2026-09-21', next: '2026-10-05', current: '2026-10-05', isCurrent: false });
+  });
+
+  it('lists every active employee for HR to edit, and anyone else with a shift read only', () => {
+    const model = buildShiftCalendar({ shifts, employees: staff, viewer: HR, today: TODAY, week: WEEK, types: TYPES });
+    expect(model.editable).toBe(true);
+    expect(model.rows.map((r) => [r.employee_id, r.editable])).toEqual([
+      ['m', true], ['p', true], ['r1', true], ['x', false],
+    ]);
+    expect(model.rows.find((r) => r.employee_id === 'r1')?.cells).toEqual([null, 'night', null, null, null, null, null]);
+    // Last week, for "Copy last week", by cell key; a shift on an archived type is not copied.
+    expect(model.previous).toEqual({ 'p|2026-09-22': 'night', 'r1|2026-09-21': 'off' });
+    expect(model.working_count).toBe(3);
+    expect(model.off_count).toBe(1);
+    expect(model.by_type.map((b) => [b.type.id, b.count])).toEqual([['morning', 2], ['night', 1], ['off', 1]]);
+    // The picker offers the active types only; the panel lists them all.
+    expect(model.active_types.map((t) => t.id)).toEqual(['morning', 'night', 'off']);
+    expect(model.type_list.map((t) => t.id)).toEqual(['morning', 'night', 'off', 'split']);
+  });
+
+  it('shows a manager their own and their reports\' shifts, read only, own row first', () => {
+    const model = buildShiftCalendar({ shifts, employees: staff, viewer: MANAGER, today: TODAY, week: WEEK });
+    expect(model.view).toBe('manager');
+    expect(model.team).toBe(false);
+    expect(model.editable).toBe(false);
+    expect(model.previous).toEqual({});
+    expect(model.rows.map((r) => r.employee_id)).toEqual(['m', 'r1']);
+  });
+
+  it('shows a member only their own shifts, even when a report\'s rows came back', () => {
+    const model = buildShiftCalendar({ shifts, employees: staff, viewer: SELF, today: TODAY, week: WEEK });
+    expect(model.rows.map((r) => r.employee_id)).toEqual(['p']);
+    expect(model.working_count + model.off_count).toBe(1);
+  });
+
+  it('never lets the demo edit', () => {
+    const model = buildShiftCalendar({ shifts, employees: staff, viewer: DEMO, today: TODAY, week: WEEK });
+    expect(model.view).toBe('demo');
+    expect(model.editable).toBe(false);
+    expect(model.rows.every((r) => !r.editable)).toBe(true);
+  });
+
+  it('gives a member their own timesheet row, editable this week and last up to today', () => {
+    const thisWeek = buildTimesheet({ entries: [], employees: staff, viewer: SELF, today: TODAY });
+    expect(thisWeek.rows.map((r) => r.employee_id)).toEqual(['p']);
+    // TODAY is Friday 9 October: Monday to Friday open, the weekend still to come.
+    expect(thisWeek.rows[0].editable).toEqual([true, true, true, true, true, false, false]);
+    expect(thisWeek.editable).toBe(true);
+    const lastWeek = buildTimesheet({ entries: [], employees: staff, viewer: SELF, today: TODAY, week: WEEK });
+    expect(lastWeek.rows[0].editable.every(Boolean)).toBe(true);
+    const older = buildTimesheet({ entries: [], employees: staff, viewer: SELF, today: TODAY, week: '2026-09-21' });
+    expect(older.rows[0].editable.some(Boolean)).toBe(false);
+    expect(older.editable).toBe(false);
+  });
+
+  it('carries billable hours per day for the inputs', () => {
+    const model = buildTimesheet({ entries: [entry('p', '2026-10-06', 8, 2.5)], employees: staff, viewer: SELF, today: TODAY });
+    expect(model.rows[0].per_day[1]).toBe(8);
+    expect(model.rows[0].billable_per_day[1]).toBe(2.5);
+    expect(model.rows[0].billable_per_day[0]).toBeNull();
+  });
+
+  it('lets HR edit every row up to today in any week, and lists active staff with nothing logged', () => {
+    const model = buildTimesheet({ entries: [entry('x', '2026-09-29', 4)], employees: staff, viewer: HR, today: TODAY, week: '2026-08-03' });
+    expect(model.rows.map((r) => r.employee_id)).toEqual(['m', 'p', 'r1']);
+    expect(model.rows.every((r) => r.editable.every(Boolean))).toBe(true);
+    const withOld = buildTimesheet({ entries: [entry('x', '2026-09-29', 4)], employees: staff, viewer: HR, today: TODAY, week: WEEK });
+    expect(withOld.rows.find((r) => r.employee_id === 'x')?.total).toBe(4);
+    expect(withOld.totals.members).toBe(1);
+  });
+
+  it('shows a manager their reports\' hours read only and their own editable', () => {
+    const entries = [entry('r1', '2026-10-05', 7), entry('p', '2026-10-05', 9), entry('m', '2026-10-06', 8)];
+    const model = buildTimesheet({ entries, employees: staff, viewer: MANAGER, today: TODAY });
+    expect(model.rows.map((r) => r.employee_id)).toEqual(['m', 'r1']);
+    expect(model.rows[0].own).toBe(true);
+    expect(model.rows[0].editable.slice(0, 5)).toEqual([true, true, true, true, true]);
+    expect(model.rows[1].editable.some(Boolean)).toBe(false);
+    expect(model.team).toBe(false);
+  });
+
+  it('keeps the demo timesheet read only', () => {
+    const model = buildTimesheet({ entries: [entry('p', '2026-10-05', 9)], employees: staff, viewer: DEMO, today: TODAY });
+    expect(model.editable).toBe(false);
+    expect(model.rows.map((r) => r.employee_id)).toEqual(['p']);
   });
 });

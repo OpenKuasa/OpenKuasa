@@ -40,7 +40,7 @@ const EMPTY: PeopleData = {
   listDepartments: async () => [], listEmployees: async () => [], getEmployeePrivate: async () => null,
   listLeaveRequests: async () => [], listLeaveBalances: async () => [], listTimeOffRequests: async () => [],
   listClaims: async () => [], listOvertime: async () => [], listAttendance: async () => [],
-  listTimesheet: async () => [], listShifts: async () => [], listPublicHolidays: async () => [],
+  listTimesheet: async () => [], listShifts: async () => [], listShiftTypes: async () => [], listPublicHolidays: async () => [],
   listPayrollRuns: async () => [], listPayslips: async () => [], listGoals: async () => [],
   listReviews: async () => [], listTrainings: async () => [],
   listTrainingEnrolments: async () => [], listAnnouncements: async () => [],

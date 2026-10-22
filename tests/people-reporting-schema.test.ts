@@ -288,9 +288,12 @@ describe('the is_manager column is dropped (issue #234)', () => {
   });
 
   test('the newest demo re-seed no longer names the column', () => {
-    const latest = files.filter((f) => statements(f).includes(RESEED_HEAD)).at(-1);
-    expect(latest).toBe(DROP);
-    expect(fn(dropSql, 'private.reseed_demo_people').body).not.toMatch(/\bis_manager\b/);
+    // Later slices may redefine it again (rosters and hours did); none may bring the column back.
+    const redefining = files.filter((f) => statements(f).includes(RESEED_HEAD));
+    expect(redefining.indexOf(DROP)).toBeGreaterThan(-1);
+    for (const f of redefining.slice(redefining.indexOf(DROP))) {
+      expect(fn(statements(f), 'private.reseed_demo_people').body, f).not.toMatch(/\bis_manager\b/);
+    }
     expect(flat(dropSql)).toContain('revoke all on function private.reseed_demo_people() from public, anon, authenticated;');
     expect(dropSql).not.toMatch(/select\s+private\.reseed_demo_people\(\)/);
   });
