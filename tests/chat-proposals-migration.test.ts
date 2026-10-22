@@ -19,12 +19,40 @@ const fn = (name: string) => {
   return code.slice(start, code.indexOf('$$;', start));
 };
 const FUNCTIONS = ['record_chat_proposal', 'claim_chat_proposal', 'reject_chat_proposals'];
+/**
+ * Later files that touch the table. The checks below read FILE alone, so a later file may not restate the table,
+ * its functions, policies or grants (that would leave these checks reading a body that is no longer live). This
+ * list is closed: each entry may only widen the product check, and sorts after FILE so a fresh replay finds the table.
+ */
+const FOLLOW_UPS = ['20261121110000_chat_proposals_allow_finance_product.sql'];
+const withoutComments = (text: string) =>
+  text
+    .split('\n')
+    .filter((line) => !line.trim().startsWith('--'))
+    .join('\n');
 
 describe('chat proposals migration', () => {
-  test('is one file, alone on its version', () => {
-    const files = readdirSync(DIR);
-    expect(files.filter((f) => f.includes('chat_proposals'))).toEqual([FILE]);
+  test('is one file, alone on its version, with only the listed follow-ups touching the table', () => {
+    const files = readdirSync(DIR).filter((f) => f.endsWith('.sql')).sort();
+    const touching = files.filter((f) => withoutComments(readFileSync(join(DIR, f), 'utf8')).includes('chat_proposals'));
+    expect(touching).toEqual([FILE, ...FOLLOW_UPS]);
     expect(files.filter((f) => f.startsWith('20261101111500'))).toEqual([FILE]);
+  });
+
+  test.each(FOLLOW_UPS)('%s sorts after the table and only widens the product check', (file) => {
+    expect(file > FILE).toBe(true);
+    const statements = withoutComments(readFileSync(join(DIR, file), 'utf8'))
+      .split(';')
+      .map((s) => s.replace(/\s+/g, ' ').trim())
+      .filter(Boolean);
+    expect(statements.length).toBeGreaterThan(0);
+    for (const statement of statements) {
+      expect(statement).toMatch(/^alter table public\.chat_proposals (drop constraint if exists|add constraint) chat_proposals_product_check\b/);
+    }
+    const allowed = /check \(product in \(([^)]*)\)\)/.exec(statements.join(' '))?.[1] ?? '';
+    // Widening only: every product the table was created with is still allowed.
+    for (const product of ['reach', 'crm', 'hire', 'people']) expect(allowed).toContain(`'${product}'`);
+    expect(code).toContain("check (product in ('reach', 'crm', 'hire', 'people'))");
   });
 
   test('a signed-in user can read their own rows and write nothing', () => {
