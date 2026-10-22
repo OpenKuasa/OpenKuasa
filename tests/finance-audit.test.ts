@@ -22,11 +22,19 @@ describe('parseAuditFilters', () => {
   });
 
   it('keeps good values and caps q at 100 characters', () => {
-    const f = parseAuditFilters({ type: 'finance_invoice', period: 'all', q: 'x'.repeat(150), before: '2026-10-22T10:00:00.123456+00:00' });
+    const f = parseAuditFilters({ type: 'finance_invoice', period: 'all', q: 'x'.repeat(150), before: '2026-10-22T10:00:00.123456+00:00~0b9c1f0e-1111-4222-8333-444455556666' });
     expect(f.type).toBe('finance_invoice');
     expect(f.period).toBe('all');
     expect(f.q).toHaveLength(100);
-    expect(f.before).toBe('2026-10-22T10:00:00.123456+00:00');
+    expect(f.before).toBe('2026-10-22T10:00:00.123456+00:00~0b9c1f0e-1111-4222-8333-444455556666');
+  });
+
+  it('accepts a cursor only as <timestamp>~<uuid>', () => {
+    const ok = '2026-10-22T10:00:00.123456+00:00~0b9c1f0e-1111-4222-8333-444455556666';
+    expect(parseAuditFilters({ before: ok }).before).toBe(ok);
+    for (const bad of ['2026-10-22T10:00:00.123456+00:00', '2026-10-22T10:00:00+00:00~id1', '~0b9c1f0e-1111-4222-8333-444455556666', 'x~0b9c1f0e-1111-4222-8333-444455556666', '2026-10-22T10:00:00+00:00~0b9c1f0e-1111-4222-8333-444455556666~z', '2026-10-22T10:00:00+00:00~0b9c1f0e-1111-4222-8333-444455556666),id.gt.0']) {
+      expect(parseAuditFilters({ before: bad }).before).toBeNull();
+    }
   });
 
   it('drops a bad cursor and an empty actor', () => {
@@ -92,6 +100,11 @@ describe('buildAuditSummary', () => {
     ]);
     expect(s.actors).toEqual(['Aisyah', 'Zed']);
   });
+
+  it('names a blank actor System in the actors list', () => {
+    const s = buildAuditSummary([row('2026-10-23T04:00:00Z', 'finance_invoice', ''), row('2026-10-23T04:00:00Z', 'finance_invoice', 'Aisyah')], '2026-10-23');
+    expect(s.actors).toEqual(['Aisyah', 'System']);
+  });
 });
 
 type Call = [string, ...unknown[]];
@@ -99,7 +112,7 @@ type Call = [string, ...unknown[]];
 function fakeCtx(data: unknown[], error: { message: string } | null = null) {
   const calls: Call[] = [];
   const chain: Record<string, unknown> = {};
-  for (const m of ['select', 'eq', 'like', 'ilike', 'gte', 'lt', 'order', 'limit']) {
+  for (const m of ['select', 'eq', 'like', 'ilike', 'gte', 'lt', 'or', 'order', 'limit']) {
     chain[m] = (...args: unknown[]) => {
       calls.push([m, ...args]);
       return chain;
@@ -145,11 +158,15 @@ describe('listFinanceAudit', () => {
 
   it('turns filters into the matching calls', async () => {
     const { ctx, calls } = fakeCtx([]);
-    await listFinanceAudit(ctx, { type: 'finance_payment', actor: 'Aisyah', period: '7d', q: 'abc', before: '2026-10-22T00:00:00+00:00' });
+    await listFinanceAudit(ctx, { type: 'finance_payment', actor: 'Aisyah', period: '7d', q: 'abc', before: '2026-10-22T00:00:00.5+00:00~0b9c1f0e-1111-4222-8333-444455556666' });
     expect(calls).toContainEqual(['eq', 'entity_type', 'finance_payment']);
     expect(calls.some((c) => c[0] === 'like')).toBe(false);
     expect(calls).toContainEqual(['eq', 'actor_name', 'Aisyah']);
-    expect(calls).toContainEqual(['lt', 'created_at', '2026-10-22T00:00:00+00:00']);
+    expect(calls).toContainEqual([
+      'or',
+      'created_at.lt."2026-10-22T00:00:00.5+00:00",and(created_at.eq."2026-10-22T00:00:00.5+00:00",id.lt.0b9c1f0e-1111-4222-8333-444455556666)',
+    ]);
+    expect(calls.some((c) => c[0] === 'lt')).toBe(false);
     expect(calls).toContainEqual(['ilike', 'target', '%abc%']);
     const gte = calls.find((c) => c[0] === 'gte')!;
     expect(gte[1]).toBe('created_at');
@@ -168,13 +185,25 @@ describe('listFinanceAudit', () => {
     const full = fakeCtx([dbRow(1), dbRow(2), dbRow(3)]);
     const a = await listFinanceAudit(full.ctx, none, 2);
     expect(a.entries.map((e) => e.id)).toEqual(['id1', 'id2']);
-    expect(a.nextBefore).toBe('2026-10-22T04:00:00Z');
+    expect(a.nextBefore).toBe('2026-10-22T04:00:00Z~id2');
     expect(full.calls).toContainEqual(['limit', 3]);
 
     const short = fakeCtx([dbRow(1), dbRow(2)]);
     const b = await listFinanceAudit(short.ctx, none, 2);
     expect(b.entries).toHaveLength(2);
     expect(b.nextBefore).toBeNull();
+  });
+
+  it('matches the System actor to a blank or missing name', async () => {
+    const { ctx, calls } = fakeCtx([]);
+    await listFinanceAudit(ctx, { ...none, actor: 'System' });
+    expect(calls).toContainEqual(['or', 'actor_name.is.null,actor_name.eq.']);
+    expect(calls.some((c) => c[0] === 'eq' && c[1] === 'actor_name')).toBe(false);
+  });
+
+  it('shows a blank actor as System', async () => {
+    const { ctx } = fakeCtx([{ ...dbRow(1), actor_name: null }]);
+    expect((await listFinanceAudit(ctx, none)).entries[0].actorName).toBe('System');
   });
 
   it('drops unknown entity types', async () => {
@@ -194,6 +223,7 @@ describe('readAuditSummaryRows', () => {
     const { ctx, calls } = fakeCtx([{ created_at: '2026-10-23T00:00:00Z', entity_type: 'finance_invoice', actor_name: 'A', event: 'created' }]);
     const rows = await readAuditSummaryRows(ctx);
     expect(rows).toHaveLength(1);
+    expect(calls).toContainEqual(['select', 'created_at, entity_type, actor_name, event:details->>event']);
     expect(calls).toContainEqual(['eq', 'org_id', 'org1']);
     expect(calls).toContainEqual(['like', 'entity_type', 'finance\\_%']);
     expect(calls).toContainEqual(['limit', 5000]);

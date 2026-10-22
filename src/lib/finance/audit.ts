@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { addDays, formatDay, malaysiaDate } from '@/lib/people/dates';
 import type { FinanceWriteContext } from './result';
 
-/** What a finance row in the audit trail is about:the `entity_type` the database writes on `activity_log`. */
+/** What a finance row in the audit trail is about: the `entity_type` the database writes on `activity_log`. */
 export type AuditEntityType =
   | 'finance_invoice'
   | 'finance_quotation'
@@ -104,8 +104,31 @@ const filtersSchema = z.object({
   actor: z.string().trim().min(1).max(200).nullable().catch(null),
   period: z.enum(PERIOD_VALUES).catch('30d'),
   q: z.string().trim().max(100).catch(''),
-  before: z.iso.datetime({ offset: true }).nullable().catch(null),
+  before: z
+    .string()
+    .refine(isCursor)
+    .nullable()
+    .catch(null),
 });
+
+/** What an unnamed actor is called, on a row and in the actor filter. */
+const SYSTEM_ACTOR = 'System';
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** Splits a page cursor, `<created_at>~<id>`, into its two halves; null when it is not in exactly that shape. */
+function splitCursor(cursor: string): { createdAt: string; id: string } | null {
+  const at = cursor.indexOf('~');
+  if (at < 0) return null;
+  const createdAt = cursor.slice(0, at);
+  const id = cursor.slice(at + 1);
+  if (!z.iso.datetime({ offset: true }).safeParse(createdAt).success || !UUID.test(id)) return null;
+  return { createdAt, id };
+}
+
+function isCursor(value: string): boolean {
+  return splitCursor(value) !== null;
+}
 
 /** Reads the audit screen's filters off the address; a bad value falls back on its own. */
 export function parseAuditFilters(params: Record<string, string | string[] | undefined>): AuditFilters {
@@ -156,10 +179,16 @@ export async function listFinanceAudit(
     .select('id, created_at, actor_name, action, target, entity_type, entity_id, details')
     .eq('org_id', ctx.orgId);
   query = filters.type ? query.eq('entity_type', filters.type) : query.like('entity_type', 'finance\\_%');
-  if (filters.actor) query = query.eq('actor_name', filters.actor);
+  if (filters.actor === SYSTEM_ACTOR) query = query.or('actor_name.is.null,actor_name.eq.');
+  else if (filters.actor) query = query.eq('actor_name', filters.actor);
   const days = AUDIT_PERIODS.find((p) => p.value === filters.period)?.days;
   if (days) query = query.gte('created_at', new Date(Date.now() - days * DAY_MS).toISOString());
-  if (filters.before) query = query.lt('created_at', filters.before);
+  // Rows written together share a timestamp, so the cursor also carries the id to break the tie.
+  const cursor = filters.before ? splitCursor(filters.before) : null;
+  if (cursor) {
+    const ts = `"${cursor.createdAt}"`;
+    query = query.or(`created_at.lt.${ts},and(created_at.eq.${ts},id.lt.${cursor.id})`);
+  }
   if (filters.q) query = query.ilike('target', `%${escapeLike(filters.q)}%`);
 
   const { data, error } = await query
@@ -176,7 +205,7 @@ export async function listFinanceAudit(
     entries.push({
       id: r.id,
       createdAt: r.created_at,
-      actorName: r.actor_name?.trim() || 'System',
+      actorName: r.actor_name?.trim() || SYSTEM_ACTOR,
       action: r.action,
       target: r.target ?? null,
       entityType: r.entity_type,
@@ -185,7 +214,8 @@ export async function listFinanceAudit(
     });
   }
   // The raw database timestamp keeps its microseconds, so the next page starts exactly after this row.
-  const nextBefore = rows.length > pageSize ? page[page.length - 1].created_at : null;
+  const last = page[page.length - 1];
+  const nextBefore = rows.length > pageSize && last ? `${last.created_at}~${last.id}` : null;
   return { entries, nextBefore };
 }
 
@@ -234,7 +264,7 @@ export function buildAuditSummary(rows: SummaryRow[], today: string): AuditSumma
       if (r.event === 'deleted') deletions += 1;
     }
     if (isEntityType(r.entity_type)) perType.set(r.entity_type, (perType.get(r.entity_type) ?? 0) + 1);
-    if (r.actor_name) actors.add(r.actor_name);
+    actors.add(r.actor_name?.trim() || SYSTEM_ACTOR);
   }
 
   const daily = Array.from({ length: SUMMARY_DAYS }, (_, i) => {
