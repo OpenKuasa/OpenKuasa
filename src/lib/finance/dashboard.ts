@@ -42,6 +42,9 @@ export const DASHBOARD_PERIODS: { key: DashboardPeriodKey; label: string }[] = [
 /** How many months the trend charts draw, ending with this month. */
 export const TREND_MONTHS = 8;
 
+/** How many weeks the weekly cash chart draws, ending with this week. */
+export const TREND_WEEKS = 8;
+
 /** How many movements "Recent cash" lists. */
 export const RECENT_CASH_ROWS = 8;
 
@@ -80,6 +83,15 @@ export function percentChange(current: number, previous: number): number | null 
   return Math.round(((toSen(current) - toSen(previous)) / Math.abs(toSen(previous))) * 100);
 }
 
+/** A change against the period before, as a chip: no chip when there is nothing to compare to, flat at zero. */
+export function deltaChip(pct: number | null, goodWhen: 'up' | 'down'): { delta: string | undefined; tone: 'up' | 'down' | 'flat' } {
+  if (pct === null) return { delta: undefined, tone: 'flat' };
+  const text = `${pct > 0 ? '+' : pct < 0 ? '−' : ''}${Math.abs(pct)}%`;
+  if (pct === 0) return { delta: text, tone: 'flat' };
+  const good = goodWhen === 'up' ? pct > 0 : pct < 0;
+  return { delta: text, tone: good ? 'up' : 'down' };
+}
+
 /* ---- the model -------------------------------------------------------- */
 
 export type CashPoint = { label: string; balance: number; net: number };
@@ -103,7 +115,7 @@ export type DashboardModel = {
   series: MonthSeries;
   breakdown: { key: string; label: string; value: number }[];
   cashTrend: CashPoint[];
-  /** Ringgit across the active accounts; null when the accounts could not be read. */
+  /** Ringgit across every account, archived ones too (as Banking's "Total cash"); null when the accounts could not be read. */
   cashPosition: number | null;
   bankAccounts: { id: string; name: string; kind: 'bank' | 'cash'; balance: number }[] | null;
   receivable: Aged | null;
@@ -133,8 +145,10 @@ export function buildDashboardModel(inputs: DashboardInputs, today: string, peri
     return { label: point.label, balance: flow.closing, net: flow.net };
   });
 
-  const active = inputs.bankAccounts === null ? null : inputs.bankAccounts.filter((a) => a.active);
-  const cashPosition = active === null ? null : fromSen(active.reduce((t, a) => t + toSen(a.balance_myr), 0));
+  // As Banking: the total takes every account, and an archived one is listed only while it holds money.
+  const cashPosition =
+    inputs.bankAccounts === null ? null : fromSen(inputs.bankAccounts.reduce((t, a) => t + toSen(a.balance_myr), 0));
+  const listed = inputs.bankAccounts === null ? null : inputs.bankAccounts.filter((a) => a.active || a.balance !== 0);
 
   const recentCash =
     inputs.bankTransactions === null
@@ -168,7 +182,7 @@ export function buildDashboardModel(inputs: DashboardInputs, today: string, peri
     cashTrend,
     cashPosition,
     bankAccounts:
-      active === null ? null : active.map((a) => ({ id: a.id, name: a.name, kind: a.kind, balance: a.balance_myr })),
+      listed === null ? null : listed.map((a) => ({ id: a.id, name: a.name, kind: a.kind, balance: a.balance_myr })),
     receivable: inputs.receivables === null ? null : aged(inputs.receivables, today),
     payable: inputs.payables === null ? null : aged(inputs.payables, today),
     recentCash,
@@ -200,7 +214,7 @@ const mondayOf = (date: string) => {
  * Money in and out per ISO week (Monday first), the last `weeks` weeks ending with today's, oldest first, empty
  * weeks included. Posted movements only, transfers left out, in ringgit.
  */
-export function weeklyCash(txns: BankTransactionRow[], today: string, weeks = 8): WeekCash[] {
+export function weeklyCash(txns: BankTransactionRow[], today: string, weeks = TREND_WEEKS): WeekCash[] {
   const last = mondayOf(today);
   const rows = Array.from({ length: weeks }, (_, i) => {
     const weekStart = isoOf(last - (weeks - 1 - i) * 7 * DAY_MS);

@@ -27,12 +27,13 @@ import { createClient } from '@/lib/supabase/server';
 import { isLiveChatAllowed } from '@/lib/ai/access';
 import { getViewer } from '@/lib/auth/viewer';
 import { listBills } from '@/lib/finance/bills';
-import { buildDashboardModel, collectionRate, weeklyCash, type DashboardInputs, type DashboardModel } from '@/lib/finance/dashboard';
+import { TREND_WEEKS, buildDashboardModel, collectionRate, deltaChip, weeklyCash, type DashboardInputs, type DashboardModel } from '@/lib/finance/dashboard';
 import { loadDashboardInputs } from '@/lib/finance/dashboard-data';
 import { rm } from '@/lib/finance/format';
 import { listInvoices, type InvoiceListRow } from '@/lib/finance/invoices';
 import { buildFinanceOverview, type FinanceOverview } from '@/lib/finance/overview';
-import { displayDate, todayUtc } from '@/lib/finance/view-helpers';
+import { displayDate } from '@/lib/finance/view-helpers';
+import { todayInMalaysia } from '@/lib/people/dates';
 import { cn } from '@/lib/utils';
 
 /* ---- mock data (Rimba Ventures Sdn Bhd · 201901027453) ------------ */
@@ -187,7 +188,7 @@ export default async function OverviewScreen() {
   let dash: DashboardModel | null = null;
   let books: DashboardInputs | null = null;
   let invoiceRows: InvoiceListRow[] | null = null;
-  const today = todayUtc();
+  const today = todayInMalaysia(new Date());
   if (!isDemo) {
     try {
       const viewer = await getViewer();
@@ -209,6 +210,7 @@ export default async function OverviewScreen() {
       console.error('[finance/assistant] data error:', e);
     }
   }
+  const revenueChip = deltaChip(dash?.deltas.revenue ?? null, 'up');
   const weeks = books?.bankTransactions ? weeklyCash(books.bankTransactions, today) : null;
   const rate = invoiceRows ? collectionRate(invoiceRows, today) : null;
   const failed = <Muted>Couldn&apos;t load your dashboard — please refresh</Muted>;
@@ -227,6 +229,7 @@ export default async function OverviewScreen() {
         <BentoCard tone="primary" className="col-span-1 md:col-span-3">
           {isDemo ? (
             <BentoStat
+              valueClassName="text-xl sm:text-2xl"
               label="Cash balance"
               value="RM 84,200"
               delta="+6%"
@@ -241,6 +244,7 @@ export default async function OverviewScreen() {
             />
           ) : (
             <BentoStat
+              valueClassName="text-xl sm:text-2xl"
               label="Cash balance"
               value={dash?.cashPosition != null ? rm(dash.cashPosition) : '—'}
               delta={dash?.cashPosition != null ? undefined : "Couldn't load"}
@@ -252,6 +256,7 @@ export default async function OverviewScreen() {
         <BentoCard className="col-span-1 md:col-span-3">
           {isDemo ? (
             <BentoStat
+              valueClassName="text-xl sm:text-2xl"
               label="Revenue · MTD"
               value="RM 42,800"
               delta="+14%"
@@ -260,22 +265,18 @@ export default async function OverviewScreen() {
             />
           ) : (
             <BentoStat
+              valueClassName="text-xl sm:text-2xl"
               label="Revenue · MTD"
               value={dash ? rm(dash.pl.totalIncome) : '—'}
-              delta={
-                !dash
-                  ? "Couldn't load"
-                  : dash.deltas.revenue === null
-                    ? undefined
-                    : `${dash.deltas.revenue > 0 ? '+' : ''}${dash.deltas.revenue}%`
-              }
-              deltaTone={!dash || dash.deltas.revenue === null ? 'flat' : dash.deltas.revenue >= 0 ? 'up' : 'down'}
+              delta={dash ? revenueChip.delta : "Couldn't load"}
+              deltaTone={dash ? revenueChip.tone : 'flat'}
             />
           )}
         </BentoCard>
         <BentoCard className="col-span-1 md:col-span-3">
           {isDemo ? (
             <BentoStat
+              valueClassName="text-xl sm:text-2xl"
               label="Outstanding · AR"
               value="RM 16,900"
               delta="−5%"
@@ -290,6 +291,7 @@ export default async function OverviewScreen() {
             />
           ) : (
             <BentoStat
+              valueClassName="text-xl sm:text-2xl"
               label="Outstanding · AR"
               value={dash?.receivable ? rm(dash.receivable.total) : '—'}
               delta={
@@ -306,6 +308,7 @@ export default async function OverviewScreen() {
         <BentoCard className="col-span-1 md:col-span-3">
           {isDemo ? (
             <BentoStat
+              valueClassName="text-xl sm:text-2xl"
               label="Payable · AP"
               value="RM 9,300"
               delta="+RM 1.2k"
@@ -320,6 +323,7 @@ export default async function OverviewScreen() {
             />
           ) : (
             <BentoStat
+              valueClassName="text-xl sm:text-2xl"
               label="Payable · AP"
               value={dash?.payable ? rm(dash.payable.total) : '—'}
               delta={
@@ -337,7 +341,7 @@ export default async function OverviewScreen() {
         {/* Cash flow + revenue mix */}
         <BentoCard
           title="Cash in vs out"
-          subtitle="Weekly · last 8 weeks"
+          subtitle={`Weekly · last ${TREND_WEEKS} weeks`}
           icon={TrendingUp}
           className="col-span-2 md:col-span-8"
         >

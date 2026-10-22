@@ -14,7 +14,9 @@ import { displayDate } from '@/lib/finance/view-helpers';
 import { AGE_BUCKETS } from '@/lib/finance/reports';
 import {
   DASHBOARD_PERIODS,
+  TREND_MONTHS,
   buildDashboardModel,
+  deltaChip,
   parseDashboardPeriod,
   type DashboardInputs,
   type DashboardModel,
@@ -39,15 +41,6 @@ const CANT_LOAD = "Couldn't load";
 
 function Unavailable() {
   return <p className="text-sm text-muted-foreground">{CANT_LOAD}</p>;
-}
-
-/** A change against the period before, as a chip: no chip when there is nothing to compare to. */
-function change(pct: number | null, goodWhen: 'up' | 'down') {
-  if (pct === null) return { delta: undefined, tone: 'flat' as const };
-  const text = `${pct > 0 ? '+' : pct < 0 ? '−' : ''}${Math.abs(pct)}%`;
-  if (pct === 0) return { delta: text, tone: 'flat' as const };
-  const good = goodWhen === 'up' ? pct > 0 : pct < 0;
-  return { delta: text, tone: good ? ('up' as const) : ('down' as const) };
 }
 
 /** The reads and today's date; null when the ledger could not be read. Without a database: the sample books. */
@@ -151,9 +144,9 @@ export default async function DashboardScreen({
 }
 
 function Cards({ m, label }: { m: DashboardModel; label: string }) {
-  const revenue = change(m.deltas.revenue, 'up');
-  const expenses = change(m.deltas.expenses, 'down');
-  const net = change(m.deltas.net, 'up');
+  const revenue = deltaChip(m.deltas.revenue, 'up');
+  const expenses = deltaChip(m.deltas.expenses, 'down');
+  const net = deltaChip(m.deltas.net, 'up');
   const pl = m.pl;
 
   const plData = m.series.map((p) => ({ label: p.label, income: p.revenue, expense: p.expenses }));
@@ -180,6 +173,7 @@ function Cards({ m, label }: { m: DashboardModel; label: string }) {
           </div>
         ) : (
           <BentoStat
+            valueClassName="text-xl sm:text-2xl"
             label="Cash position"
             value={rm(m.cashPosition)}
             onPrimary
@@ -189,6 +183,7 @@ function Cards({ m, label }: { m: DashboardModel; label: string }) {
       </BentoCard>
       <BentoCard className="col-span-1 md:col-span-3">
         <BentoStat
+          valueClassName="text-xl sm:text-2xl"
           label={`Revenue · ${label}`}
           value={rm(pl.totalIncome)}
           delta={revenue.delta}
@@ -198,6 +193,7 @@ function Cards({ m, label }: { m: DashboardModel; label: string }) {
       </BentoCard>
       <BentoCard className="col-span-1 md:col-span-3">
         <BentoStat
+          valueClassName="text-xl sm:text-2xl"
           label={`Expenses · ${label}`}
           value={rm(pl.totalExpenses)}
           delta={expenses.delta}
@@ -207,6 +203,7 @@ function Cards({ m, label }: { m: DashboardModel; label: string }) {
       </BentoCard>
       <BentoCard className="col-span-1 md:col-span-3">
         <BentoStat
+          valueClassName="text-xl sm:text-2xl"
           label={`Net profit · ${label}`}
           value={rm(pl.netProfit)}
           delta={net.delta}
@@ -218,7 +215,7 @@ function Cards({ m, label }: { m: DashboardModel; label: string }) {
       {/* Cash flow + expense breakdown */}
       <BentoCard
         title="Cash flow"
-        subtitle="Closing balance & net cash · last 8 months"
+        subtitle={`Closing balance & net cash · last ${TREND_MONTHS} months`}
         icon={TrendingUp}
         className="col-span-2 md:col-span-8"
       >
@@ -233,7 +230,7 @@ function Cards({ m, label }: { m: DashboardModel; label: string }) {
       </BentoCard>
 
       {/* P&L bars + profit-margin gauge */}
-      <BentoCard title="Profit & loss" subtitle="Income vs expense (RM) · last 8 months" icon={ChartColumn} className="col-span-2 md:col-span-8">
+      <BentoCard title="Profit & loss" subtitle={`Income vs expense (RM) · last ${TREND_MONTHS} months`} icon={ChartColumn} className="col-span-2 md:col-span-8">
         <BarGroup data={plData} series={PL_SERIES} height={240} showLegend />
       </BentoCard>
       <BentoCard title="Profit margin" subtitle={`Net profit of revenue · ${label}`} icon={Gauge} className="col-span-2 md:col-span-4">

@@ -11,9 +11,9 @@ vi.mock('@/lib/supabase/server', () => ({
 }));
 vi.mock('@/lib/ai/access', () => ({ isLiveChatAllowed: () => true }));
 vi.mock('@/lib/auth/viewer', () => ({ getViewer: async () => ({ orgId: 'org' }) }));
-vi.mock('@/lib/finance/view-helpers', async (importOriginal) => ({
+vi.mock('@/lib/people/dates', async (importOriginal) => ({
   ...(await importOriginal<object>()),
-  todayUtc: () => '2026-10-23',
+  todayInMalaysia: () => '2026-10-23',
 }));
 vi.mock('@/lib/finance/invoices', async (importOriginal) => ({
   ...(await importOriginal<object>()),
@@ -52,7 +52,7 @@ describe('Bendahara Overview (live)', () => {
   it('fills the cash balance, collection rate and the not-yet cards', async () => {
     state.inputs = async () => inputs;
     const html = await render();
-    expect(html).toContain('RM 1,234.50');
+    expect(html).toContain('RM 2,233.50');
     expect(html).toContain('GAUGE 75%');
     expect(html).toContain('Paid of invoiced, last 90 days');
     expect(html).toContain('Nothing records when a customer opens an invoice yet.');

@@ -140,6 +140,7 @@ export function BentoStat({
   chart,
   onPrimary = false,
   className,
+  valueClassName,
 }: {
   label: ReactNode;
   value: ReactNode;
@@ -148,6 +149,8 @@ export function BentoStat({
   chart?: ReactNode;
   onPrimary?: boolean;
   className?: string;
+  /** Opt-in: extra classes for the figure, e.g. a smaller size in a narrow card. */
+  valueClassName?: string;
 }) {
   const deltaClass = onPrimary
     ? 'bg-primary-foreground/15 text-primary-foreground'
@@ -168,7 +171,7 @@ export function BentoStat({
       </p>
       {/* A figure and its chip never break inside themselves; in a narrow card the chip drops below the figure. */}
       <div className="mt-1 flex flex-wrap items-baseline gap-x-2 gap-y-1">
-        <span className="text-2xl font-bold tracking-tight whitespace-nowrap tabular-nums">{value}</span>
+        <span className={cn('text-2xl font-bold tracking-tight whitespace-nowrap tabular-nums', valueClassName)}>{value}</span>
         {delta != null ? (
           <span
             className={cn(

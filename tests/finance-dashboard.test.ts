@@ -5,6 +5,7 @@ import type { BankAccountRow, BankTransactionRow } from '@/lib/finance/banking';
 import {
   buildDashboardModel,
   collectionRate,
+  deltaChip,
   parseDashboardPeriod,
   percentChange,
   previousPeriod,
@@ -121,21 +122,30 @@ describe('buildDashboardModel', () => {
     expect(model.deltas.revenue).toBeNull();
   });
 
-  it('uses ringgit for foreign accounts and leaves out inactive ones', () => {
+  it('uses ringgit for foreign accounts; cash counts every account like Banking, and an archived zero one is not listed', () => {
     const model = buildDashboardModel(
       {
         ...empty,
         bankAccounts: [
           bankAccount({ id: 'usd', balance: 1000, balance_myr: 4700, active: true }),
           bankAccount({ id: 'old', balance: 99, balance_myr: 99, active: false }),
+          bankAccount({ id: 'zero', balance: 0, balance_myr: 0, active: false }),
         ],
       },
       TODAY,
       'this_month',
     );
-    expect(model.cashPosition).toBe(4700);
-    expect(model.bankAccounts?.map((a) => a.id)).toEqual(['usd']);
+    expect(model.cashPosition).toBe(4799);
+    expect(model.bankAccounts?.map((a) => a.id)).toEqual(['usd', 'old']);
     expect(model.bankAccounts?.[0].balance).toBe(4700);
+  });
+
+  it('formats a delta chip: none without a comparison, flat and a true minus sign', () => {
+    expect(deltaChip(null, 'up')).toEqual({ delta: undefined, tone: 'flat' });
+    expect(deltaChip(0, 'up')).toEqual({ delta: '0%', tone: 'flat' });
+    expect(deltaChip(12, 'up')).toEqual({ delta: '+12%', tone: 'up' });
+    expect(deltaChip(-5, 'up')).toEqual({ delta: '−5%', tone: 'down' });
+    expect(deltaChip(-5, 'down')).toEqual({ delta: '−5%', tone: 'up' });
   });
 
   it('recentCash drops transfers and drafts, orders, and caps at 8', () => {
