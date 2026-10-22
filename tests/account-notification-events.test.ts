@@ -41,7 +41,7 @@ describe('the manager notification events', () => {
 });
 
 // The two Lekiu roster events the database passes to private.deliver_notification
-// (20261125090300_people_roster_notify_swaps.sql).
+// (20261125090400_people_roster_notify_swaps.sql).
 describe('the roster and shift swap notification events', () => {
   const ROSTER = 'hr_roster_changed';
   const SWAP = 'hr_shift_swap';

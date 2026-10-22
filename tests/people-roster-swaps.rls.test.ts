@@ -1,6 +1,6 @@
 /**
  * Live test of roster notifications and shift swaps, against the real database. It needs
- * 20261125090300_people_roster_notify_swaps.sql applied; until then it fails. Skipped without Supabase env vars.
+ * 20261125090400_people_roster_notify_swaps.sql applied; until then it fails. Skipped without Supabase env vars.
  * Not run by the agent that wrote it.
  *
  * One workspace: an owner, a manager, and two members (alpha and bravo) who report to the manager. The owner

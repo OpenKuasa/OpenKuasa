@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
 
 const DIR = join(process.cwd(), 'supabase/migrations');
-const FILE = '20261125090300_people_roster_notify_swaps.sql';
+const FILE = '20261125090400_people_roster_notify_swaps.sql';
 const ROSTERS = '20261124140000_people_rosters_and_hours.sql';
 const REPORTING = '20261115133700_people_reporting_lines.sql';
 
