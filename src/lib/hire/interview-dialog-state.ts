@@ -339,8 +339,6 @@ export function keepChosen(options: PickerOption[], chosen: PickerApplication | 
   return [{ id: chosen.id, label: pickerLabel(chosen) }, ...options];
 }
 
-/** How many applications the server sends for one search. */
-export const SERVER_PICKER_MAX = 50;
 export const PICKER_SEARCHING = 'Searching all applications…';
 export const PICKER_SEARCH_FAILED = 'The search could not be finished, so only the newest 1,000 applications were searched.';
 export const PICKER_SERVER_MORE = 'More match than are shown. Type more of the name or job.';
