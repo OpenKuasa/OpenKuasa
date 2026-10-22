@@ -47,7 +47,7 @@ const JOB = '55555555-5555-4555-8555-555555555555';
 const FORBIDDEN = { ok: false, error: 'You do not have permission to make changes here.' };
 const EVERY_PATH = [
   '/hire/jobs', '/hire/careers-page', '/hire/assistant', '/hire/dashboard', '/hire/applications', '/hire/candidates',
-  '/hire/interviews', '/hire/talent-pool',
+  '/hire/interviews', '/hire/settings', '/hire/talent-pool',
 ];
 const CHANGED = { ok: true, data: { id: ID, name: 'Aina Rahman', from: 'none', to: 'available', message: 'Added Aina Rahman to the talent pool as Available.' } };
 const person = (id: string, pool_status: string, over: Record<string, unknown> = {}) => ({

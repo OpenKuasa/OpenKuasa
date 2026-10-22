@@ -36,7 +36,7 @@ const ID = '44444444-4444-4444-8444-444444444444';
 const FORBIDDEN = { ok: false, error: 'You do not have permission to make changes here.' };
 const EVERY_PATH = [
   '/hire/jobs', '/hire/careers-page', '/hire/assistant', '/hire/dashboard', '/hire/applications', '/hire/candidates',
-  '/hire/interviews', '/hire/talent-pool',
+  '/hire/interviews', '/hire/settings', '/hire/talent-pool',
 ];
 const DELETED = { ok: true, data: { id: ID, name: 'Aina Rahman', job: null, applications: 2, interviews: 0, cv_files: 1, message: 'Deleted Aina Rahman, with 2 applications and 1 CV file.' } };
 

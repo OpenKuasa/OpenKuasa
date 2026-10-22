@@ -70,6 +70,8 @@ const JOB_PATHS = [
   '/hire/applications',
   '/hire/candidates',
   '/hire/interviews',
+  // Settings shows the live count in each stage and the careers page's job count.
+  '/hire/settings',
 ];
 
 /**
@@ -121,7 +123,7 @@ export async function rateApplicationAction(input: unknown) {
   return run((ctx) => rateApplication(ctx, input as never));
 }
 
-/** The careers page is its own thing: it does not change what the job screens show. */
+/** The careers page is its own thing: it does not change what the job screens show, only Settings' careers card. */
 export async function updateCareersPageAction(input: unknown) {
   const ctx = await writeCtx();
   if (!ctx) return FORBIDDEN;
@@ -129,6 +131,7 @@ export async function updateCareersPageAction(input: unknown) {
   if (result.ok) {
     revalidatePath('/hire/careers-page');
     revalidatePath('/hire/assistant');
+    revalidatePath('/hire/settings');
     // The public pages render on every request, so this is not needed today. It is cheap, and it keeps the
     // board right if the pages are ever cached. A literal path takes no `type`.
     revalidatePath(careersPath(ctx.orgId));

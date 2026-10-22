@@ -66,7 +66,7 @@ const SEEN = '2026-10-12T02:15:00.123456+00:00';
 const FORBIDDEN = { ok: false, error: 'You do not have permission to make changes here.' };
 const EVERY_PATH = [
   '/hire/jobs', '/hire/careers-page', '/hire/assistant', '/hire/dashboard', '/hire/applications', '/hire/candidates',
-  '/hire/interviews', '/hire/talent-pool',
+  '/hire/interviews', '/hire/settings', '/hire/talent-pool',
 ];
 const SAVED = {
   ok: true,

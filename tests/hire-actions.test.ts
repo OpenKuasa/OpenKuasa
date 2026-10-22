@@ -56,6 +56,7 @@ describe('hire job actions', () => {
       '/hire/dashboard',
       '/hire/interviews',
       '/hire/jobs',
+      '/hire/settings',
     ]);
   });
   it('allows an owner and an admin who are not demo visitors', async () => {
@@ -101,7 +102,7 @@ describe('updateCareersPageAction', () => {
     expect(ctl.calls).toHaveLength(1);
     expect(ctl.calls[0]).toMatchObject({ fn: 'updateCareersPage', ctx: { orgId: 'org1', client: { marker: 'client' } } });
     expect(ctl.calls[0].input).toEqual(sent);
-    expect(ctl.revalidated).toEqual(['/hire/careers-page', '/hire/assistant', '/careers/org1']);
+    expect(ctl.revalidated).toEqual(['/hire/careers-page', '/hire/assistant', '/hire/settings', '/careers/org1']);
     expect(ctl.types[2]).toBeUndefined();
   });
   it('refreshes nothing when the change was refused', async () => {
@@ -141,7 +142,7 @@ describe('updateApplicationFormAction', () => {
 describe('application change actions', () => {
   const APP = '44444444-4444-4444-8444-444444444444';
   const HIRING_SCREENS = [
-    '/hire/applications', '/hire/assistant', '/hire/candidates', '/hire/careers-page', '/hire/dashboard', '/hire/interviews', '/hire/jobs',
+    '/hire/applications', '/hire/assistant', '/hire/candidates', '/hire/careers-page', '/hire/dashboard', '/hire/interviews', '/hire/jobs', '/hire/settings',
   ];
   const each: [string, string, (input: unknown) => Promise<unknown>, Record<string, unknown>][] = [
     ['moveApplicationAction', 'moveApplication', (input) => moveApplicationAction(input), { id: APP, stage: 'offer' }],

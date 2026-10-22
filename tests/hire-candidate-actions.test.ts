@@ -101,7 +101,7 @@ const REFUSED_VIEWERS = [
 ];
 const SCREENS = [
   '/hire/applications', '/hire/assistant', '/hire/candidates', '/hire/careers-page', '/hire/dashboard',
-  '/hire/interviews', '/hire/jobs', '/hire/talent-pool',
+  '/hire/interviews', '/hire/jobs', '/hire/settings', '/hire/talent-pool',
 ];
 const NAME = 'Zulaikha Binti Osman';
 const EMAIL = 'zulaikha.osman@example.com';
