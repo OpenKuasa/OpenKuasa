@@ -24,6 +24,7 @@ const KINDS: { key: keyof WaitingCounts; label: string; href: string }[] = [
   { key: 'claims', label: 'Financial Claims', href: '/people/approve-claims' },
   { key: 'overtime', label: 'Overtime', href: '/people/approve-overtime' },
   { key: 'time_off', label: 'Time-Off', href: '/people/approve-time-off' },
+  { key: 'swaps', label: 'Shift Swaps', href: '/people/approve-shift-swaps' },
 ];
 
 /** Whether the dashboard reads anything for the team card. */
@@ -56,14 +57,24 @@ export function buildTeamSection(input: {
   };
 }
 
-/** Pending requests from the viewer's direct reports, counted from rows already read. */
+/**
+ * Pending requests from the viewer's direct reports, counted from rows already read. Shift swaps are not among the
+ * rows read here, so for an owner or admin with a team the card leaves them out (they have their own badge).
+ */
 export function waitingFromReports(
   rows: { leave: LeaveRequest[]; timeOff: TimeOffRequest[]; claims: Claim[]; overtime: OvertimeRecord[] },
   ids: Set<string>,
 ): WaitingCounts {
   const count = (list: { employee_id: string; status: string }[]) =>
     list.filter((r) => r.status === 'pending' && ids.has(r.employee_id)).length;
-  return { leave: count(rows.leave), time_off: count(rows.timeOff), claims: count(rows.claims), overtime: count(rows.overtime) };
+  return {
+    leave: count(rows.leave),
+    time_off: count(rows.timeOff),
+    claims: count(rows.claims),
+    overtime: count(rows.overtime),
+    swaps: 0,
+    swap_replies: 0,
+  };
 }
 
 /**
