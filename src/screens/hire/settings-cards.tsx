@@ -102,8 +102,8 @@ export function CareersBoardCard({ board, failed }: { board: SettingsModel['boar
           )}
           {board.hiddenOpen > 0 ? (
             <p className={NOTE}>
-              {plural(board.hiddenOpen, 'open job has', 'open jobs have')} no description, so the page leaves{' '}
-              {board.hiddenOpen === 1 ? 'it' : 'them'} out.
+              {plural(board.hiddenOpen, 'open job has', 'open jobs have')} no description, so the page{' '}
+              {board.enabled ? 'leaves' : 'would leave'} {board.hiddenOpen === 1 ? 'it' : 'them'} out.
             </p>
           ) : null}
           <div className="flex flex-wrap gap-x-4">
@@ -146,7 +146,9 @@ function whoMayChange(): string {
 }
 
 export function HiringTeamCard({ team, demo }: { team: TeamMember[] | null; demo: boolean }) {
-  const shown = team?.slice(0, TEAM_SHOWN) ?? [];
+  // You first, so a long list never folds you into "and N more"; the rest keep the order they joined in.
+  const ordered = team ? [...team.filter((m) => m.isYou), ...team.filter((m) => !m.isYou)] : [];
+  const shown = ordered.slice(0, TEAM_SHOWN);
   const more = (team?.length ?? 0) - shown.length;
   return (
     <SettingsCard title="Hiring team" subtitle="Everyone in your workspace" icon={Users}>

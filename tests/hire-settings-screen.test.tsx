@@ -85,7 +85,7 @@ describe('the screen', () => {
 
   it('says the careers page is on, how many jobs it shows, and links to it and to its screen', async () => {
     const html = await render();
-    expect(words(html)).toContain('On');
+    expect(html).toMatch(/>On<\/span>/);
     expect(words(html)).toContain('4 jobs are showing on it.');
     expect(html).toMatch(/<a [^>]*href="\/careers\/o1"[^>]*>View the public page<\/a>/);
     expect(html).toMatch(/<a [^>]*href="\/hire\/careers-page"[^>]*>Manage careers page<\/a>/);
@@ -98,10 +98,15 @@ describe('the screen', () => {
     expect(text).toContain('2 open jobs have no description, so the page leaves them out.');
   });
 
+  it('says the same jobs would be left out while the page is off', async () => {
+    mocks.loadHire.mockResolvedValue({ model: model({ enabled: false, listed: 0, hiddenOpen: 1 }), isDemo: false });
+    expect(words(await render())).toContain('1 open job has no description, so the page would leave it out.');
+  });
+
   it('says the careers page is off and offers no public link then', async () => {
     mocks.loadHire.mockResolvedValue({ model: model({ enabled: false }), isDemo: false });
     const html = await render();
-    expect(words(html)).toContain('Off');
+    expect(html).toMatch(/>Off<\/span>/);
     expect(words(html)).toContain('No one outside your workspace can see it.');
     expect(html).not.toContain('href="/careers/o1"');
   });
@@ -121,8 +126,29 @@ describe('the screen', () => {
     );
     const text = words(await render());
     expect(text).toContain('Person 8');
-    expect(text).not.toContain('Person 9 ');
+    expect(text).not.toMatch(/Person 9\b/);
     expect(text).toContain('and 3 more');
+  });
+
+  it('always lists you, even when you joined after the first eight', async () => {
+    mocks.getTeam.mockResolvedValue(
+      Array.from({ length: 11 }, (_, i) => member({ userId: `u${i}`, name: `Person ${i + 1}`, isYou: i === 10 })),
+    );
+    const text = words(await render());
+    expect(text).toMatch(/^.*Hiring team.*Person 11 \(you\).*and 3 more/);
+    expect(text).not.toMatch(/Person 8\b/);
+  });
+
+  it('lets each card title and subtitle wrap instead of being cut off, and gives every link 44 pixels', async () => {
+    const html = await render();
+    const wraps = (text: string) =>
+      new RegExp(`<[a-z]+[^>]*class="[^"]*\\bwhitespace-normal\\b[^"]*"[^>]*>${text}</`).test(html);
+    for (const t of ['Hiring pipeline', 'Stages candidates move through', 'Careers page', 'Your own public job board', 'Hiring team', 'Everyone in your workspace']) {
+      expect(wraps(t), t).toBe(true);
+    }
+    const links = html.match(/<a\b[^>]*>/g) ?? [];
+    expect(links.length).toBe(4);
+    for (const tag of links) expect(tag).toContain('min-h-11');
   });
 
   it('says so on the team card alone when the team cannot be read', async () => {
