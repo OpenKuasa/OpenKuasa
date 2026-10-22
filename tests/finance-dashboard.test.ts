@@ -14,7 +14,7 @@ import {
 } from '@/lib/finance/dashboard';
 import type { InvoiceListRow } from '@/lib/finance/invoices';
 import type { LedgerAccount, LedgerLine } from '@/lib/finance/ledger';
-import { aged, monthlyTotals, periodFor, profitAndLoss } from '@/lib/finance/reports';
+import { aged, cashFlow, cashMovements, monthlyTotals, periodFor, profitAndLoss } from '@/lib/finance/reports';
 
 const TODAY = '2026-10-23';
 
@@ -72,9 +72,11 @@ describe('parseDashboardPeriod', () => {
 });
 
 describe('previousPeriod', () => {
-  it('is the same length, ending the month before', () => {
-    expect(previousPeriod({ from: '2026-07', to: '2026-09' })).toEqual({ from: '2026-04', to: '2026-06' });
-    expect(previousPeriod({ from: '2026-01', to: '2026-01' })).toEqual({ from: '2025-12', to: '2025-12' });
+  it('moves the whole period back one unit of its key', () => {
+    expect(previousPeriod({ from: '2026-10', to: '2026-10' }, 'this_month')).toEqual({ from: '2026-09', to: '2026-09' });
+    expect(previousPeriod({ from: '2026-10', to: '2026-10' }, 'this_quarter')).toEqual({ from: '2026-07', to: '2026-07' });
+    expect(previousPeriod({ from: '2026-01', to: '2026-10' }, 'this_year')).toEqual({ from: '2025-01', to: '2025-10' });
+    expect(previousPeriod({ from: '2026-01', to: '2026-01' }, 'this_month')).toEqual({ from: '2025-12', to: '2025-12' });
   });
 });
 
@@ -168,7 +170,50 @@ describe('buildDashboardModel', () => {
     expect(model.isEmpty).toBe(true);
     expect(model.pl.margin).toBeNull();
     expect(model.cashPosition).toBe(0);
-    expect(JSON.stringify(model)).not.toContain('NaN');
+    const nulls: string[] = [];
+    const walk = (value: unknown, path: string) => {
+      if (typeof value === 'number') expect(Number.isFinite(value), path).toBe(true);
+      else if (value === null) nulls.push(path);
+      else if (typeof value === 'object') for (const [k, v] of Object.entries(value)) walk(v, `${path}.${k}`);
+    };
+    walk(model, 'model');
+    // The only nulls an empty workspace may show are the declared ones: no margin, nothing to compare to.
+    expect(nulls.sort()).toEqual(
+      ['model.deltas.expenses', 'model.deltas.net', 'model.deltas.revenue', 'model.pl.margin'].sort(),
+    );
+  });
+
+  it('delta is a whole percent when the previous period has money', () => {
+    const accounts = [{ id: 'rev', code: '4000', name: 'Sales', type: 'income', stands_for: 'system' }] as LedgerAccount[];
+    const line = (entry_date: string, credit: number): LedgerLine => ({
+      entry_key: entry_date, entry_date, source: 'journal', source_id: 's', source_no: null, description: 'x', account_id: 'rev', debit: 0, credit,
+    });
+    const model = buildDashboardModel(
+      { ...empty, lines: [line('2026-09-10', 100), line('2026-10-05', 110)], accounts },
+      TODAY,
+      'this_month',
+    );
+    expect(model.deltas.revenue).toBe(10);
+  });
+
+  it('cashTrend closing agrees with Reports', () => {
+    const model = buildDashboardModel(inputs, TODAY, 'this_month');
+    const movements = cashMovements(SAMPLE_LEDGER_LINES, SAMPLE_LEDGER_ACCOUNTS);
+    const withMoves = model.series.filter((p) => movements.some((m) => m.month === p.month));
+    expect(withMoves.length).toBeGreaterThan(0);
+    for (const p of withMoves) {
+      const i = model.series.indexOf(p);
+      const flow = cashFlow(movements, { from: p.month, to: p.month });
+      expect(model.cashTrend[i].balance).toBe(flow.closing);
+      expect(model.cashTrend[i].net).toBe(flow.net);
+    }
+  });
+
+  it('isEmpty is true only when every read succeeded and all are empty', () => {
+    expect(buildDashboardModel(empty, TODAY, 'this_month').isEmpty).toBe(true);
+    expect(buildDashboardModel({ ...empty, bankAccounts: null }, TODAY, 'this_month').isEmpty).toBe(false);
+    expect(buildDashboardModel({ ...empty, receivables: null }, TODAY, 'this_month').isEmpty).toBe(false);
+    expect(buildDashboardModel({ ...empty, payables: null }, TODAY, 'this_month').isEmpty).toBe(false);
   });
 
   it('failed reads stay null', () => {
@@ -210,6 +255,15 @@ describe('collectionRate', () => {
       invoice({ invoice_date: '2026-06-01', total_myr: 9000, paid_myr: 9000 }),
     ];
     expect(collectionRate(rows, TODAY)).toBe(25);
+  });
+  it('counts 89 days back, not 90, and leaves out voids', () => {
+    const rows = [
+      invoice({ invoice_date: '2026-07-25', total_myr: 1000, paid_myr: 1000 }),
+      invoice({ invoice_date: '2026-07-26', total_myr: 1000, paid_myr: 0 }),
+      invoice({ display_status: 'void', total_myr: 1000, paid_myr: 1000 }),
+    ];
+    expect(collectionRate(rows, TODAY)).toBe(0);
+    expect(collectionRate([rows[0]], TODAY)).toBeNull();
   });
   it('is null with nothing to collect', () => {
     expect(collectionRate([], TODAY)).toBeNull();

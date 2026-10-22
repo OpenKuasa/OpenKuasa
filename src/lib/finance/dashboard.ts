@@ -56,11 +56,16 @@ const fromSen = (sen: number) => sen / 100;
 const monthNumber = (month: Month) => Number(month.slice(0, 4)) * 12 + (Number(month.slice(5, 7)) - 1);
 const monthAt = (n: number): Month => `${String(Math.floor(n / 12)).padStart(4, '0')}-${String((n % 12) + 1).padStart(2, '0')}`;
 
-/** The period just before this one, the same number of months long and ending the month before it starts. */
-export function previousPeriod(period: Period): Period {
-  const length = monthNumber(period.to) - monthNumber(period.from) + 1;
-  const start = monthNumber(period.from);
-  return { from: monthAt(start - length), to: monthAt(start - 1) };
+const UNIT_MONTHS: Record<DashboardPeriodKey, number> = { this_month: 1, this_quarter: 3, this_year: 12 };
+
+/**
+ * The period to compare with: the whole period moved back one unit of its key (a month, a quarter or a year),
+ * keeping its length. So a quarter to date is compared with the same stretch of the quarter before, and a year to
+ * date with the same months of last year.
+ */
+export function previousPeriod(period: Period, key: DashboardPeriodKey): Period {
+  const back = UNIT_MONTHS[key];
+  return { from: monthAt(monthNumber(period.from) - back), to: monthAt(monthNumber(period.to) - back) };
 }
 
 /** The months the trend charts draw: TREND_MONTHS of them, ending with today's month. */
@@ -119,13 +124,13 @@ export function buildDashboardModel(inputs: DashboardInputs, today: string, peri
   const { totals } = monthlyTotals(inputs.lines);
   const period = periodFor(periodKey, today, totals);
   const pl = profitAndLoss(inputs.accounts, totals, period);
-  const before = profitAndLoss(inputs.accounts, totals, previousPeriod(period));
+  const before = profitAndLoss(inputs.accounts, totals, previousPeriod(period, periodKey));
 
   const series = monthlySeries(inputs.accounts, totals, trendPeriod(today));
   const movements = cashMovements(inputs.lines, inputs.accounts);
   const cashTrend = series.map((point) => {
     const flow = cashFlow(movements, { from: point.month, to: point.month });
-    return { label: point.label, balance: flow.closing, net: fromSen(toSen(flow.totalIn) - toSen(flow.totalOut)) };
+    return { label: point.label, balance: flow.closing, net: flow.net };
   });
 
   const active = inputs.bankAccounts === null ? null : inputs.bankAccounts.filter((a) => a.active);
@@ -167,11 +172,12 @@ export function buildDashboardModel(inputs: DashboardInputs, today: string, peri
     receivable: inputs.receivables === null ? null : aged(inputs.receivables, today),
     payable: inputs.payables === null ? null : aged(inputs.payables, today),
     recentCash,
+    // A read that failed is not an empty one: only a clean read of nothing counts.
     isEmpty:
       inputs.lines.length === 0 &&
-      (inputs.bankAccounts?.length ?? 0) === 0 &&
-      (inputs.receivables?.length ?? 0) === 0 &&
-      (inputs.payables?.length ?? 0) === 0,
+      inputs.bankAccounts?.length === 0 &&
+      inputs.receivables?.length === 0 &&
+      inputs.payables?.length === 0,
   };
 }
 
