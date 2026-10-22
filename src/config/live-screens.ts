@@ -113,6 +113,8 @@ export const LIVE_SCREENS: ReadonlySet<string> = new Set([
   'finance/reports',
   // SST settings are live (#222 stage 1); the return below them is still sample until stage 2.
   'finance/sst-report',
+  // Reads the finance rows of the activity log (2026-10-23); history starts on the go-live date.
+  'finance/audit-trail',
 ]);
 
 /** Whether the app path is a screen that is not connected to live data yet. */

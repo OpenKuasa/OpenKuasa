@@ -54,6 +54,10 @@ describe('live screens', () => {
     expect(isSampleScreen('/finance/assistant')).toBe(false);
   });
 
+  it('counts the Bendahara Audit Trail as live', () => {
+    expect(isSampleScreen('/finance/audit-trail')).toBe(false);
+  });
+
   it('counts FX Revaluation as live', () => {
     expect(isSampleScreen('/finance/fx-revaluation')).toBe(false);
   });
