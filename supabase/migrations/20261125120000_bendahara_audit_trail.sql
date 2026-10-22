@@ -13,11 +13,17 @@
 --      settings. They run after every BEFORE guard has passed, so a refused change logs nothing.
 --   4. private.finance_journal_log (20261108093000), private.finance_purchase_order_log (20261106090000, its only
 --      definition) and public.finance_post_fx_revaluation (20261123100000) are restated from their newest text, with
---      only their activity rows changed to go through private.finance_log with the entity fields; the journals'
---      trigger also fires on DELETE now, for a deleted draft.
+--      only their activity rows changed to go through private.finance_log with the entity fields.
+--      The journals' trigger finance_journal_log is recreated under the same name and now fires on DELETE as well
+--      as UPDATE, so a deleted draft journal is logged ("Deleted a draft journal").
+--   5. A closing block checks the new triggers are in place and that nobody but the owner may call
+--      private.finance_log.
 --
 -- It adds no behaviour beyond logging: every trigger returns null after an AFTER event and nothing it writes is read
 -- by a guard. Safe to run once (it creates the triggers and the helper; a second run fails on them).
+
+-- Fail fast instead of queueing behind a long transaction and stalling sign-ins.
+set local lock_timeout = '5s';
 
 -- ============================================================================
 -- 1. activity_log: the entity and its details
@@ -207,6 +213,8 @@ declare
   what text;
   ev text;
   party text;
+  tot numeric;
+  tot_myr numeric;
 begin
   if (select auth.uid()) is null then
     return null;
@@ -227,8 +235,12 @@ begin
   end if;
 
   select c.name into party from public.finance_contacts c where c.org_id = r.org_id and c.id = r.supplier_id;
+  if ev <> 'deleted' then
+    select t.total, t.total_myr into tot, tot_myr from public.supplier_bill_totals t where t.org_id = r.org_id and t.id = r.id;
+  end if;
   perform private.finance_log(r.org_id, 'finance_supplier_bill', r.id, what, coalesce(r.bill_no, party, 'a draft'),
-    jsonb_strip_nulls(jsonb_build_object('event', ev, 'number', r.bill_no, 'party', party, 'date', r.bill_date)));
+    jsonb_strip_nulls(jsonb_build_object('event', ev, 'number', r.bill_no, 'party', party, 'date', r.bill_date,
+      'amount', tot, 'currency', r.currency, 'amount_myr', tot_myr)));
   return null;
 end $$;
 revoke all on function private.finance_supplier_bills_audit() from public, anon, authenticated, service_role;
@@ -277,7 +289,8 @@ create trigger finance_supplier_credit_notes_audit
 
 -- ---- payments and transfers -------------------------------------------------------------------------------------
 -- A payment (transfer_id null) logs: recorded (written posted, or posted from draft or pending approval), paid
--- (scheduled to posted), submitted (written or moved to pending approval), approved (pending approval to scheduled),
+-- (scheduled to posted), submitted (written or moved to pending approval), approved (written scheduled, or moved to
+-- scheduled from draft or pending approval: an owner or admin scheduling a payment approves it),
 -- rejected, voided, and the delete of one that was never posted. Most RPCs write a draft and post it in the same
 -- call; either way it is one "recorded".
 -- A transfer is two rows sharing transfer_id; only its 'out' row logs, so a transfer is one row: recorded, voided.
@@ -330,7 +343,7 @@ begin
     what := 'Marked a payment paid'; ev := 'paid';
   elsif r.status = 'pending_approval' then
     what := 'Submitted a payment for approval'; ev := 'submitted';
-  elsif r.status = 'scheduled' and prior = 'pending_approval' then
+  elsif r.status = 'scheduled' and (tg_op = 'INSERT' or prior in ('draft', 'pending_approval')) then
     what := 'Approved a payment'; ev := 'approved';
   elsif r.status = 'rejected' then
     what := 'Rejected a payment'; ev := 'rejected';
@@ -790,3 +803,49 @@ begin
 end $$;
 revoke all on function public.finance_post_fx_revaluation(uuid, jsonb) from public, anon, service_role;
 grant execute on function public.finance_post_fx_revaluation(uuid, jsonb) to authenticated;
+
+-- ============================================================================
+-- 5. closing check: the triggers are in place, on, and fire on what they should; the writer is the owner's alone
+-- ============================================================================
+do $$
+declare
+  r record;
+  got text;
+begin
+  for r in
+    select * from (values
+      ('public.finance_invoices', 'finance_invoices_audit', 'update,delete'),
+      ('public.finance_quotations', 'finance_quotations_audit', 'update,delete'),
+      ('public.finance_credit_notes', 'finance_credit_notes_audit', 'update,delete'),
+      ('public.supplier_bills', 'finance_supplier_bills_audit', 'update,delete'),
+      ('public.finance_supplier_credit_notes', 'finance_supplier_credit_notes_audit', 'update,delete'),
+      ('public.finance_transactions', 'finance_transactions_audit', 'insert,update,delete'),
+      ('public.finance_expenses', 'finance_expenses_audit', 'update,delete'),
+      ('public.finance_contras', 'finance_contras_audit', 'update,delete'),
+      ('public.finance_journals', 'finance_journal_log', 'update,delete'),
+      ('public.finance_purchase_orders', 'finance_purchase_order_log', 'update'),
+      ('public.finance_sst_returns', 'finance_sst_returns_audit', 'insert,delete'),
+      ('public.finance_sst_return_figures', 'finance_sst_return_figures_audit', 'insert,update'),
+      ('public.finance_sst_settings', 'finance_sst_settings_audit', 'insert,update')
+    ) as v(tbl, trg, events)
+  loop
+    -- tgtype bits: 1 row, 2 before, 4 insert, 8 delete, 16 update.
+    select concat_ws(',',
+             case when g.tgtype & 4 = 4 then 'insert' end,
+             case when g.tgtype & 16 = 16 then 'update' end,
+             case when g.tgtype & 8 = 8 then 'delete' end)
+           || case when g.tgtype & 1 = 1 and g.tgtype & 2 = 0 and g.tgenabled = 'O' then '' else ' (not an enabled AFTER ROW trigger)' end
+      into got
+      from pg_catalog.pg_trigger g
+     where g.tgrelid = r.tbl::regclass and g.tgname = r.trg and not g.tgisinternal;
+    if got is distinct from r.events then
+      raise exception 'trigger % on % is %, not %', r.trg, r.tbl, coalesce(got, 'missing'), r.events;
+    end if;
+  end loop;
+
+  if has_function_privilege('anon', 'private.finance_log(uuid, text, uuid, text, text, jsonb)', 'execute')
+     or has_function_privilege('authenticated', 'private.finance_log(uuid, text, uuid, text, text, jsonb)', 'execute')
+     or has_function_privilege('service_role', 'private.finance_log(uuid, text, uuid, text, text, jsonb)', 'execute') then
+    raise exception 'anon, authenticated or service_role may call private.finance_log';
+  end if;
+end $$;

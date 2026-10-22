@@ -34,7 +34,7 @@ declare
   i1 uuid; i2 uuid; i3 uuid; ic uuid; iusd uuid;
   q1 uuid; q2 uuid;
   cn1 uuid; cn2 uuid;
-  b1 uuid; b2 uuid; b3 uuid; bc uuid;
+  b1 uuid; b2 uuid; b3 uuid; bc uuid; busd uuid; p_sched uuid;
   sc1 uuid; sc2 uuid;
   p_in uuid; p_out uuid; v1 uuid; v2 uuid; v3 uuid; tr uuid; tr_out uuid;
   e1 uuid; e2 uuid; e3 uuid;
@@ -132,7 +132,7 @@ begin
   insert into public.finance_contacts (org_id, name, is_customer) values (org, 'Pelanggan Sdn Bhd', true) returning id into cust;
   insert into public.finance_contacts (org_id, name, is_supplier) values (org, 'Pembekal Sdn Bhd', true) returning id into sup;
   insert into public.finance_contacts (org_id, name, is_customer, is_supplier) values (org, 'Dua Hala Sdn Bhd', true, true) returning id into both_c;
-  insert into public.finance_contacts (org_id, name, is_customer) values (org, 'Abroad Inc', true) returning id into usd_c;
+  insert into public.finance_contacts (org_id, name, is_customer, is_supplier) values (org, 'Abroad Inc', true, true) returning id into usd_c;
   select id into bank from public.finance_accounts where org_id = org and kind = 'bank' order by created_at limit 1;
   select id into till from public.finance_accounts where org_id = org and kind = 'cash' order by created_at limit 1;
   select id into rent from public.finance_ledger_accounts where org_id = org and code = '6000';
@@ -191,6 +191,12 @@ begin
   b3 := public.finance_save_bill(org, jsonb_build_object('supplier_id', sup, 'bill_date', current_date, 'due_date', current_date + 30), one_line);
   no := public.finance_post_bill(org, b3);
   expected := expected || jsonb_build_object('t', 'finance_supplier_bill', 'id', b3, 'e', 'posted', 'a', 'Posted a supplier bill', 'g', no);
+  -- A bill in another currency (1999, a typed rate): its details carry USD and the ringgit total.
+  busd := public.finance_save_bill(org, jsonb_build_object('supplier_id', usd_c, 'bill_date', '1999-01-12', 'due_date', '1999-02-12',
+    'currency', 'USD', 'fx_rate', '4.2', 'fx_rate_source', 'manual', 'fx_rate_provider', 'reuters'),
+    '[{"description":"M","quantity":1,"unit_price":500,"sst_rate":0}]');
+  no := public.finance_post_bill(org, busd);
+  expected := expected || jsonb_build_object('t', 'finance_supplier_bill', 'id', busd, 'e', 'posted', 'a', 'Posted a supplier bill', 'g', no);
 
   -- ==== supplier credit notes: issued, voided, a draft deleted ==================================================
   sc1 := public.finance_save_supplier_credit_note(org, jsonb_build_object('bill_id', b3, 'amount', 10));
@@ -218,6 +224,16 @@ begin
     expected := expected || jsonb_build_object('t', 'finance_payment', 'id', p_out, 'e', 'recorded', 'a', 'Recorded money out', 'g', r.number);
   else
     fails := fails || format('setup: a payment out is %s, not posted', r.status);
+  end if;
+  -- An owner schedules a payment out straight from Payments Out: scheduling it is approving it.
+  p_sched := public.finance_record_payment_out(org, jsonb_build_object('account_id', bank, 'method', 'fpx', 'status', 'scheduled'),
+    jsonb_build_array(jsonb_build_object('bill_id', b3, 'amount', 15)));
+  select number, status into r from public.finance_transactions where id = p_sched;
+  if r.status = 'scheduled' then
+    expected := expected || jsonb_build_object('t', 'finance_payment', 'id', p_sched, 'e', 'approved', 'a', 'Approved a payment',
+      'g', coalesce(r.number, 'Pembekal Sdn Bhd'));
+  else
+    fails := fails || format('setup: a payment out saved scheduled is %s', r.status);
   end if;
   -- A voucher: sent for approval as it is made, approved, marked paid.
   v1 := public.finance_save_voucher(org, jsonb_build_object('account_id', bank, 'method', 'cash', 'amount', 7,
@@ -396,6 +412,23 @@ begin
   select a.details into x from public.activity_log a where a.org_id = org and a.entity_id = i2;
   if x->>'party' is distinct from 'Pelanggan Sdn Bhd' or x ? 'amount_myr' then
     fails := fails || format('a deleted draft invoice''s details are %s', x);
+  end if;
+  select a.details into x from public.activity_log a where a.org_id = org and a.entity_id = b3 and a.details->>'event' = 'posted';
+  if x->>'party' is distinct from 'Pembekal Sdn Bhd' or (x->>'amount')::numeric is distinct from 100
+     or x->>'currency' is distinct from 'MYR' or (x->>'amount_myr')::numeric is distinct from 100 then
+    fails := fails || format('a posted bill''s details are %s', x);
+  end if;
+  select a.details into x from public.activity_log a where a.org_id = org and a.entity_id = b1 and a.details->>'event' = 'voided';
+  if (x->>'amount')::numeric is distinct from 100 or x->>'currency' is distinct from 'MYR' or (x->>'amount_myr')::numeric is distinct from 100 then
+    fails := fails || format('a voided bill''s details are %s', x);
+  end if;
+  select a.details into x from public.activity_log a where a.org_id = org and a.entity_id = busd;
+  if x->>'currency' is distinct from 'USD' or (x->>'amount')::numeric is distinct from 500 or (x->>'amount_myr')::numeric is distinct from 2100 then
+    fails := fails || format('a posted USD bill''s details are %s', x);
+  end if;
+  select a.details into x from public.activity_log a where a.org_id = org and a.entity_id = b2;
+  if x->>'party' is distinct from 'Pembekal Sdn Bhd' or x ? 'amount' or x ? 'amount_myr' then
+    fails := fails || format('a deleted draft bill''s details are %s', x);
   end if;
   select a.details into x from public.activity_log a where a.org_id = org and a.entity_id = iusd;
   if x->>'currency' is distinct from 'USD' or (x->>'amount')::numeric is distinct from 1000 or (x->>'amount_myr')::numeric is distinct from 4200 then
