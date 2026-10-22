@@ -39,7 +39,12 @@
 --   * FIN62 at commit (a deferred constraint trigger): a draft whose discount
 --     takes all of its lines' net (D >= the sum, including any discount on lines
 --     that net to 0). Deferred, so a save that deletes its lines and inserts them
---     again is only judged once it has finished.
+--     again is only judged once it has finished. A line inserted queues no check:
+--     it only adds to the net; the header's own events and a line's delete or
+--     update cover every way the net can fall below D.
+--   * A later migration that writes invoice or quotation lines and then ALTERs a
+--     line table in the same transaction must run "set constraints all
+--     immediate" first, or the ALTER fails on the pending FIN62 events.
 --
 -- Nothing here is granted to service_role: no worker touches these tables.
 
@@ -159,7 +164,13 @@ declare
   h record;
   tbl text;
   fk text;
+  shared boolean;
 begin
+  -- One split of a document at a time: two transactions writing lines of the
+  -- same draft wait here, so the second splits over the first's lines and the
+  -- shares always add up to D. Not FOR UPDATE on the header: the line guards
+  -- take FOR SHARE on it, and the two would deadlock.
+  perform pg_advisory_xact_lock(hashtextextended(p_kind || ':' || p_doc::text, 0));
   if p_kind = 'invoice' then
     select org_id, status, doc_discount_pct, doc_discount_amount into h
       from public.finance_invoices where id = p_doc;
@@ -175,6 +186,15 @@ begin
   end if;
   if not found or h.status <> 'draft' then
     return;
+  end if;
+  -- No discount and no share left to clear: nothing to do (every document
+  -- without a discount, so all that existed before this migration).
+  if num_nonnulls(h.doc_discount_pct, h.doc_discount_amount) = 0 then
+    execute format('select exists (select 1 from public.%I where org_id = $1 and %I = $2 and doc_discount_share <> 0)', tbl, fk)
+      into shared using h.org_id, p_doc;
+    if not shared then
+      return;
+    end if;
   end if;
 
   -- Lets the share guard pass these writes; cleared straight after.
@@ -238,7 +258,9 @@ language plpgsql
 set search_path = ''
 as $$
 begin
-  if coalesce(current_setting('openkuasa.doc_discount_split', true), '') = '1' then
+  -- The split's own update runs inside a trigger (depth 2 here); a caller's
+  -- statement, or a function it calls, is at depth 1, flag or no flag.
+  if coalesce(current_setting('openkuasa.doc_discount_split', true), '') = '1' and pg_trigger_depth() > 1 then
     return new;
   end if;
   if tg_op = 'INSERT' then
@@ -416,13 +438,13 @@ create constraint trigger finance_quotation_doc_discount_fits
   execute function private.finance_doc_discount_check();
 
 create constraint trigger finance_invoice_line_doc_discount_fits
-  after insert or delete or update of quantity, unit_price, discount_pct, discount_amount, invoice_id
+  after delete or update of quantity, unit_price, discount_pct, discount_amount, invoice_id
   on public.finance_invoice_lines
   deferrable initially deferred
   for each row execute function private.finance_doc_discount_check();
 
 create constraint trigger finance_quotation_line_doc_discount_fits
-  after insert or delete or update of quantity, unit_price, discount_pct, discount_amount, quotation_id
+  after delete or update of quantity, unit_price, discount_pct, discount_amount, quotation_id
   on public.finance_quotation_lines
   deferrable initially deferred
   for each row execute function private.finance_doc_discount_check();

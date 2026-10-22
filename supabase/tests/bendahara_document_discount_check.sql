@@ -28,7 +28,7 @@ declare
   owner_id uuid := gen_random_uuid();
   owner_claims text;
   cust uuid;
-  i2 uuid; q2 uuid; i3 uuid; i4 uuid; i5 uuid; i6 uuid; i7 uuid; i8 uuid; i9 uuid; q9 uuid; ie uuid;
+  i2 uuid; q2 uuid; q6 uuid; q7 uuid; i3 uuid; i4 uuid; i5 uuid; i6 uuid; i7 uuid; i8 uuid; i9 uuid; q9 uuid; ie uuid;
   n integer;
   t text;
   r record;
@@ -175,6 +175,18 @@ begin
   select string_agg(doc_discount_share::text, ' / ' order by position) into t
     from public.finance_invoice_lines where invoice_id = i6;
   if t is distinct from '5.00 / 5.00 / 5.00' then fails := fails || format('6: the shares read %s after the save', t); end if;
+  q6 := public.finance_save_quotation(org, jsonb_build_object('customer_id', cust, 'quote_date', current_date,
+    'valid_until', current_date + 30, 'notes', 'case 6'), three_lines);
+  update public.finance_quotations set doc_discount_amount = 15 where id = q6;
+  fails := fails || public.bendahara_check_try('6: a quotation''s lines deleted and inserted again', 'ok',
+    format($q$
+      delete from public.finance_quotation_lines where quotation_id = %1$L;
+      insert into public.finance_quotation_lines (org_id, quotation_id, position, description, quantity, unit_price, sst_rate)
+      values (%2$L, %1$L, 1, 'A', 1, 10, 0), (%2$L, %1$L, 2, 'B', 1, 10, 0), (%2$L, %1$L, 3, 'C', 1, 10, 0)
+    $q$, q6, org));
+  select string_agg(doc_discount_share::text, ' / ' order by position) into t
+    from public.finance_quotation_lines where quotation_id = q6;
+  if t is distinct from '5.00 / 5.00 / 5.00' then fails := fails || format('6: the quotation shares read %s after the save', t); end if;
 
   -- ==== 7: a share a caller sends is ignored =================================================
   i7 := public.finance_save_invoice(org, jsonb_build_object('customer_id', cust, 'invoice_date', current_date,
@@ -191,6 +203,25 @@ begin
     from public.finance_invoice_lines where invoice_id = i7;
   -- 3.00 over nets 10 / 20 / 10 / 10.
   if t is distinct from '0.60 / 1.20 / 0.60 / 0.60' then fails := fails || format('7: after a share written by hand the shares read %s', t); end if;
+  -- The split's flag set by a caller does not let a share through: the caller is not inside a trigger.
+  perform set_config('openkuasa.doc_discount_split', '1', true);
+  update public.finance_invoice_lines set doc_discount_share = 5 where invoice_id = i7 and position = 1;
+  perform set_config('openkuasa.doc_discount_split', '', true);
+  select doc_discount_share::text into t from public.finance_invoice_lines where invoice_id = i7 and position = 1;
+  if t is distinct from '0.60' then fails := fails || format('7: with the flag forged a share was written: %s', t); end if;
+  q7 := public.finance_save_quotation(org, jsonb_build_object('customer_id', cust, 'quote_date', current_date,
+    'valid_until', current_date + 30, 'notes', 'case 7'), tens);
+  update public.finance_quotations set doc_discount_amount = 3 where id = q7;
+  insert into public.finance_quotation_lines (org_id, quotation_id, position, description, quantity, unit_price, sst_rate, doc_discount_share)
+  values (org, q7, 4, 'D', 1, 10, 0, 99);
+  select string_agg(doc_discount_share::text, ' / ' order by position) into t
+    from public.finance_quotation_lines where quotation_id = q7;
+  if t is distinct from '0.75 / 0.75 / 0.75 / 0.75' then fails := fails || format('7: a quotation after a sent share of 99 reads %s', t); end if;
+  update public.finance_quotation_lines set doc_discount_share = 5 where quotation_id = q7 and position = 1;
+  update public.finance_quotation_lines set doc_discount_share = 5, quantity = 2 where quotation_id = q7 and position = 2;
+  select string_agg(doc_discount_share::text, ' / ' order by position) into t
+    from public.finance_quotation_lines where quotation_id = q7;
+  if t is distinct from '0.60 / 1.20 / 0.60 / 0.60' then fails := fails || format('7: a quotation after a share written by hand reads %s', t); end if;
 
   -- ==== the half-sen line: its whole net as its share leaves 0.00, not -0.01 ======================
   ie := public.finance_save_invoice(org, jsonb_build_object('customer_id', cust, 'invoice_date', current_date,
@@ -279,6 +310,23 @@ begin
   set constraints all deferred;
   fails := fails || public.bendahara_check_try('8: lines cut below a fixed discount', 'FIN62',
     format('update public.finance_invoice_lines set unit_price = 1 where invoice_id = %L; set constraints all immediate', i6));
+  set constraints all deferred;
+  -- A save that re-inserts fewer lines, leaving D >= the net: the deletes queue the check (inserts queue none).
+  fails := fails || public.bendahara_check_try('8: a save that re-inserts fewer lines under a discount', 'FIN62',
+    format($q$
+      delete from public.finance_invoice_lines where invoice_id = %1$L;
+      insert into public.finance_invoice_lines (org_id, invoice_id, position, description, quantity, unit_price, sst_rate)
+      values (%2$L, %1$L, 1, 'A', 1, 10, 0);
+      set constraints all immediate
+    $q$, i6, org));
+  set constraints all deferred;
+  fails := fails || public.bendahara_check_try('8: a quotation save that re-inserts fewer lines under a discount', 'FIN62',
+    format($q$
+      delete from public.finance_quotation_lines where quotation_id = %1$L;
+      insert into public.finance_quotation_lines (org_id, quotation_id, position, description, quantity, unit_price, sst_rate)
+      values (%2$L, %1$L, 1, 'A', 1, 10, 0);
+      set constraints all immediate
+    $q$, q6, org));
   set constraints all deferred;
   fails := fails || public.bendahara_check_try('8: lines moved out from under a discount', 'FIN62',
     format('update public.finance_invoice_lines set invoice_id = %L where invoice_id = %L; set constraints all immediate', i8, i6));
