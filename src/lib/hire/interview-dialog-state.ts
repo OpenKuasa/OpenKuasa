@@ -356,7 +356,7 @@ export const noticeOf = (change: InterviewChange): string =>
 /** Every word a database function or a capability check can refuse with that the screen treats differently from "try again". */
 const REFUSAL_WORDS = [
   'not_found', 'forbidden', 'not_active', 'in_past', 'too_far_ahead', 'duplicate', 'not_scheduled', 'not_closed', 'unchanged', 'changed',
-  'not_past', 'too_far_back',
+  'not_past', 'too_far_back', 'has_feedback',
 ] as const;
 
 /** A form about an application (scheduling, recording) or about an interview (changing): `not_found` reads differently. */
@@ -385,7 +385,7 @@ export function fieldOfRefusal(word: string | null): InterviewField | null {
  * in fact have happened, and the fresh row shows whether it did).
  */
 export function refreshAfter(word: string | null): boolean {
-  return word === null || word === 'changed' || word === 'not_found' || word === 'not_scheduled' || word === 'not_active';
+  return word === null || word === 'changed' || word === 'not_found' || word === 'not_scheduled' || word === 'not_active' || word === 'has_feedback';
 }
 
 /** A row that has gone takes its own refusal line with it, so that refusal is said on the notice line instead. */

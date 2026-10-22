@@ -353,6 +353,8 @@ describe('what an action answered', () => {
     expect(refusalWord('This interview is no longer scheduled. Mark it as scheduled again first.', 'interview')).toBe('not_scheduled');
     expect(refusalWord('This application is no longer active. Reopen it before scheduling or changing an interview.', 'application')).toBe('not_active');
     expect(refusalWord('This interview is already scheduled.', 'interview')).toBe('not_closed');
+    // "Mark as scheduled again" on an interview that has feedback: its own plain sentence, never the generic one.
+    expect(refusalWord('This interview has feedback. Clear the feedback before marking it as scheduled again.', 'interview')).toBe('has_feedback');
     expect(refusalWord('You do not have permission to make changes here.', 'interview')).toBe('forbidden');
     expect(refusalWord(GENERIC, 'interview')).toBeNull();
     expect(refusalWord('', 'interview')).toBeNull();
@@ -366,7 +368,8 @@ describe('what an action answered', () => {
     }
   });
   it('fetches the screen again after a refusal that means it is out of date, and after one it cannot name', () => {
-    for (const word of ['changed', 'not_found', 'not_scheduled', 'not_active', null]) expect(refreshAfter(word), String(word)).toBe(true);
+    // has_feedback: feedback was added since the row was read, so the row is out of date.
+    for (const word of ['changed', 'not_found', 'not_scheduled', 'not_active', 'has_feedback', null]) expect(refreshAfter(word), String(word)).toBe(true);
     for (const word of ['in_past', 'too_far_ahead', 'not_past', 'too_far_back', 'duplicate', 'unchanged', 'forbidden', 'not_closed']) {
       expect(refreshAfter(word), word).toBe(false);
     }
