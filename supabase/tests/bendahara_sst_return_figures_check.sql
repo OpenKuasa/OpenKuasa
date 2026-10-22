@@ -11,6 +11,7 @@ declare
   org uuid := gen_random_uuid();
   owner_id uuid := gen_random_uuid();
   member_id uuid := gen_random_uuid();
+  org2 uuid := gen_random_uuid();
   owner_claims text;
   member_claims text;
   n integer;
@@ -156,6 +157,23 @@ begin
   fails := fails || public.bendahara_check_try('figures of the other tax type, same period', 'ok',
     format('update public.finance_sst_return_figures set deduction_13b = 101 where org_id = %L and tax_type = %L and period_start = %L',
       org, 'sales', '2026-09-01'));
+  -- Moving the key cannot dodge the lock, filed or not.
+  fails := fails || public.bendahara_check_try('moving a filed row''s period', 'FIN61',
+    format('update public.finance_sst_return_figures set period_start = %L where org_id = %L and tax_type = %L and period_start = %L',
+      '2026-03-01', org, 'service', '2026-09-01'));
+  fails := fails || public.bendahara_check_try('moving a filed row''s tax type', 'FIN61',
+    format('update public.finance_sst_return_figures set tax_type = %L, cards_11e = 0, deduction_13c = 0 where org_id = %L and tax_type = %L and period_start = %L',
+      'sales', org, 'service', '2026-09-01'));
+  fails := fails || public.bendahara_check_try('moving an unfiled row''s period', 'FIN61',
+    format('update public.finance_sst_return_figures set period_start = %L where org_id = %L and tax_type = %L and period_start = %L',
+      '2026-11-01', org, 'sales', '2026-09-01'));
+  select count(*) into n from public.finance_sst_return_figures
+   where org_id = org and ((tax_type = 'service' and period_start = '2026-09-01') or (tax_type = 'sales' and period_start = '2026-09-01'));
+  if n <> 2 then fails := fails || format('a refused move left %s rows in place, not 2', n); end if;
+  -- An upsert with the same key still works on an unfiled row.
+  fails := fails || public.bendahara_check_try('an upsert on an unfiled row', 'ok',
+    format('insert into public.finance_sst_return_figures (org_id, tax_type, period_start, deduction_13b) values (%L, %L, %L, 102) on conflict (org_id, tax_type, period_start) do update set deduction_13b = excluded.deduction_13b',
+      org, 'sales', '2026-09-01'));
   select cards_11e into n from public.finance_sst_return_figures where org_id = org and tax_type = 'service' and period_start = '2026-09-01';
   if n <> 5 then fails := fails || format('a refused update changed the cards to %s', n); end if;
 
@@ -165,8 +183,19 @@ begin
     format('update public.finance_sst_return_figures set cards_11e = 6 where org_id = %L and tax_type = %L and period_start = %L',
       org, 'service', '2026-09-01'));
 
-  -- ==== the workspace is deleted ===================================================
+  -- ==== a non-member learns nothing about another workspace's marks ===============
   reset role;
+  insert into public.orgs (id, name) values (org2, 'SST Figures Other Sdn Bhd');
+  insert into public.finance_sst_returns (org_id, tax_type, period_start, filed_on) values (org2, 'service', '2026-09-01', '2026-10-20');
+  perform set_config('request.jwt.claims', member_claims, true);
+  set local role authenticated;
+  fails := fails || public.bendahara_check_try('a non-member inserting into a workspace with a mark', '42501',
+    format('insert into public.finance_sst_return_figures (org_id, tax_type, period_start, cards_11e) values (%L, %L, %L, 1)',
+      org2, 'service', '2026-09-01'));
+  reset role;
+  delete from public.orgs where id = org2;
+
+  -- ==== the workspace is deleted ===================================================
   delete from public.orgs where id = org;
   select count(*) into n from public.finance_sst_return_figures where org_id = org;
   if n <> 0 then fails := fails || format('deleting the workspace left %s rows', n); end if;

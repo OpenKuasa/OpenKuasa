@@ -57,16 +57,22 @@ create trigger finance_sst_return_figures_stamp
   before insert or update on public.finance_sst_return_figures
   for each row execute function private.finance_sst_return_figures_stamp();
 
--- A return marked filed never changes: refuse while a mark exists. The check
--- reads finance_sst_returns with the definer's rights, so it does not depend on
--- the caller's own policies.
+-- A return marked filed never changes: refuse while a mark exists. The key
+-- cannot be moved either (that would dodge the lock). The function runs with the
+-- caller's rights, so a non-member cannot learn through it whether another
+-- workspace marked a period filed (RLS hides the mark and the insert policy
+-- then refuses with 42501). Error code FIN61 is new as well.
 create function private.finance_sst_return_figures_lock()
 returns trigger
 language plpgsql
-security definer
+security invoker
 set search_path = ''
 as $$
 begin
+  if tg_op = 'UPDATE'
+     and (new.org_id, new.tax_type, new.period_start) is distinct from (old.org_id, old.tax_type, old.period_start) then
+    raise exception 'The period and tax type of a return''s figures cannot be changed.' using errcode = 'FIN61';
+  end if;
   if exists (
     select 1 from public.finance_sst_returns r
      where r.org_id = new.org_id and r.tax_type = new.tax_type and r.period_start = new.period_start

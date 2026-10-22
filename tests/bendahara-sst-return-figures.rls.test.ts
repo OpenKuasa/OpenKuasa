@@ -72,6 +72,10 @@ testWithSupabase('figures: an owner saves, a member reads only, a filed return i
   expect(locked.error?.code).toBe('FIN60');
   expect(locked.error?.message).toContain('marked filed');
 
+  // The key cannot be moved to dodge the lock.
+  const moved = await o.from('finance_sst_return_figures').update({ period_start: '2026-03-01' }).match(key).select('cards_11e');
+  expect(moved.error?.code).toBe('FIN61');
+
   // Undo the mark and the figures open again.
   const unmark = await o.from('finance_sst_returns').delete().match(key).select('org_id');
   expect(unmark.error, unmark.error?.message).toBeNull();
