@@ -81,6 +81,13 @@ import type { Form, FormStatus, FormSubmission } from '@/lib/reach/types';
 /** What every lead form action answers with. */
 export type LeadFormResult = { ok: boolean; error?: string };
 
+/*
+ * The editor and the Submissions card share one grid and can both be open for
+ * the same form, so each card's key says which card it is as well as which form.
+ */
+export const formCardKey = (form: { id: string } | null): string => `edit-${form?.id ?? 'new'}`;
+export const submissionsCardKey = (form: { id: string }): string => `submissions-${form.id}`;
+
 /**
  * The writes this screen can make. The page hands them in (they are server
  * actions over the reach capabilities); people who can only read get none, and
@@ -282,7 +289,7 @@ export function LeadFormsView({
         {formOpen && actions ? (
           <LeadFormCard
             // A different form (or a new one) starts from a clean card.
-            key={editing?.id ?? 'new'}
+            key={formCardKey(editing)}
             editing={editing}
             suggestions={suggestions}
             nameRef={nameRef}
@@ -296,7 +303,7 @@ export function LeadFormsView({
         {viewing && submissions ? (
           <SubmissionsCard
             // Another form starts from its own list.
-            key={viewing.id}
+            key={submissionsCardKey(viewing)}
             form={viewing}
             submissions={submissions}
             onClose={closeSubmissions}
