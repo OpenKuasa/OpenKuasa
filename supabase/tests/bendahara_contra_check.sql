@@ -103,7 +103,8 @@ begin
   end if;
   select string_agg(tgname, ',' order by tgname) into t from pg_trigger
    where not tgisinternal and tgrelid = 'public.finance_invoices'::regclass and tgenabled = 'O';
-  if t is distinct from 'finance_invoice_guard,finance_invoice_rate_to_lines,finance_invoice_sign_off,finance_invoice_to_ringgit,'
+  if t is distinct from 'finance_invoice_doc_discount_fits,finance_invoice_doc_discount_split,'
+       || 'finance_invoice_guard,finance_invoice_rate_to_lines,finance_invoice_sign_off,finance_invoice_to_ringgit,'
        || 'finance_invoice_void_contra,finance_void_stamp' then
     fails := fails || format('triggers on finance_invoices are: %s', t);
   end if;
