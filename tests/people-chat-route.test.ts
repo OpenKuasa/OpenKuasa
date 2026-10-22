@@ -180,13 +180,16 @@ const SELF_TOOLS = [
   'submitClaim', 'cancelClaim', 'submitOvertime', 'cancelOvertime',
   'clockIn', 'clockOut', 'getMyAttendanceToday',
   'saveGoal', 'removeGoal', 'enrolInTraining', 'withdrawFromTraining',
+  'listShiftSwaps', 'listSwapOptions', 'logHours', 'requestShiftSwap', 'replyShiftSwap', 'cancelShiftSwap',
 ];
 /** Anyone linked to an employee record holds these, an owner or admin included. */
-const CLOCK_TOOLS = ['clockIn', 'clockOut', 'getMyAttendanceToday'];
+const CLOCK_TOOLS = ['clockIn', 'clockOut', 'getMyAttendanceToday', 'listSwapOptions', 'requestShiftSwap', 'replyShiftSwap', 'cancelShiftSwap'];
+/** What only a linked person holds: their clock and their own side of a shift swap. */
+const LINKED_ONLY = new Set(['clockIn', 'clockOut', 'requestShiftSwap', 'replyShiftSwap', 'cancelShiftSwap']);
 /** What an owner or admin with no employee record holds: every change tool but the clock ones, and the settings lookup. */
 const UNLINKED_OWNER_TOOLS = [
-  ...PEOPLE_TOOL_NAMES, 'previewLeave', 'previewOvertime', 'getAttendanceSettings', 'listLetterTemplates',
-  ...PEOPLE_WRITE_TOOL_NAMES.filter((name) => name !== 'clockIn' && name !== 'clockOut'),
+  ...PEOPLE_TOOL_NAMES, 'previewLeave', 'previewOvertime', 'getAttendanceSettings', 'listLetterTemplates', 'listShiftSwaps',
+  ...PEOPLE_WRITE_TOOL_NAMES.filter((name) => !LINKED_ONLY.has(name)),
 ];
 
 function post(body: unknown): Request {

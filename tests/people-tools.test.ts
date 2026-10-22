@@ -44,12 +44,12 @@ const EMPTY: PeopleData = {
 };
 
 describe('people tools', () => {
-  it('is exactly the twenty-six lookups, none sharing a name with another product', () => {
+  it('is exactly the twenty-seven lookups, none sharing a name with another product', () => {
     expect(Object.keys(createPeopleTools(data, HR, NOW))).toEqual([...PEOPLE_TOOL_NAMES]);
     expect(PEOPLE_TOOL_NAMES).toEqual([
       'getPeopleOverview', 'listEmployees', 'getEmployee', 'listDepartments', 'getHeadcountByDepartment',
       'listWhoIsOnLeave', 'listLeaveRequests', 'listTimeOffRequests', 'getLeaveBalances', 'listPendingApprovals', 'listClaims',
-      'listOvertime', 'getAttendanceSummary', 'getTimesheet', 'listShifts', 'listPublicHolidays', 'getHrCalendar',
+      'listOvertime', 'getAttendanceSummary', 'getTimesheet', 'listShifts', 'listShiftTypes', 'listPublicHolidays', 'getHrCalendar',
       'getPayrollSummary', 'listPayslips', 'getPerformanceSummary', 'listGoals', 'listReviews', 'listTrainings', 'listAnnouncements',
       'listDocuments', 'listLetters',
     ]);

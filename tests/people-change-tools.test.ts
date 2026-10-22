@@ -70,20 +70,23 @@ describe('Lekiu change tools', () => {
       'saveAnnouncement', 'removeAnnouncement', 'publishAnnouncement', 'unpublishAnnouncement',
       'saveLetter', 'startLetterFromTemplate', 'issueLetter', 'requestAcknowledgement',
       'setReportsTo',
+      'setShifts', 'logHours', 'saveShiftType', 'archiveShiftType',
+      'requestShiftSwap', 'replyShiftSwap', 'decideShiftSwap', 'cancelShiftSwap',
     ]);
-    expect(PEOPLE_WRITE_TOOL_NAMES).toHaveLength(54);
-    // An owner with no linked employee record holds no clock tool; one with a record holds every one.
+    expect(PEOPLE_WRITE_TOOL_NAMES).toHaveLength(62);
+    // An owner with no linked employee record holds no clock tool and none of a person's own swap tools; one with a record holds every one.
+    const ownOnly = new Set(['clockIn', 'clockOut', 'requestShiftSwap', 'replyShiftSwap', 'cancelShiftSwap']);
     const unlinked = Object.keys(createPeopleTools(data, HR, NOW, write())).sort();
     expect(unlinked).toEqual(
-      [...PEOPLE_TOOL_NAMES, 'previewLeave', 'previewOvertime', 'getAttendanceSettings', 'listLetterTemplates', ...PEOPLE_WRITE_TOOL_NAMES]
-        .filter((name) => name !== 'clockIn' && name !== 'clockOut')
+      [...PEOPLE_TOOL_NAMES, 'previewLeave', 'previewOvertime', 'getAttendanceSettings', 'listLetterTemplates', 'listShiftSwaps', ...PEOPLE_WRITE_TOOL_NAMES]
+        .filter((name) => !ownOnly.has(name))
         .sort(),
     );
     const linked = Object.keys(
       createPeopleTools(data, { ...HR, employeeId: EMP }, NOW, { ...write(), employeeId: EMP }),
     ).sort();
     expect(linked).toEqual(
-      [...PEOPLE_TOOL_NAMES, 'previewLeave', 'previewOvertime', 'getMyAttendanceToday', 'getAttendanceSettings', 'listLetterTemplates', ...PEOPLE_WRITE_TOOL_NAMES].sort(),
+      [...PEOPLE_TOOL_NAMES, 'previewLeave', 'previewOvertime', 'getMyAttendanceToday', 'getAttendanceSettings', 'listLetterTemplates', 'listShiftSwaps', 'listSwapOptions', ...PEOPLE_WRITE_TOOL_NAMES].sort(),
     );
   });
 
@@ -92,7 +95,7 @@ describe('Lekiu change tools', () => {
     const kit = peopleProduct({ data, viewer: { ...HR, employeeId: EMP }, write: linked });
     expect(Object.keys(kit.write).sort()).toEqual([...PEOPLE_WRITE_TOOL_NAMES].sort());
     expect(Object.keys(kit.read).sort()).toEqual(
-      [...PEOPLE_TOOL_NAMES, 'previewLeave', 'previewOvertime', 'getMyAttendanceToday', 'getAttendanceSettings', 'listLetterTemplates'].sort(),
+      [...PEOPLE_TOOL_NAMES, 'previewLeave', 'previewOvertime', 'getMyAttendanceToday', 'getAttendanceSettings', 'listLetterTemplates', 'listShiftSwaps', 'listSwapOptions'].sort(),
     );
     const { toolApproval } = combineToolkits([kit]);
     for (const name of PEOPLE_WRITE_TOOL_NAMES) expect(toolApproval?.[name]).toBe('user-approval');
@@ -171,8 +174,8 @@ describe('Lekiu change tools for goals, reviews, training and announcements', ()
   it('are all in the list of tools that wait for approval, once each, after the payroll tools', () => {
     const names = [...PEOPLE_WRITE_TOOL_NAMES];
     expect(new Set(names).size).toBe(names.length);
-    expect(names.slice(-19, -5)).toEqual([...OWN, 'saveReview', 'deleteReview', 'releaseReview', 'saveTraining', 'removeTraining', 'setTrainingCompleted', 'saveAnnouncement', 'removeAnnouncement', 'publishAnnouncement', 'unpublishAnnouncement']);
-    expect(names.slice(-5)).toEqual(['saveLetter', 'startLetterFromTemplate', 'issueLetter', 'requestAcknowledgement', 'setReportsTo']);
+    expect(names.slice(-27, -13)).toEqual([...OWN, 'saveReview', 'deleteReview', 'releaseReview', 'saveTraining', 'removeTraining', 'setTrainingCompleted', 'saveAnnouncement', 'removeAnnouncement', 'publishAnnouncement', 'unpublishAnnouncement']);
+    expect(names.slice(-13, -8)).toEqual(['saveLetter', 'startLetterFromTemplate', 'issueLetter', 'requestAcknowledgement', 'setReportsTo']);
     const kit = peopleProduct({ data, viewer: { ...HR, employeeId: EMP }, write: { ...write(), employeeId: EMP } });
     const { toolApproval } = combineToolkits([kit]);
     for (const name of [...OWN, ...HR_ONLY]) {
@@ -187,7 +190,7 @@ describe('Lekiu change tools for goals, reviews, training and announcements', ()
     expect(Object.keys(kit.write).sort()).toEqual(
       [
         'applyLeave', 'applyTimeOff', 'cancelLeaveRequest', 'cancelTimeOffRequest', 'submitClaim', 'cancelClaim', 'submitOvertime', 'cancelOvertime',
-        'clockIn', 'clockOut', ...OWN,
+        'clockIn', 'clockOut', ...OWN, 'logHours', 'requestShiftSwap', 'replyShiftSwap', 'cancelShiftSwap',
       ].sort(),
     );
     const { toolApproval } = combineToolkits([kit]);
@@ -217,8 +220,9 @@ describe("Lekiu's three tool sets", () => {
     ...PEOPLE_TOOL_NAMES, 'previewLeave', 'previewOvertime', 'getMyAttendanceToday',
     'applyLeave', 'applyTimeOff', 'cancelLeaveRequest', 'cancelTimeOffRequest', 'submitClaim', 'cancelClaim', 'submitOvertime', 'cancelOvertime',
     'clockIn', 'clockOut', 'saveGoal', 'removeGoal', 'enrolInTraining', 'withdrawFromTraining',
+    'listShiftSwaps', 'listSwapOptions', 'logHours', 'requestShiftSwap', 'replyShiftSwap', 'cancelShiftSwap',
   ];
-  const DECIDE = ['decideLeave', 'decideTimeOff', 'decideClaim', 'decideOvertime'];
+  const DECIDE = ['decideLeave', 'decideTimeOff', 'decideClaim', 'decideOvertime', 'decideShiftSwap'];
   const TEAM_READS = ['listMyTeam', 'getWaitingForMe'];
   const namesFor = (tier: 'self' | 'manager', employeeId: string | null = 'seed-emp-12') =>
     Object.keys(createPeopleTools(data, MANAGER_VIEWER, NOW, asTier(tier, employeeId))).sort();
