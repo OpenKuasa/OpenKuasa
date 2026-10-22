@@ -413,6 +413,19 @@ describe('people tools', () => {
     expect(description.endsWith('Never present a narrower scope as the whole team.')).toBe(true);
   });
 
+  it('says the holiday lookups hold only the workspace\'s own holidays, never a list from general knowledge', () => {
+    // A workspace with no holidays recorded was told "the standard Malaysian public holidays fall in January,
+    // February, ..." from the model's memory.
+    const tools = createPeopleTools(data, HR, NOW) as unknown as Record<string, { description: string }>;
+    const holidays = tools.listPublicHolidays.description;
+    expect(holidays).toContain('These are only the holidays recorded for this workspace');
+    expect(holidays).toContain('when there are none, say so and offer to add them');
+    expect(holidays).toContain('never list holidays, dates or months from general knowledge');
+    const calendar = tools.getHrCalendar.description;
+    expect(calendar).toContain('Public holidays are only the ones recorded for this workspace');
+    expect(calendar).toContain('never list holidays, dates or months from general knowledge');
+  });
+
   it('gives each employee an id, and says whether an account is linked, but never the account itself', async () => {
     const { employees } = await run('listEmployees')({ limit: 3 });
     for (const row of employees) {
