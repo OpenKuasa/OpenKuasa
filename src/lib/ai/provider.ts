@@ -47,6 +47,20 @@ function createProvider(apiKey: string) {
   });
 }
 
+/**
+ * The OpenRouter session a model's calls belong to. Through OpenRouter one model is served by several providers (for
+ * Claude: Anthropic, Amazon, Google), and each keeps its own prompt cache. Without a session OpenRouter keeps calls on
+ * one provider only after a cache hit, and guesses the conversation from its first messages, so a call can land on a
+ * provider whose cache is cold and pay to write the whole prompt again. With a session it keeps every call on one
+ * provider from the first (and still moves when that provider fails). The cached prompt is the same for every user of
+ * an assistant, so the session is the model alone: nothing about the workspace or the person is in it.
+ */
+export const routingSession = (modelId: string) => `openkuasa:${modelId}`.slice(0, 256);
+
+/** A model of `provider`, in its routing session. */
+const inSession = (provider: ReturnType<typeof createOpenRouter>, modelId: string): LanguageModel =>
+  provider(modelId, { extraBody: { session_id: routingSession(modelId) } });
+
 let platformProvider: ReturnType<typeof createOpenRouter> | null = null;
 
 function getPlatformProvider() {
@@ -65,7 +79,7 @@ function getPlatformProvider() {
 export function getModel(layer: AgentLayer, apiKey?: string): LanguageModel {
   // A workspace provider is built per request so keys are never cached.
   const provider = apiKey ? createProvider(apiKey) : getPlatformProvider();
-  return provider(pickModelId(layer));
+  return inSession(provider, pickModelId(layer));
 }
 
 /**
@@ -77,5 +91,5 @@ export function getModel(layer: AgentLayer, apiKey?: string): LanguageModel {
 export function getWorkspaceModelById(modelId: string, apiKey: string): LanguageModel {
   if (!apiKey.trim() || !modelId.trim()) throw new Error('A workspace model needs a key and a model id.');
   // Built per request so keys are never cached.
-  return createProvider(apiKey)(modelId.trim());
+  return inSession(createProvider(apiKey), modelId.trim());
 }
