@@ -205,7 +205,18 @@ export type HireData = {
    * holds every row in memory (the sample data) may leave it out: `interviewCardFromLists` is then used.
    */
   interviewCard?(id: unknown): Promise<InterviewCardRead>;
+  /**
+   * The candidates whose name contains this text, in any letter case, newest first, read by the name so that no page
+   * size can hide an older one. A provider over a database must have it. One that holds every row in memory (the
+   * sample data) may leave it out: `searchCandidatesFromList` over the candidates list is then used.
+   */
+  searchCandidates?(query: CandidateSearch): Promise<CandidateSearchResult>;
 };
+
+/** A lookup of candidates by name. `inPool`: only talent pool members; `poolStatus`: only that pool status. */
+export type CandidateSearch = { name: string; inPool?: boolean; poolStatus?: Exclude<PoolStatus, 'none'> };
+/** At most CANDIDATE_SEARCH_LIMIT rows, newest first. `more` when there were more matches than that. */
+export type CandidateSearchResult = { rows: Candidate[]; more: boolean };
 
 /** A candidate or an application as an approval card may need to describe it, to tell it from another of the same name. */
 export type Namesake = {

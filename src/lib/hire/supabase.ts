@@ -2,6 +2,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { getCurrentOrg } from '@/lib/auth/current-org';
 import { hasSupabaseEnv } from '@/lib/auth/viewer';
 import { feedbackOf } from './interview-feedback';
+import { CANDIDATE_COLUMNS, readCandidateSearch } from './candidate-search';
 import { readInterviewCard, readNamesakes } from './namesakes';
 import { createSeedHireData } from './seed';
 import { DEFAULT_HIRE_SETTINGS, HIRE_READ_CAP, JOB_COLUMNS, SETTINGS_COLUMNS } from './types';
@@ -12,7 +13,6 @@ import type {
 /** The API answers with at most this many rows per request. */
 const PAGE_SIZE = HIRE_READ_CAP;
 
-const CANDIDATE_COLUMNS = 'id,name,email,phone,headline,location,skills,source,pool_status,created_at';
 const APPLICATION_COLUMNS =
   'id,candidate_id,job_id,stage,outcome,reject_reason,rating,source,applied_at,offered_at,hired_at,created_at,' +
   'cover_letter,cv_url,cv_path,portfolio_url,expected_salary_cents,consented_at,' +
@@ -112,6 +112,7 @@ export function createSupabaseHireData(client: SupabaseClient, orgId: string): H
     namesakes: (kind, id) => readNamesakes(client, orgId, kind, id),
     poolStatusOf: (id) => readPoolStatus(client, orgId, id),
     interviewCard: (id) => readInterviewCard(client, orgId, id),
+    searchCandidates: (query) => readCandidateSearch(client, orgId, query),
   };
 }
 

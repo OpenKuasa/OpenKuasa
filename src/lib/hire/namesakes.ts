@@ -13,7 +13,7 @@ import type {
 /** How many same-named rows are read. More than this and the answer is marked `cut`. */
 export const NAMESAKE_LIMIT = 50;
 
-const ZERO_WIDTH = /[​-‍⁠﻿]/g;
+export const ZERO_WIDTH = /[​-‍⁠﻿]/g;
 
 /**
  * Two names are one when they differ only in letter case, in spacing, or in
@@ -22,7 +22,7 @@ const ZERO_WIDTH = /[​-‍⁠﻿]/g;
 export const sameText = (value: string) =>
   value.normalize('NFKC').replace(ZERO_WIDTH, '').trim().replace(/\s+/g, ' ').toLowerCase();
 
-const escapeRegex = (word: string) => word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+export const escapeRegex = (word: string) => word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 /**
  * A pattern for the database's case-insensitive match that fits this text
