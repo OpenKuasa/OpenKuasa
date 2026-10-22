@@ -1,5 +1,5 @@
 -- Bendahara FX revaluation: a workspace with posted runs is deleted cleanly (bug-273). Run it after
--- 20261123110000_bendahara_fx_revaluation_workspace_delete.sql (which needs 20261123100000, 6a), in the same
+-- 20261123115000_bendahara_fx_revaluation_workspace_delete.sql (which needs 20261123100000, 6a), in the same
 -- transaction for a dry run, or by itself once applied. It leaves nothing behind either way: the block always ends
 -- with RAISE, so every row, the helper functions, and the foreign key it recreates (case C) are rolled back. Read
 -- the message:

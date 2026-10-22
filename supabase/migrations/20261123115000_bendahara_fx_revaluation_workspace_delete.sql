@@ -2,6 +2,10 @@
 -- revaluations can be deleted (bug-273). Built on
 -- 20261123100000_bendahara_fx_revaluation.sql (6a, merged as #301).
 --
+-- First shipped as 20261123110000, the version 20261123110000_bendahara_supplier_credit_notes.sql also took
+-- (a fresh replay rejects a reused version). Renamed to 20261123115000: it still sorts after 6a, and after the
+-- credit notes, the order it was applied in on the hosted database. Neither file touches what the other does.
+--
 -- The bug. Deleting a workspace that had posted a run failed with 23503 on the
 -- hosted database (live test cleanup; one test workspace and its users were
 -- left behind). finance_fx_revaluation_lines named the run's invoice, bill and
