@@ -103,9 +103,17 @@ describe('the two feedback tools', () => {
     expect(applied.clear.mock.calls[1][2]).toBeUndefined();
   });
   it('a refusal is handed on as it is', async () => {
-    const refused = { ok: false, error: 'This interview already has feedback. Open it to edit it.' };
+    const refused = { ok: false, error: 'Feedback is for a completed interview. Mark this one completed first.' };
     applied.save.mockResolvedValue(refused);
     expect(await writer().saveInterviewFeedback.execute({ id: IV, rating: 4, recommendation: 'advance' }, OPTIONS)).toBe(refused);
+  });
+  it('"already has feedback" is said in chat words, not the screen\'s "Open it to edit it"', async () => {
+    applied.save.mockResolvedValue({ ok: false, error: 'This interview already has feedback. Open it to edit it.' });
+    expect(await writer().saveInterviewFeedback.execute({ id: IV, rating: 4, recommendation: 'advance' }, OPTIONS)).toEqual({
+      ok: false,
+      error: 'This interview already has feedback (someone added it after the card was made), so nothing was saved. ' +
+        'Tell the user what it is, and ask whether to replace it.',
+    });
   });
   it('have no entry of their own among the tool labels: like every hiring change but 4a\'s six, they are named for what they do', () => {
     for (const name of HIRE_FEEDBACK_TOOL_NAMES) expect(toolMeta(name).isFallback, name).toBe(true);

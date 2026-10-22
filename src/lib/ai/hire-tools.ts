@@ -76,7 +76,7 @@ import type { CvReader } from '@/lib/hire/cv-read';
 import { sameText } from '@/lib/hire/namesakes';
 import { timeToHire } from '@/lib/hire/dashboard';
 import { klDateOf, klTimeOf, klTodayWords, shortWhen } from '@/lib/hire/interview-time';
-import { feedbackForModel, seenFeedbackAt } from '@/lib/hire/interview-feedback';
+import { FEEDBACK_EXISTS_IN_CHAT, feedbackForModel, feedbackMessage, seenFeedbackAt } from '@/lib/hire/interview-feedback';
 import { careersPath, careersUrl } from '@/lib/hire/public-careers';
 import { applicantsByJob, overviewTotals, sourceBreakdown } from '@/lib/hire/overview';
 import { APPLICATION_STAGES, HIRE_READ_CAP, type HireData, type Job } from '@/lib/hire/types';
@@ -272,6 +272,8 @@ const boundSeen = (options: unknown): string | undefined => seenFeedbackAt((opti
 
 /** A feedback change's answer as a model is given it: the same, with long comments cut as the lookup cuts them. */
 function feedbackForTool(result: CapResult<InterviewFeedbackChange>) {
+  // The one refusal worded for the screen: said in chat words here, and left as it is for the screen.
+  if (!result.ok && result.error === feedbackMessage('has_feedback', 'save')) return { ok: false as const, error: FEEDBACK_EXISTS_IN_CHAT };
   if (!result.ok) return result;
   return { ...result, data: { ...result.data, feedback: feedbackForModel(result.data.feedback) } };
 }

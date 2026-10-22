@@ -95,6 +95,14 @@ const SENTENCES: Record<'save' | 'clear', Record<string, string>> = {
 };
 
 /**
+ * `has_feedback` from a save, as the chat says it: the screen's "Open it to edit it" means nothing there. An approved
+ * save that saw no feedback meets feedback a colleague added after the card; the assistant says what it is and asks.
+ */
+export const FEEDBACK_EXISTS_IN_CHAT =
+  'This interview already has feedback (someone added it after the card was made), so nothing was saved. ' +
+  'Tell the user what it is, and ask whether to replace it.';
+
+/**
  * What the person is told for a word one of the two feedback functions
  * answered with. Any other word, an error or no answer: the generic sentence.
  * (`has_feedback` from "mark as scheduled again" is that function's word, and
