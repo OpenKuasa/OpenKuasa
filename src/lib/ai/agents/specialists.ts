@@ -301,7 +301,8 @@ function applyGate(products: ProductToolkit[], team: TeamContext, turn: TurnStat
     shown.set(proposal.id, toolCallId);
     // The record was seen and every check of its kind ran on it in this request: only now may `apply` take it.
     gated.add(proposal.id);
-    return decision;
+    // What a check binds is the record's (kept when the change was prepared), never the SDK's: the answer goes on without it.
+    return typeof decision === 'object' ? { type: 'user-approval', reason: decision.reason } : decision;
   };
 }
 

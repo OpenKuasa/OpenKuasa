@@ -10,6 +10,7 @@ import {
 import { refusalForUser } from '@/components/chat/tool-parts';
 import { approvalBinding, bindApprovals, hireProduct } from '@/lib/ai/products';
 import { memoryProposalStore } from '@/lib/chat/proposal-store';
+import { createTeamTools } from '@/lib/ai/agents/specialists';
 import type { Feedback } from '@/lib/hire/interview-feedback';
 import { interviewCardFromLists } from '@/lib/hire/namesakes';
 import { createSeedHireData } from '@/lib/hire/seed';
@@ -235,6 +236,14 @@ describe('the version a feedback card was made from, on the server\'s record', (
     const fresh = bound(COMPLETED);
     expect(await fresh.gate('saveInterviewFeedback')(SAVE, { toolCallId: 'c1', messages: listed })).toEqual({ type: 'user-approval', reason: NONE_YET });
     expect(fresh.store.rows[0]).toMatchObject({ action: 'saveInterviewFeedback', input: SAVE, bound: NONE_SEEN });
+  });
+  it('Tuah\'s team: the card\'s answer to the SDK carries no binding either', async () => {
+    const product = hireProduct({ data: world(RATED), write: { ctx: { client: {} as never, orgId: 'org1' }, canWrite: true } });
+    const id = '55555555-5555-4555-8555-555555555581';
+    const proposals = new Map([[id, { id, product: 'hire', action: 'clearInterviewFeedback', input: { id: IV }, title: '', detail: null }]]);
+    const { toolApproval } = createTeamTools([product], { transcript: '', proposals, store: memoryProposalStore() } as never, listed);
+    const gate = toolApproval!.applyChange as DeletionGate;
+    expect(await gate({ proposalId: id }, { toolCallId: `apply-${id}`, messages: listed })).toEqual({ type: 'user-approval', reason: HAS });
   });
 });
 
