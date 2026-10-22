@@ -1,12 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import {
   SST_FORM_ITEMS,
+  NO_TYPED_FIGURES,
   buildSstReturn,
   pickSstView,
   recentSstPeriods,
   type SstCreditRow,
   type SstFormLine,
   type SstLineRow,
+  type SstTypedFigures,
 } from '@/lib/finance/sst-return';
 import type { SstSettings } from '@/lib/finance/sst';
 
@@ -375,5 +377,46 @@ describe('pickSstView', () => {
       period: SEP_OCT,
     });
     expect(pickSstView({ tax: 'bogus' }, settings({ sales_tax_no: 'S1' }), today).type).toBe('sales');
+  });
+});
+
+describe('buildSstReturn typed-in figures', () => {
+  const fig = (over: Partial<SstTypedFigures> = {}): SstTypedFigures => ({ ...NO_TYPED_FIGURES, ...over });
+  const serviceRows = [line({ sst_rate: 6, amount_myr: 31666.67, sst_amount_myr: 1900 })];
+  const serviceLines = () => serviceRows;
+  const salesRows = [line({ sst_rate: 10, tax_type: 'sales', amount_myr: 1000, sst_amount_myr: 100 })];
+  const salesLines = () => salesRows;
+
+  it('counts cards in item 12 and 13(c), 13(d) in item 14 on a service return', () => {
+    const credits = [credit({ amount_myr: 100, invoice_total_myr: 100, invoice_sst_myr: { service: 80, sales: 0 } })];
+    const r = buildSstReturn('service', SEP_OCT, serviceLines(), credits, fig({ cards11e: 4, deduction13c: 50, badDebt13d: 30 }));
+    expect(item(r.b2, '11(e)')).toEqual({ item: '11(e)', label: 'Credit and charge cards, RM25 each', value: 4, tax: 100, typed: true });
+    expect(r.item12).toBe(2000);
+    expect(item(r.deductions, '13(a)')?.tax).toBe(80);
+    expect(item(r.deductions, '13(c)')).toMatchObject({ value: null, tax: 50, typed: true });
+    expect(item(r.deductions, '13(d)')).toMatchObject({ value: null, tax: 30, typed: true });
+    expect(r.item14).toBe(1840);
+  });
+
+  it('subtracts 13(b), 13A and 13(d) on a sales return', () => {
+    const credits = [credit({ amount_myr: 50, invoice_total_myr: 100, invoice_sst_myr: { service: 0, sales: 20 } })];
+    const r = buildSstReturn('sales', SEP_OCT, salesLines(), credits, fig({ deduction13b: 100, adjustment13a: 10, badDebt13d: 5 }));
+    expect(item(r.deductions, '13(b)')?.tax).toBe(100);
+    expect(item(r.deductions, '13A')?.tax).toBe(10);
+    expect(item(r.deductions, '13(d)')?.tax).toBe(5);
+    expect(r.item14).toBe(r.item12 - (item(r.deductions, '13(a)')?.tax ?? 0) - 115);
+  });
+
+  it('ignores the other type fields', () => {
+    const service = buildSstReturn('service', SEP_OCT, serviceLines(), [], fig({ deduction13b: 100, adjustment13a: 10 }));
+    expect(service).toEqual(buildSstReturn('service', SEP_OCT, serviceLines(), []));
+    const sales = buildSstReturn('sales', SEP_OCT, salesLines(), [], fig({ cards11e: 9, deduction13c: 40 }));
+    expect(sales).toEqual(buildSstReturn('sales', SEP_OCT, salesLines(), []));
+  });
+
+  it('is unchanged with all-zero figures', () => {
+    const none = buildSstReturn('service', SEP_OCT, serviceLines(), []);
+    expect(buildSstReturn('service', SEP_OCT, serviceLines(), [], NO_TYPED_FIGURES)).toEqual(none);
+    expect(none.item14).toBe(1900);
   });
 });
