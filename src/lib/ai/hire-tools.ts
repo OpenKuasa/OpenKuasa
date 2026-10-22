@@ -73,7 +73,7 @@ import { CV_MAX_BYTES } from '@/lib/hire/application-fields';
 import { applicationFormOf } from '@/lib/hire/application-form';
 import { applicationLabel, funnelCounts, matchesText } from '@/lib/hire/applications-view';
 import type { CvReader } from '@/lib/hire/cv-read';
-import { CANDIDATE_SEARCH_LIMIT, findCandidates } from '@/lib/hire/candidate-search';
+import { CANDIDATE_SEARCH_LIMIT, cleanSearchName, findCandidates } from '@/lib/hire/candidate-search';
 import { sameText } from '@/lib/hire/namesakes';
 import { timeToHire } from '@/lib/hire/dashboard';
 import { klDateOf, klTimeOf, klTodayWords, shortWhen } from '@/lib/hire/interview-time';
@@ -276,12 +276,21 @@ function feedbackForTool(result: CapResult<InterviewFeedbackChange>) {
 
 const limit = limitSchema(`How many rows to return, at most ${LOOKUP_MAX}.`);
 
-/** The date in Kuala Lumpur, as YYYY-MM-DD: the day a closing date is checked against. */
-/** Said when a lookup by name matched more people than it returns: the newest are given, and the model narrows. */
-const moreMatches = (who: string) =>
-  `More than ${CANDIDATE_SEARCH_LIMIT} ${who} match this name: only the newest ${CANDIDATE_SEARCH_LIMIT} were looked at, ` +
-  'so the one meant may be missing. Ask the user for more of the name.';
+/**
+ * Said when a lookup by name matched more people than it read. `narrowed`: a skill or a place was also asked for, so
+ * the wider read was used and the filter covered only its newest rows.
+ */
+const moreMatches = (who: string, narrowed: boolean) =>
+  narrowed
+    ? `At least ${HIRE_READ_CAP} ${who} match this name: the skill and place filters covered only the newest ` +
+      `${HIRE_READ_CAP} of them, so the one meant may be missing. Ask the user for more of the name.`
+    : `More than ${CANDIDATE_SEARCH_LIMIT} ${who} match this name: only the newest ${CANDIDATE_SEARCH_LIMIT} were looked at, ` +
+      'so the one meant may be missing. Ask the user for more of the name.';
 
+/** A name to look someone up by: at most 100 characters. */
+const lookupName = (describe: string) => z.string().max(100).optional().describe(describe);
+
+/** The date in Kuala Lumpur, as YYYY-MM-DD: the day a closing date is checked against. */
 const klToday = (now: Date) => now.toLocaleDateString('en-CA', { timeZone: 'Asia/Kuala_Lumpur' });
 
 export function createHireTools(
@@ -466,7 +475,7 @@ export function createHireTools(
         'Email and phone are returned only when includeContact is set. Filter by a name, a skill, a location or their pool status. ' +
         'If the result has "several_match", the name fits more than one person: prepare no change and ask the user which one.',
       inputSchema: z.object({
-        name: z.string().optional().describe('Only pool members whose name contains this, in any letter case.'),
+        name: lookupName('Only pool members whose name contains this, in any letter case.'),
         skill: z.string().optional().describe('Only candidates with this skill. Part of the skill is enough.'),
         location: z.string().optional().describe('Only candidates in this place.'),
         poolStatus: z.enum(['available', 'passive', 're_engaged']).optional().describe('Only this pool status.'),
@@ -476,21 +485,26 @@ export function createHireTools(
       execute: async ({ name, skill, location, poolStatus, includeContact: withContact, limit: requested }) =>
         safe('listTalentPool', async () => {
           // By a name, the database is asked, so a pool member added long ago is found too. Otherwise the list.
-          const found = name?.trim() ? await findCandidates(data, { name, inPool: true, poolStatus }) : null;
+          // With a skill or a place as well, as many rows are read as the list would give, then narrowed here.
+          const asked = cleanSearchName(name ?? '');
+          const narrowed = Boolean(skill?.trim() || location?.trim());
+          const found = asked
+            ? await findCandidates(data, { name: asked, inPool: true, poolStatus, ...(narrowed && { limit: HIRE_READ_CAP }) })
+            : null;
           const rows = (found ? found.rows : await data.listCandidates()).filter(
             (c) =>
               c.pool_status !== 'none' &&
               (!poolStatus || c.pool_status === poolStatus) &&
-              matchesText(c.name, name) &&
+              matchesText(c.name, asked) &&
               matchesText(c.location, location) &&
               (!skill?.trim() || c.skills.some((s) => matchesText(s, skill))),
           );
           return {
             total: rows.length,
-            ...(found?.more && { more_matches: moreMatches('pool members') }),
+            ...(found?.more && { more_matches: moreMatches('pool members', narrowed) }),
             // A rule in the prompt alone was not enough: the worker picked the first match. So the result says it.
             // No "look again": a change from a second lookup in the same turn is refused, so the model must ask.
-            ...(name?.trim() && rows.length > 1 && {
+            ...(asked && rows.length > 1 && {
               several_match:
                 `More than one person in the talent pool matches this name: ${rows.map((c) => c.name).sort().slice(0, 10).join(', ')}. ` +
                 'Do not choose one. Prepare no change: name them and ask the user which one they mean.',
@@ -516,7 +530,7 @@ export function createHireTools(
         'Email and phone are returned only when includeContact is set. ' +
         'If the result has "several_match", the name fits more than one person: prepare no change and ask the user which one.',
       inputSchema: z.object({
-        name: z.string().optional().describe('Only candidates whose name contains this, in any letter case.'),
+        name: lookupName('Only candidates whose name contains this, in any letter case.'),
         skill: z.string().optional().describe('Only candidates with this skill. Part of the skill is enough.'),
         location: z.string().optional().describe('Only candidates in this place.'),
         includeContact,
@@ -525,9 +539,12 @@ export function createHireTools(
       execute: async ({ name, skill, location, includeContact: withContact, limit: requested }) =>
         safe('listCandidates', async () => {
           // By a name, the database is asked, so a candidate added long ago is found too. Otherwise the list.
+          // With a skill or a place as well, as many rows are read as the list would give, then narrowed here.
+          const asked = cleanSearchName(name ?? '');
+          const narrowed = Boolean(skill?.trim() || location?.trim());
           const [found, apps] = await Promise.all([
-            name?.trim()
-              ? findCandidates(data, { name })
+            asked
+              ? findCandidates(data, { name: asked, ...(narrowed && { limit: HIRE_READ_CAP }) })
               : data.listCandidates().then((list) => ({ rows: list, more: false, capped: list.length >= HIRE_READ_CAP })),
             data.listApplications(),
           ]);
@@ -535,7 +552,7 @@ export function createHireTools(
           for (const a of apps) counts.set(a.candidate_id, (counts.get(a.candidate_id) ?? 0) + 1);
           const rows = found.rows.filter(
             (c) =>
-              matchesText(c.name, name) &&
+              matchesText(c.name, asked) &&
               matchesText(c.location, location) &&
               (!skill?.trim() || c.skills.some((s) => matchesText(s, skill))),
           );
@@ -545,9 +562,9 @@ export function createHireTools(
           const readCapped = found.capped || appsCapped;
           return {
             total: rows.length,
-            ...(found.more && { more_matches: moreMatches('candidates') }),
+            ...(found.more && { more_matches: moreMatches('candidates', narrowed) }),
             // A rule in the prompt alone was not enough: the worker picked the first match. So the result says it.
-            ...(name?.trim() && rows.length > 1 && {
+            ...(asked && rows.length > 1 && {
               several_match:
                 `More than one candidate matches this name: ${rows.map((c) => c.name).sort().slice(0, 10).join(', ')}. ` +
                 'Do not choose one. Prepare no change: name them and ask the user which one they mean.',

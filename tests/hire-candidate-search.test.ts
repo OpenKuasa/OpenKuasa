@@ -193,3 +193,64 @@ describe('the lookup tools find someone older than the newest page', () => {
     expect(result.note).not.toMatch(/candidate may be missing/);
   });
 });
+
+describe('a wider read when skill or place narrows the name', () => {
+  it('asks the database for up to the list cap, and says more only when that came back full', async () => {
+    const { client, queries } = standIn(() => ({ data: [] }));
+    await readCandidateSearch(client, 'org1', { name: 'Lim', limit: HIRE_READ_CAP });
+    expect(has(queries[0], 'limit', HIRE_READ_CAP)).toBe(true);
+    const full = standIn(() => ({ data: Array.from({ length: HIRE_READ_CAP }, (_, i) => person(i)) }));
+    const got = await readCandidateSearch(full.client, 'org1', { name: 'Person', limit: HIRE_READ_CAP });
+    expect(got.rows).toHaveLength(HIRE_READ_CAP);
+    expect(got.more).toBe(true);
+  });
+  const MUHAMMADS = Array.from({ length: 200 }, (_, i) =>
+    person(i, { name: `Muhammad ${i}`, skills: i === 120 ? ['React'] : ['Excel'], location: i === 130 ? 'Ipoh' : 'Shah Alam' }));
+  const many = (): HireData => ({
+    ...seed,
+    listCandidates: async () => MUHAMMADS,
+    listApplications: async () => [],
+    searchCandidates: async (query) => searchCandidatesFromList(MUHAMMADS, query),
+  });
+  it('listCandidates finds the only skill match older than the newest 50 of that name, with no "more of the name"', async () => {
+    const result = await exec(many(), 'listCandidates', { name: 'Muhammad', skill: 'react' });
+    expect(result.candidates.map((c: Loose) => c.id)).toEqual(['c120']);
+    expect(result).not.toHaveProperty('more_matches');
+    const placed = await exec(many(), 'listCandidates', { name: 'Muhammad', location: 'ipoh' });
+    expect(placed.candidates.map((c: Loose) => c.id)).toEqual(['c130']);
+  });
+  it('listTalentPool does the same', async () => {
+    const pool = MUHAMMADS.map((c) => ({ ...c, pool_status: 'available' as const }));
+    const data: HireData = { ...many(), searchCandidates: async (query) => searchCandidatesFromList(pool, query) };
+    const result = await exec(data, 'listTalentPool', { name: 'Muhammad', skill: 'react' });
+    expect(result.candidates.map((c: Loose) => c.id)).toEqual(['c120']);
+    expect(result).not.toHaveProperty('more_matches');
+  });
+  it('when even the wider read was cut, says the filter covered only the newest people of that name', async () => {
+    const lots = Array.from({ length: HIRE_READ_CAP + 10 }, (_, i) => person(i, { name: `Muhammad ${i}` }));
+    const data: HireData = { ...many(), searchCandidates: async (query) => searchCandidatesFromList(lots, query) };
+    const result = await exec(data, 'listCandidates', { name: 'Muhammad', skill: 'react' });
+    expect(result.more_matches).toMatch(new RegExp(`newest ${HIRE_READ_CAP}`));
+    expect(result.more_matches).toMatch(/skill/);
+  });
+});
+
+describe('what is typed is cleaned once', () => {
+  it('a name with a character that takes no room still finds the person', async () => {
+    const result = await exec(big(true), 'listCandidates', { name: 'Zulai​kha' });
+    expect(result.candidates.map((c: Loose) => c.id)).toEqual(['c1150']);
+  });
+  it('NUL bytes never reach the database', async () => {
+    const { client, queries } = standIn(() => ({ data: [] }));
+    await readCandidateSearch(client, 'org1', { name: 'Li\u0000m' });
+    expect(has(queries[0], 'filter', 'name', 'imatch', 'Lim')).toBe(true);
+  });
+  it('the tools take a name of at most 100 characters', () => {
+    const tools = createHireTools(seed, NOW);
+    for (const name of ['listCandidates', 'listTalentPool']) {
+      const schema = (tools[name] as unknown as { inputSchema: { safeParse: (v: unknown) => { success: boolean } } }).inputSchema;
+      expect(schema.safeParse({ name: 'a'.repeat(100) }).success, name).toBe(true);
+      expect(schema.safeParse({ name: 'a'.repeat(101) }).success, name).toBe(false);
+    }
+  });
+});
