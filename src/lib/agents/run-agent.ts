@@ -103,9 +103,14 @@ export async function runAgent(
       researchText = search.text;
     }
 
-    await reserve(cost + TEXT_ESTIMATE_CENTS);
-    const digest = await writeDigest(apiKey, def.digest.prompt(context, researchText));
-    cost += costOr(digest.cost_cents, TEXT_ESTIMATE_CENTS);
+    // The digest is optional: an agent without one skips the reserve and the call.
+    let digestText: string | undefined;
+    if (def.digest) {
+      await reserve(cost + TEXT_ESTIMATE_CENTS);
+      const digest = await writeDigest(apiKey, def.digest.prompt(context, researchText));
+      cost += costOr(digest.cost_cents, TEXT_ESTIMATE_CENTS);
+      digestText = digest.text;
+    }
 
     // Optional poster/hero/video. The step tracks its own running cost from `cost` and
     // reserves absolute totals via the same `reserve`; it returns the real cost it added.
@@ -141,7 +146,10 @@ export async function runAgent(
       // Deliberately drop the exception: it may carry request details or a key.
     }
 
-    return await finish('done', { digest_md: digest.text, cost_cents: cost });
+    return await finish('done', {
+      ...(digestText !== undefined ? { digest_md: digestText } : {}),
+      cost_cents: cost,
+    });
   } catch {
     // Deliberately drop the exception: it may carry request details or a key.
     // The steps that completed before the failure were still paid for.

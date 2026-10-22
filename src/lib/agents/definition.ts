@@ -14,7 +14,25 @@ export type Candidate = {
   input: unknown;
   title: string;
   detail: string | null;
+  /** Stored on the proposal row (`check_key`) and handed to the definition's dedupe key. */
+  checkKey?: string;
   fillInput?: (name: string | undefined) => unknown;
+};
+
+/**
+ * What the generic proposer reads from a definition: how to ask the model to pick, and the
+ * optional dedupe / cooldown / expiry rules. Only `pickPrompt` is required; the defaults keep
+ * the original (reach) behaviour.
+ */
+export type ProposalSettings = {
+  /** The full pick prompt. Jebat's returns today's text exactly. `list` is the `${index}. ${title}` lines. */
+  pickPrompt(context: string, list: string, trend?: string): string;
+  /** Default: today's key (action + id | contact_name | name | JSON). */
+  dedupeKey?(action: string, input: unknown, checkKey?: string): string;
+  /** Also skip candidates approved/rejected within this many days. Default: none. */
+  cooldownDays?: number;
+  /** Set expires_at explicitly. Default: the column default (14 days). */
+  expiresInDays?: number;
 };
 
 /**
@@ -88,7 +106,10 @@ export type AgentDefinition = {
   buildWriteContext(client: SupabaseClient, orgId: string, userId: string): unknown;
   /** Optional web-search step; its text feeds the digest and the proposer's `trend`. */
   research?: { prompt(context: string): string };
-  digest: { prompt(context: string, research: string | null): string };
+  /** Optional digest step; when absent the run skips it and finishes without `digest_md`. */
+  digest?: { prompt(context: string, research: string | null): string };
+  /** How this agent's proposals are picked, de-duplicated, cooled down and expired. */
+  proposals: ProposalSettings;
   /** Optional poster/hero/video generation; returns the cost it added. */
   media?(mctx: MediaContext): Promise<{ cost_cents: number }>;
   ui: { title: string; subtitle: string; screenPath: string; assetKinds: readonly string[] };

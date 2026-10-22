@@ -97,3 +97,32 @@ describe('reachAgent definition', () => {
     });
   });
 });
+
+describe('reach pick prompt is unchanged', () => {
+  const list = '0. Promote Aina Rahman to a contact\n1. Create a draft lead-capture form';
+  const head = [
+    'You help a small business owner decide which suggested CRM changes are worth queueing for their approval.',
+    'Choose ONLY from the numbered candidates below. Do not invent new items or change them.',
+    'Reply with JSON only: an array of {"index": number, "rationale": string} objects, where rationale is one short sentence.',
+    'If a candidate is about creating a lead-capture form, also include a short "name" (max 60 characters) for the draft form, inspired by this week\'s market angles.',
+    'Reply [] if none are worthwhile.',
+    '',
+    'Business snapshot:\nSNAP',
+  ];
+
+  it('matches the text suggestProposals built before, without a trend', () => {
+    const expected = [...head, '', `Candidates:\n${list}`].join('\n');
+    expect(reachAgent.proposals.pickPrompt('SNAP', list)).toBe(expected);
+  });
+
+  it('matches the text suggestProposals built before, with a trend', () => {
+    const expected = [...head, '', "This week's market angles:\nRaya gifting", '', `Candidates:\n${list}`].join('\n');
+    expect(reachAgent.proposals.pickPrompt('SNAP', list, 'Raya gifting')).toBe(expected);
+  });
+
+  it('sets no cooldown, expiry or custom dedupe key', () => {
+    expect(reachAgent.proposals.cooldownDays).toBeUndefined();
+    expect(reachAgent.proposals.expiresInDays).toBeUndefined();
+    expect(reachAgent.proposals.dedupeKey).toBeUndefined();
+  });
+});

@@ -36,20 +36,36 @@ function fakeService(
   // The recent-form gate (`select('id')`) is a distinct query; control it separately.
   recentForms: { id: string }[] = [],
   recentError: { message: string; code?: string } | null = null,
+  // The cooldown read (a select narrowed with `.in('status', …)`) is a third query.
+  decided: { action: string; input: unknown; check_key?: string | null }[] = [],
+  decidedError: { message: string; code?: string } | null = null,
 ) {
   const inserts: Record<string, unknown>[] = [];
+  const selects: { cols: string; calls: { method: string; args: unknown[] }[] }[] = [];
   const client = {
     from() {
-      // `select('id')` is the recent-form gate; anything else is the dedupe fetch.
+      // `select('id')` is the recent-form gate; a select narrowed with `.in()` is the cooldown
+      // read; anything else is the dedupe fetch.
       const select = (cols: string) => {
         const isRecentFormGate = cols === 'id';
-        const data = isRecentFormGate ? recentForms : pending;
-        const error = isRecentFormGate ? recentError : selectError;
-        const chain: Record<string, unknown> = {
-          eq: () => chain,
-          gte: () => chain,
-          limit: () => chain,
-          then: (resolve: (v: unknown) => void) => resolve({ data, error }),
+        const rec = { cols, calls: [] as { method: string; args: unknown[] }[] };
+        selects.push(rec);
+        let isDecided = false;
+        const chain: Record<string, unknown> = {};
+        for (const m of ['eq', 'gte', 'limit', 'in']) {
+          chain[m] = (...args: unknown[]) => {
+            rec.calls.push({ method: m, args });
+            if (m === 'in') isDecided = true;
+            return chain;
+          };
+        }
+        chain.then = (resolve: (v: unknown) => void) => {
+          if (isDecided) return resolve({ data: decided, error: decidedError });
+          return resolve(
+            isRecentFormGate
+              ? { data: recentForms, error: recentError }
+              : { data: pending, error: selectError },
+          );
         };
         return chain;
       };
@@ -62,7 +78,7 @@ function fakeService(
       };
     },
   } as never;
-  return { client, inserts };
+  return { client, inserts, selects };
 }
 
 describe('proposeChanges gate', () => {
@@ -99,6 +115,7 @@ describe('proposeChanges gate', () => {
       actions: { noop: entry(z.object({ id: z.string() }), async () => ({ ok: true as const, data: null })) },
       buildWriteContext: () => ({}),
       digest: { prompt: () => 'd' },
+      proposals: { pickPrompt: () => '' },
       ui: { title: 'QA', subtitle: 's', screenPath: '/qa/agents', assetKinds: [] },
     };
     vi.mocked(suggestProposals).mockResolvedValue({ keep: [{ index: 0, rationale: 'r' }], cost_cents: 1 });
@@ -191,11 +208,11 @@ describe('proposeChanges gate', () => {
     vi.mocked(suggestProposals).mockResolvedValue({ keep: [], cost_cents: 0 });
     const { client } = fakeService();
     await proposeChanges(client, 'org-1', 'run-1', 'key', built({ leads: [lead()] }), 200, 10, reachAgent);
+    // The seam now takes the finished prompt: the candidates reach it only as `${index}. ${title}`.
     const arg = vi.mocked(suggestProposals).mock.calls[0];
     expect(arg[0]).toBe('key');
-    expect(arg[1]).toBe('ctx');
-    expect(arg[2]).toEqual([{ index: 0, title: expect.any(String) }]);
-    expect(Object.keys(arg[2][0]).sort()).toEqual(['index', 'title']);
+    expect(arg[1]).toContain('Business snapshot:\nctx');
+    expect(arg[1]).toMatch(/Candidates:\n0\. .*Aina Rahman/);
   });
 
   it('offers a draft form for the trend and queues it with the model-supplied name (rule 4)', async () => {
@@ -214,8 +231,10 @@ describe('proposeChanges gate', () => {
       10,
       reachAgent,
     );
-    // The trend reaches the seam as the 4th arg; channel/status are server-forced.
-    expect(vi.mocked(suggestProposals).mock.calls[0][3]).toBe('Raya season gifting');
+    // The trend reaches the seam inside the finished prompt; channel/status are server-forced.
+    expect(vi.mocked(suggestProposals).mock.calls[0][1]).toContain(
+      "This week's market angles:\nRaya season gifting",
+    );
     expect(res.proposed).toBe(1);
     expect(inserts).toHaveLength(1);
     expect(inserts[0]).toMatchObject({
@@ -284,5 +303,108 @@ describe('proposeChanges gate', () => {
     );
     expect(res.proposed).toBe(0);
     expect(inserts).toHaveLength(0);
+  });
+});
+
+describe('proposeChanges definition-supplied settings', () => {
+  beforeEach(() => vi.mocked(suggestProposals).mockReset());
+
+  const qaWith = (
+    proposals: AgentDefinition['proposals'],
+    candidates: Candidate[] = [{ action: 'noop', input: { id: 'x' }, title: 'T', detail: null }],
+  ): AgentDefinition => ({
+    agentKey: 'qa-agent',
+    product: 'qa',
+    buildContext: async () => ({ context: 'c', raw: {} }),
+    scan: () => candidates,
+    hasNewData: async () => true,
+    actions: { noop: entry(z.object({ id: z.string() }), async () => ({ ok: true as const, data: null })) },
+    buildWriteContext: () => ({}),
+    proposals,
+    ui: { title: 'QA', subtitle: 's', screenPath: '/qa/agents', assetKinds: [] },
+  });
+
+  it('scopes the pending read by the definition product', async () => {
+    vi.mocked(suggestProposals).mockResolvedValue({ keep: [], cost_cents: 0 });
+    const { client, selects } = fakeService();
+    await proposeChanges(client, 'org-1', 'run-1', 'key', built({ leads: [lead()] }), 200, 10, reachAgent);
+    const pendingRead = selects.find((s) => s.cols !== 'id');
+    expect(pendingRead?.calls).toContainEqual({ method: 'eq', args: ['product', 'reach'] });
+    expect(pendingRead?.calls).toContainEqual({ method: 'eq', args: ['status', 'pending'] });
+  });
+
+  it('makes no decided read, and inserts check_key null and no expires_at, for reach', async () => {
+    vi.mocked(suggestProposals).mockResolvedValue({ keep: [{ index: 0, rationale: 'r' }], cost_cents: 1 });
+    const { client, inserts, selects } = fakeService();
+    await proposeChanges(client, 'org-1', 'run-1', 'key', built({ leads: [lead()] }), 200, 10, reachAgent);
+    expect(selects.some((s) => s.calls.some((c) => c.method === 'in'))).toBe(false);
+    expect(inserts[0]).toMatchObject({ check_key: null });
+    expect(inserts[0]).not.toHaveProperty('expires_at');
+  });
+
+  it('cooldown skips a candidate decided within the window', async () => {
+    const def = qaWith({ pickPrompt: () => 'p', cooldownDays: 14 });
+    const { client, inserts, selects } = fakeService([], null, [], null, [
+      { action: 'noop', input: { id: 'x' } },
+    ]);
+    const res = await proposeChanges(client, 'org-1', 'run-1', 'key', built(), 200, 10, def);
+    const decidedRead = selects.find((s) => s.calls.some((c) => c.method === 'in'));
+    expect(decidedRead?.cols).toBe('action, input, check_key');
+    expect(decidedRead?.calls).toContainEqual({ method: 'eq', args: ['product', 'qa'] });
+    expect(decidedRead?.calls).toContainEqual({ method: 'in', args: ['status', ['approved', 'rejected']] });
+    const gte = decidedRead?.calls.find((c) => c.method === 'gte');
+    expect(gte?.args[0]).toBe('decided_at');
+    const ageMs = Date.now() - new Date(gte?.args[1] as string).getTime();
+    expect(Math.abs(ageMs - 14 * 24 * 3600_000)).toBeLessThan(60_000);
+    expect(suggestProposals).not.toHaveBeenCalled();
+    expect(res).toEqual({ proposed: 0, cost_cents: 0 });
+    expect(inserts).toHaveLength(0);
+  });
+
+  it('does not make the decided read without cooldownDays', async () => {
+    vi.mocked(suggestProposals).mockResolvedValue({ keep: [], cost_cents: 0 });
+    const def = qaWith({ pickPrompt: () => 'p' });
+    const { client, selects } = fakeService();
+    await proposeChanges(client, 'org-1', 'run-1', 'key', built(), 200, 10, def);
+    expect(selects.some((s) => s.calls.some((c) => c.method === 'in'))).toBe(false);
+  });
+
+  it('fails closed when the cooldown read errors', async () => {
+    const def = qaWith({ pickPrompt: () => 'p', cooldownDays: 14 });
+    const { client, inserts } = fakeService([], null, [], null, [], { message: 'boom' });
+    const res = await proposeChanges(client, 'org-1', 'run-1', 'key', built(), 200, 10, def);
+    expect(suggestProposals).not.toHaveBeenCalled();
+    expect(res).toEqual({ proposed: 0, cost_cents: 0 });
+    expect(inserts).toHaveLength(0);
+  });
+
+  it('passes a stored row check_key to the definition dedupe key', async () => {
+    const dedupeKey = vi.fn((action: string, _input: unknown, checkKey?: string) => `${action}:${checkKey ?? '-'}`);
+    const def = qaWith(
+      { pickPrompt: () => 'p', dedupeKey },
+      [{ action: 'noop', input: { id: 'x' }, title: 'T', detail: null, checkKey: 'k1' }],
+    );
+    const { client } = fakeService([{ action: 'noop', input: { id: 'x' }, check_key: 'k1' } as never]);
+    const res = await proposeChanges(client, 'org-1', 'run-1', 'key', built(), 200, 10, def);
+    expect(dedupeKey).toHaveBeenCalledWith('noop', { id: 'x' }, 'k1');
+    expect(suggestProposals).not.toHaveBeenCalled();
+    expect(res.proposed).toBe(0);
+  });
+
+  it('inserts check_key and expires_at when the definition sets them', async () => {
+    vi.mocked(suggestProposals).mockResolvedValue({ keep: [{ index: 0, rationale: 'r' }], cost_cents: 1 });
+    const def = qaWith(
+      { pickPrompt: () => 'the prompt', expiresInDays: 7 },
+      [{ action: 'noop', input: { id: 'x' }, title: 'T', detail: null, checkKey: 'k1' }],
+    );
+    const { client, inserts } = fakeService();
+    const before = Date.now();
+    const res = await proposeChanges(client, 'org-1', 'run-1', 'key', built(), 200, 10, def);
+    expect(res.proposed).toBe(1);
+    expect(inserts[0]).toMatchObject({ check_key: 'k1' });
+    const exp = new Date(inserts[0].expires_at as string).getTime();
+    expect(Math.abs(exp - (before + 7 * 24 * 3600_000))).toBeLessThan(60_000);
+    // The finished prompt comes from the definition.
+    expect(vi.mocked(suggestProposals).mock.calls[0][1]).toBe('the prompt');
   });
 });

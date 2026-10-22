@@ -78,6 +78,7 @@ const qa: AgentDefinition = {
   actions: { noop: entry(z.object({ id: z.string() }), async () => ({ ok: true as const, data: null })) },
   buildWriteContext: () => ({}),
   digest: { prompt: () => 'digest prompt' }, // no research, no media
+  proposals: { pickPrompt: () => '' },
   ui: { title: 'QA', subtitle: 's', screenPath: '/qa/agents', assetKinds: [] },
 };
 
@@ -105,6 +106,22 @@ describe('runAgent drives any definition', () => {
     expect(generateImage).not.toHaveBeenCalled(); // qa has no media
     expect(startVideo).not.toHaveBeenCalled();
     expect(writeDigest).toHaveBeenCalledWith('decrypted-abc', 'digest prompt');
+  });
+
+  it('makes no digest call and still proposes when the definition has no digest step', async () => {
+    const { service, runs } = fakeService();
+    const noDigest: AgentDefinition = {
+      ...qa,
+      digest: undefined,
+      scan: () => [{ action: 'noop', input: { id: 'x' }, title: 'T', detail: null }],
+    };
+    vi.mocked(suggestProposals).mockResolvedValue({ keep: [], cost_cents: 1 });
+    const res = await runAgent(service, ORG, 'manual', noDigest);
+    expect(res).toMatchObject({ runId: 'run-1', status: 'done' });
+    expect(writeDigest).not.toHaveBeenCalled();
+    expect(suggestProposals).toHaveBeenCalledTimes(1);
+    expect(runs[0].status).toBe('done');
+    expect(runs[0]).not.toHaveProperty('digest_md');
   });
 
   it('fails with "no AI key" before any paid call when the workspace has no key', async () => {

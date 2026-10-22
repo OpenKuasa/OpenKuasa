@@ -23,6 +23,7 @@ const qa: AgentDefinition = {
   },
   buildWriteContext: () => ({ tag: 't' }),
   digest: { prompt: () => 'd' },
+  proposals: { pickPrompt: () => '' },
   ui: { title: 'QA', subtitle: 's', screenPath: '/qa/agents', assetKinds: [] },
 };
 const reg: AgentRegistry = new Map([[qa.agentKey, qa]]);

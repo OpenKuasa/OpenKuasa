@@ -201,6 +201,22 @@ export const reachAgent: AgentDefinition = {
       `Write a short weekly digest in markdown for the business owner.\n\nBusiness snapshot:\n${context}\n\nMarket angles:\n${research ?? ''}`,
   },
 
+  proposals: {
+    pickPrompt: (context, list, trend) =>
+      [
+        'You help a small business owner decide which suggested CRM changes are worth queueing for their approval.',
+        'Choose ONLY from the numbered candidates below. Do not invent new items or change them.',
+        'Reply with JSON only: an array of {"index": number, "rationale": string} objects, where rationale is one short sentence.',
+        'If a candidate is about creating a lead-capture form, also include a short "name" (max 60 characters) for the draft form, inspired by this week\'s market angles.',
+        'Reply [] if none are worthwhile.',
+        '',
+        `Business snapshot:\n${context}`,
+        ...(trend ? ['', `This week's market angles:\n${trend}`] : []),
+        '',
+        `Candidates:\n${list}`,
+      ].join('\n'),
+  },
+
   async media(mctx: MediaContext): Promise<{ cost_cents: number }> {
     const { apiKey, context, maxCost, costSoFar, reserve, service, orgId, runId } = mctx;
     // Track only what this step ADDS (summed directly, never costSoFar−derived) so the

@@ -74,23 +74,8 @@ export async function writeDigest(apiKey: string, context: string): Promise<Dige
  */
 export async function suggestProposals(
   apiKey: string,
-  context: string,
-  candidates: { index: number; title: string }[],
-  trend?: string,
+  prompt: string,
 ): Promise<{ keep: { index: number; rationale: string; name?: string }[]; cost_cents: number | null }> {
-  const list = candidates.map((c) => `${c.index}. ${c.title}`).join('\n');
-  const prompt = [
-    'You help a small business owner decide which suggested CRM changes are worth queueing for their approval.',
-    'Choose ONLY from the numbered candidates below. Do not invent new items or change them.',
-    'Reply with JSON only: an array of {"index": number, "rationale": string} objects, where rationale is one short sentence.',
-    'If a candidate is about creating a lead-capture form, also include a short "name" (max 60 characters) for the draft form, inspired by this week\'s market angles.',
-    'Reply [] if none are worthwhile.',
-    '',
-    `Business snapshot:\n${context}`,
-    ...(trend ? ['', `This week's market angles:\n${trend}`] : []),
-    '',
-    `Candidates:\n${list}`,
-  ].join('\n');
   const { text, cost_cents } = await complete(apiKey, DIGEST_MODEL(), prompt);
   const keep: { index: number; rationale: string; name?: string }[] = [];
   const match = text.match(/\[[\s\S]*\]/);
