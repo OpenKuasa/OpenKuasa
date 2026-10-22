@@ -84,7 +84,7 @@ export const HIRE_WRITE_TOOL_NAMES = ['createJob', 'updateJob', 'setJobStatus', 
 /** The HR data an agent reads, who is asking, and whether they may change it. */
 export type PeopleAccess = { data: PeopleData; viewer: PeopleViewer; write?: PeopleWrite };
 
-/** HR tools that change data: employees, departments, who reports to whom, leave, time-off, claims, overtime, attendance, public holidays, attendance settings, payroll drafts, goals, reviews, training, announcements, and letters and acknowledgement requests. A manager holds only the four decide tools of these beyond a member's. */
+/** HR tools that change data: employees, departments, who reports to whom, leave, time-off, claims, overtime, attendance, public holidays, attendance settings, payroll drafts, goals, reviews, training, announcements, letters and acknowledgement requests, the roster, hours, shift types and shift swaps. A manager holds only the five decide tools of these beyond a member's. */
 export const PEOPLE_WRITE_TOOL_NAMES = [
   'createEmployee',
   'updateEmployee',
@@ -140,6 +140,14 @@ export const PEOPLE_WRITE_TOOL_NAMES = [
   'issueLetter',
   'requestAcknowledgement',
   'setReportsTo',
+  'setShifts',
+  'logHours',
+  'saveShiftType',
+  'archiveShiftType',
+  'requestShiftSwap',
+  'replyShiftSwap',
+  'decideShiftSwap',
+  'cancelShiftSwap',
 ] as const;
 
 /**
@@ -155,6 +163,8 @@ const CONDITIONAL_PEOPLE_READ_TOOL_NAMES = [
   'listLetterTemplates',
   'listMyTeam',
   'getWaitingForMe',
+  'listShiftSwaps',
+  'listSwapOptions',
 ] as const;
 
 /**
