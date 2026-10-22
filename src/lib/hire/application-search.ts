@@ -46,7 +46,7 @@ const boundOf = (query: ApplicationSearch) => Math.min(query.limit ?? APPLICATIO
 
 /** Newest first; the id breaks a tie, so the order never depends on which read a row came from. */
 const newestFirst = (a: Application, b: Application) =>
-  (a.applied_at < b.applied_at ? 1 : a.applied_at > b.applied_at ? -1 : a.id.localeCompare(b.id));
+  (a.applied_at < b.applied_at ? 1 : a.applied_at > b.applied_at ? -1 : a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
 
 /**
  * The read against the database, with the member's own client (row-level security and the workspace filter apply,
