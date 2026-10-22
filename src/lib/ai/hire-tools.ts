@@ -73,6 +73,7 @@ import { CV_MAX_BYTES } from '@/lib/hire/application-fields';
 import { applicationFormOf } from '@/lib/hire/application-form';
 import { applicationLabel, funnelCounts, matchesText } from '@/lib/hire/applications-view';
 import type { CvReader } from '@/lib/hire/cv-read';
+import { CANDIDATE_SEARCH_LIMIT, findCandidates } from '@/lib/hire/candidate-search';
 import { sameText } from '@/lib/hire/namesakes';
 import { timeToHire } from '@/lib/hire/dashboard';
 import { klDateOf, klTimeOf, klTodayWords, shortWhen } from '@/lib/hire/interview-time';
@@ -276,6 +277,11 @@ function feedbackForTool(result: CapResult<InterviewFeedbackChange>) {
 const limit = limitSchema(`How many rows to return, at most ${LOOKUP_MAX}.`);
 
 /** The date in Kuala Lumpur, as YYYY-MM-DD: the day a closing date is checked against. */
+/** Said when a lookup by name matched more people than it returns: the newest are given, and the model narrows. */
+const moreMatches = (who: string) =>
+  `More than ${CANDIDATE_SEARCH_LIMIT} ${who} match this name: only the newest ${CANDIDATE_SEARCH_LIMIT} were looked at, ` +
+  'so the one meant may be missing. Ask the user for more of the name.';
+
 const klToday = (now: Date) => now.toLocaleDateString('en-CA', { timeZone: 'Asia/Kuala_Lumpur' });
 
 export function createHireTools(
@@ -469,7 +475,9 @@ export function createHireTools(
       }),
       execute: async ({ name, skill, location, poolStatus, includeContact: withContact, limit: requested }) =>
         safe('listTalentPool', async () => {
-          const rows = (await data.listCandidates()).filter(
+          // By a name, the database is asked, so a pool member added long ago is found too. Otherwise the list.
+          const found = name?.trim() ? await findCandidates(data, { name, inPool: true, poolStatus }) : null;
+          const rows = (found ? found.rows : await data.listCandidates()).filter(
             (c) =>
               c.pool_status !== 'none' &&
               (!poolStatus || c.pool_status === poolStatus) &&
@@ -479,6 +487,7 @@ export function createHireTools(
           );
           return {
             total: rows.length,
+            ...(found?.more && { more_matches: moreMatches('pool members') }),
             // A rule in the prompt alone was not enough: the worker picked the first match. So the result says it.
             // No "look again": a change from a second lookup in the same turn is refused, so the model must ask.
             ...(name?.trim() && rows.length > 1 && {
@@ -515,19 +524,28 @@ export function createHireTools(
       }),
       execute: async ({ name, skill, location, includeContact: withContact, limit: requested }) =>
         safe('listCandidates', async () => {
-          const [people, apps] = await Promise.all([data.listCandidates(), data.listApplications()]);
+          // By a name, the database is asked, so a candidate added long ago is found too. Otherwise the list.
+          const [found, apps] = await Promise.all([
+            name?.trim()
+              ? findCandidates(data, { name })
+              : data.listCandidates().then((list) => ({ rows: list, more: false, capped: list.length >= HIRE_READ_CAP })),
+            data.listApplications(),
+          ]);
           const counts = new Map<string, number>();
           for (const a of apps) counts.set(a.candidate_id, (counts.get(a.candidate_id) ?? 0) + 1);
-          const rows = people.filter(
+          const rows = found.rows.filter(
             (c) =>
               matchesText(c.name, name) &&
               matchesText(c.location, location) &&
               (!skill?.trim() || c.skills.some((s) => matchesText(s, skill))),
           );
-          // The read keeps only the newest HIRE_READ_CAP rows. At the cap, an older match may be missing.
-          const readCapped = people.length >= HIRE_READ_CAP || apps.length >= HIRE_READ_CAP;
+          // The list read keeps only the newest HIRE_READ_CAP rows. At the cap, an older match may be missing; a full
+          // applications read only means the counts may be low.
+          const appsCapped = apps.length >= HIRE_READ_CAP;
+          const readCapped = found.capped || appsCapped;
           return {
             total: rows.length,
+            ...(found.more && { more_matches: moreMatches('candidates') }),
             // A rule in the prompt alone was not enough: the worker picked the first match. So the result says it.
             ...(name?.trim() && rows.length > 1 && {
               several_match:
@@ -536,9 +554,10 @@ export function createHireTools(
             }),
             ...(readCapped && {
               read_capped: true,
-              note:
-                `Only the newest ${HIRE_READ_CAP} candidates and applications were searched, so an older ` +
-                'candidate may be missing and the application counts may be low. Narrow the search or say so.',
+              note: found.capped
+                ? `Only the newest ${HIRE_READ_CAP} candidates and applications were searched, so an older ` +
+                  'candidate may be missing and the application counts may be low. Narrow the search or say so.'
+                : `Only the newest ${HIRE_READ_CAP} applications were counted, so the application counts may be low.`,
             }),
             candidates: rows.slice(0, rowLimit(requested, 20)).map((c) => ({
               id: c.id,
