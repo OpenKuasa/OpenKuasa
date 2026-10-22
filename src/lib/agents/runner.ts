@@ -5,7 +5,7 @@ import { workspaceSpendCents } from '@/lib/agents/spend';
 import { runAgent, type AgentRunResult } from '@/lib/agents/run-agent';
 import { AGENTS, agentFor } from '@/lib/agents/registry';
 import type { AgentRegistry } from '@/lib/agents/definition';
-import { RunInProgressError, WEEKLY_STUDIO } from '@/lib/agents/types';
+import { RunInProgressError } from '@/lib/agents/types';
 
 export type RunSchedulesSummary = {
   ran: number;
@@ -32,6 +32,7 @@ export type StartRefusal = 'disabled' | BudgetRefusal;
 async function overBudget(
   client: SupabaseClient,
   orgId: string,
+  agentKey: string,
   caps: OrgConfig | null,
 ): Promise<BudgetRefusal | null> {
   const daily = caps?.daily_cap_cents ?? 500;
@@ -39,21 +40,25 @@ async function overBudget(
   // Fail closed: workspaceSpendCents throws on an unreadable spend. For a schedule,
   // the per-schedule catch counts it failed and the next tick retries (no pause).
   const since = (ms: number) => new Date(Date.now() - ms).toISOString();
-  if ((await workspaceSpendCents(client, orgId, since(DAY_MS))) >= daily) {
+  if ((await workspaceSpendCents(client, orgId, since(DAY_MS), agentKey)) >= daily) {
     return 'daily budget reached';
   }
-  if ((await workspaceSpendCents(client, orgId, since(7 * DAY_MS))) >= weekly) {
+  if ((await workspaceSpendCents(client, orgId, since(7 * DAY_MS), agentKey)) >= weekly) {
     return 'weekly budget reached';
   }
   return null;
 }
 
-async function readOrgConfig(client: SupabaseClient, orgId: string): Promise<OrgConfig | null> {
+async function readOrgConfig(
+  client: SupabaseClient,
+  orgId: string,
+  agentKey: string,
+): Promise<OrgConfig | null> {
   const { data, error } = await client
     .from('agent_configs')
     .select('enabled, daily_cap_cents, weekly_cap_cents')
     .eq('org_id', orgId)
-    .eq('agent_key', WEEKLY_STUDIO)
+    .eq('agent_key', agentKey)
     .maybeSingle();
   // Fail closed: unreadable settings must not read as "no settings, defaults apply".
   if (error) throw new Error('config query failed');
@@ -70,11 +75,12 @@ async function readOrgConfig(client: SupabaseClient, orgId: string): Promise<Org
 export async function startRefusal(
   client: SupabaseClient,
   orgId: string,
+  agentKey: string,
   config?: OrgConfig | null,
 ): Promise<StartRefusal | null> {
-  const cfg = config === undefined ? await readOrgConfig(client, orgId) : config;
+  const cfg = config === undefined ? await readOrgConfig(client, orgId, agentKey) : config;
   if (cfg && cfg.enabled === false) return 'disabled';
-  return overBudget(client, orgId, cfg);
+  return overBudget(client, orgId, agentKey, cfg);
 }
 
 type DueSchedule = {
@@ -120,12 +126,13 @@ export async function runSchedules(
     .lte('next_run_at', nowIso);
   if (error || !data) return summary;
 
-  // Per-org Weekly Studio config, read once per org per tick.
+  // Per-org, per-agent config, read once per org and agent per tick.
   const configs = new Map<string, OrgConfig | null>();
-  const configFor = async (orgId: string): Promise<OrgConfig | null> => {
-    if (configs.has(orgId)) return configs.get(orgId) ?? null;
-    const row = await readOrgConfig(client, orgId);
-    configs.set(orgId, row);
+  const configFor = async (orgId: string, agentKey: string): Promise<OrgConfig | null> => {
+    const cacheKey = `${orgId}:${agentKey}`;
+    if (configs.has(cacheKey)) return configs.get(cacheKey) ?? null;
+    const row = await readOrgConfig(client, orgId, agentKey);
+    configs.set(cacheKey, row);
     return row;
   };
 
@@ -141,7 +148,7 @@ export async function runSchedules(
 
       // Off switch: leave the schedule untouched so re-enabling resumes it.
       // No config row keeps the default behavior (proceed).
-      const config = await configFor(s.org_id);
+      const config = await configFor(s.org_id, s.agent_key);
       if (config && config.enabled === false) {
         summary.skipped += 1;
         continue;
@@ -162,12 +169,13 @@ export async function runSchedules(
         continue;
       }
 
-      const reason = await startRefusal(client, s.org_id, config);
+      const reason = await startRefusal(client, s.org_id, s.agent_key, config);
       if (reason) {
         await client
           .from('agent_schedules')
           .update({ status: 'paused', paused_reason: reason, updated_at: nowIso })
           .eq('org_id', s.org_id)
+          .eq('agent_key', s.agent_key)
           .eq('status', 'active');
         summary.paused += 1;
         continue;

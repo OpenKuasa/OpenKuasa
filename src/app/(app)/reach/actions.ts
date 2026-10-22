@@ -79,7 +79,7 @@ import { serviceClient } from '@/lib/supabase/service';
 import { runWeeklyStudio } from '@/lib/agents/weekly-studio';
 import { runProposalAction } from '@/lib/agents/apply-proposal';
 import { reapStaleRuns, startRefusal, type StartRefusal } from '@/lib/agents/runner';
-import { RunInProgressError } from '@/lib/agents/types';
+import { RunInProgressError, WEEKLY_STUDIO } from '@/lib/agents/types';
 import { createSupabaseReachData, getReachData } from '@/lib/reach/supabase';
 import { FORM_MESSAGES } from '@/lib/reach/forms';
 import { leadsToCsv } from '@/lib/reach/csv';
@@ -399,7 +399,7 @@ export async function runAgentNowAction(
     // A run that died mid-flight still holds the workspace's one slot until it is
     // reaped; do that for this workspace now rather than wait for the poll cron.
     await reapStaleRuns(service, ctx.orgId);
-    const refusal = await startRefusal(service, ctx.orgId);
+    const refusal = await startRefusal(service, ctx.orgId, WEEKLY_STUDIO);
     if (refusal) return { ok: false, error: RUN_REFUSED[refusal] };
     // Starting the run claims the slot atomically: concurrent presses cannot all start.
     const result = await runWeeklyStudio(service, ctx.orgId, 'manual');

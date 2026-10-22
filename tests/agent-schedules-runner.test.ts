@@ -6,7 +6,9 @@ vi.mock('@/lib/agents/run-agent', () => ({
 vi.mock('@/lib/agents/openrouter-media', () => ({ checkVideo: vi.fn() }));
 vi.mock('@/lib/ai/key-crypto', () => ({ hasKeySecret: () => true, decryptApiKey: () => 'k' }));
 
-import { runSchedules } from '@/lib/agents/runner';
+import { runSchedules, startRefusal } from '@/lib/agents/runner';
+import { AGENTS } from '@/lib/agents/registry';
+import type { AgentRegistry } from '@/lib/agents/definition';
 import { RunInProgressError } from '@/lib/agents/types';
 import { runAgent } from '@/lib/agents/run-agent';
 
@@ -50,6 +52,8 @@ type Opts = {
   newData?: boolean;
   runsFor?: (ageMs: number) => { cost_cents: number }[];
   spendError?: boolean;
+  cfgFor?: (agentKey: unknown) => { enabled?: boolean; daily_cap_cents: number; weekly_cap_cents: number } | null;
+  spendFor?: (agentKey: unknown) => number;
 };
 
 type Write = {
@@ -62,14 +66,16 @@ type Write = {
 
 function fakeClient(schedules: Sched[], opts: Opts = {}) {
   const writes: Write[] = [];
-  const rpcCalls: { name: string; args: { p_org_id: string; p_since: string } }[] = [];
+  const rpcCalls: { name: string; args: { p_org_id: string; p_since: string; p_agent_key?: string } }[] = [];
   let runRowListReads = 0;
+  const configReads: [string, unknown][][] = [];
   const o = { claim: true, cfg: null, recentRuns: [], runCost: 0, newData: false, ...opts };
   const client = {
     // The workspace spend is one database-side sum per window, never a row fetch.
-    async rpc(name: string, args: { p_org_id: string; p_since: string }) {
+    async rpc(name: string, args: { p_org_id: string; p_since: string; p_agent_key?: string }) {
       rpcCalls.push({ name, args });
       if (o.spendError) return { data: null, error: { message: 'x' } };
+      if (o.spendFor) return { data: o.spendFor(args.p_agent_key), error: null };
       const rows = o.runsFor ? o.runsFor(Date.now() - new Date(args.p_since).getTime()) : o.recentRuns;
       return { data: rows.reduce((n, r) => n + r.cost_cents, 0), error: null };
     },
@@ -84,7 +90,11 @@ function fakeClient(schedules: Sched[], opts: Opts = {}) {
           q.lte = () => q;
           q.limit = () => q;
           q.maybeSingle = async () => {
-            if (table === 'agent_configs') return { data: o.cfg, error: null };
+            if (table === 'agent_configs') {
+              configReads.push(eqs);
+              const key = eqs.find(([c]) => c === 'agent_key')?.[1];
+              return { data: o.cfgFor ? o.cfgFor(key) : o.cfg, error: null };
+            }
             if (table === 'agent_runs') return { data: { cost_cents: o.runCost }, error: null };
             return { data: o.newData ? { id: 'x' } : null, error: null };
           };
@@ -116,7 +126,7 @@ function fakeClient(schedules: Sched[], opts: Opts = {}) {
       };
     },
   };
-  return { client: client as never, writes, rpcCalls, runRowListReads: () => runRowListReads };
+  return { client: client as never, writes, rpcCalls, configReads, runRowListReads: () => runRowListReads };
 }
 
 const schedUpdates = (writes: Write[]) => writes.filter((w) => w.table === 'agent_schedules' && w.kind === 'update');
@@ -299,6 +309,52 @@ describe('runSchedules', () => {
     const out = await runSchedules(client);
     expect(out.ran).toBe(2);
     expect(cfgReads).toBe(1);
+  });
+
+  const crmRegistry = (): AgentRegistry =>
+    new Map([
+      ...AGENTS,
+      ['crm-focus', { ...AGENTS.get('weekly-studio')!, agentKey: 'crm-focus', hasNewData: async () => true }],
+    ]);
+
+  it("pauses only the over-budget agent's schedules", async () => {
+    const { client, writes, rpcCalls } = fakeClient(
+      [sched({ id: 's1', agent_key: 'weekly-studio' }), sched({ id: 's2', agent_key: 'crm-focus' })],
+      { spendFor: (k) => (k === 'crm-focus' ? 9999 : 0) },
+    );
+    const out = await runSchedules(client, crmRegistry());
+    expect(rpcCalls.every((c) => c.args.p_agent_key !== undefined)).toBe(true);
+    const pauses = schedUpdates(writes).filter((w) => w.patch.status === 'paused');
+    expect(pauses).toHaveLength(1);
+    expect(pauses[0].eqs).toContainEqual(['agent_key', 'crm-focus']);
+    expect(pauses[0].eqs).toContainEqual(['org_id', ORG]);
+    expect(runAgent).toHaveBeenCalledTimes(1);
+    expect(out).toMatchObject({ paused: 1, ran: 1 });
+  });
+
+  it('reads config per agent, cached by org and agent key', async () => {
+    const { client, configReads } = fakeClient(
+      [
+        sched({ id: 's1', agent_key: 'weekly-studio' }),
+        sched({ id: 's2', agent_key: 'crm-focus' }),
+        sched({ id: 's3', agent_key: 'crm-focus' }),
+      ],
+      { cfgFor: (k) => ({ enabled: k !== 'crm-focus', daily_cap_cents: 500, weekly_cap_cents: 2000 }) },
+    );
+    const out = await runSchedules(client, crmRegistry());
+    expect(configReads).toHaveLength(2);
+    expect(configReads.map((e) => e.find(([c]) => c === 'agent_key')?.[1]).sort()).toEqual([
+      'crm-focus',
+      'weekly-studio',
+    ]);
+    expect(out).toMatchObject({ ran: 1, skipped: 2 });
+  });
+
+  it('startRefusal passes the agent key to the spend sum', async () => {
+    const { client, rpcCalls } = fakeClient([], {});
+    await startRefusal(client, ORG, 'crm-focus', null);
+    expect(rpcCalls).toHaveLength(2);
+    expect(rpcCalls.every((c) => c.args.p_agent_key === 'crm-focus')).toBe(true);
   });
 
   it('clears a stale paused_reason in the claim update', async () => {
