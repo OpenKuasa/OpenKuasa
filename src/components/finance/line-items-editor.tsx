@@ -332,7 +332,7 @@ export function LineItemsEditor({
                 </Select>
               </div>
               {docProblem ? (
-                <p id={`${id}-doc-discount-problem`} className="text-xs text-destructive">
+                <p id={`${id}-doc-discount-problem`} role="alert" className="text-xs text-destructive">
                   {docProblem}
                 </p>
               ) : null}

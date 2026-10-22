@@ -6,7 +6,7 @@
  * the text the person typed.
  */
 import { type DocDiscount, DOC_DISCOUNT_LEAVES_NOTHING, addDaysIso, docDiscountLeavesNothing, type LineNumbers } from './bill-math';
-import { type DocumentLineRow, isIsoDate, roundRate } from './document-lines';
+import { DOC_DISCOUNT_MESSAGES, type DocumentLineRow, isIsoDate, roundRate } from './document-lines';
 import { typedNumber } from './format';
 import type { CurrencyFields, RateFigure } from './document-currency';
 import type { FinanceProduct } from './products';
@@ -139,8 +139,16 @@ export function docDiscountPayload(draft: DocDiscountDraft): { doc_discount_pct:
   return { doc_discount_pct: pct, doc_discount_amount: amount };
 }
 
-/** DOC_DISCOUNT_LEAVES_NOTHING when the discount would leave nothing to pay on these lines, else null. */
+/**
+ * What is wrong with the discount, else null: the range message when the percentage is not above 0 and up to
+ * 100 with two decimals at most (as Save says), or DOC_DISCOUNT_LEAVES_NOTHING when it is in range but would
+ * leave nothing to pay on these lines.
+ */
 export function docDiscountProblem(lines: LineDraft[], draft: DocDiscountDraft): string | null {
+  const { pct } = docDiscountNumbers(draft);
+  if (pct !== null && !(pct > 0 && pct <= 100 && Math.abs(pct * 100 - Math.round(pct * 100)) < 1e-6)) {
+    return DOC_DISCOUNT_MESSAGES.pct;
+  }
   // The form's lines are in position order, which is how the split breaks ties.
   return docDiscountLeavesNothing(lines.map(lineNumbers), docDiscountNumbers(draft)) ? DOC_DISCOUNT_LEAVES_NOTHING : null;
 }

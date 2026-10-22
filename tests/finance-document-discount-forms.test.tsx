@@ -5,7 +5,7 @@ import { QuotationFormCard } from '@/components/finance/quotation-form-card';
 import { DOC_DISCOUNT_LEAVES_NOTHING } from '@/lib/finance/bill-math';
 import type { FinanceContact } from '@/lib/finance/contacts';
 import { ringgitTotal, wholeUnitsError } from '@/lib/finance/document-currency';
-import { type LineDraft, emptyLine } from '@/lib/finance/document-form';
+import { type LineDraft, docDiscountProblem, emptyLine } from '@/lib/finance/document-form';
 import { DOC_DISCOUNT_MESSAGES } from '@/lib/finance/document-lines';
 import { type InvoiceForm, invoiceFormError, invoiceFormFromDetail, invoicePayload, newInvoiceForm } from '@/lib/finance/invoice-form';
 import {
@@ -223,7 +223,25 @@ describe('the invoice form with a discount on the whole invoice', () => {
   });
 
   it('says beside the field when the discount leaves nothing to pay', () => {
-    expect(card(draft(100))).toContain(DOC_DISCOUNT_LEAVES_NOTHING);
+    const out = card(draft(100));
+    expect(out).toContain(DOC_DISCOUNT_LEAVES_NOTHING);
+    expect(out).toMatch(/<p[^>]*role="alert"[^>]*>[^<]*A discount on the whole document must leave something to pay/);
+  });
+
+  it('says the range, not "nothing to pay", for a percentage out of range', () => {
+    const out = card(draft(150));
+    expect(out).toContain(DOC_DISCOUNT_MESSAGES.pct);
+    expect(out).not.toContain(DOC_DISCOUNT_LEAVES_NOTHING);
+    expect(out).toMatch(/<p[^>]*role="alert"[^>]*>Enter a discount on the whole document above 0%/);
+  });
+
+  it('docDiscountProblem: range message out of range, FIN62 sentence only when in range', () => {
+    const lines = invoiceFormFromDetail(draft(null)).lines;
+    const problem = (pct: string, amount = '') => docDiscountProblem(lines, { pct, amount });
+    for (const pct of ['150', '100.01', '-5', '10.005']) expect(problem(pct)).toBe(DOC_DISCOUNT_MESSAGES.pct);
+    expect(problem('100')).toBe(DOC_DISCOUNT_LEAVES_NOTHING);
+    expect(problem('10')).toBeNull();
+    expect(problem('')).toBeNull();
   });
 
   it('is the quotation form too, in its own word', () => {
