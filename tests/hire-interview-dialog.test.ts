@@ -9,7 +9,7 @@ import {
   dateBounds, dateHelper, dialogDescription, dialogTitle, discardTitle, durationOptions, emptyValues, fieldId, fieldOfRefusal, firstWrongField,
   focusIdAfter, foundFrom, interviewProblems, interviewResult, inviteLead, inviteTitle, isDirty, keepChosen, mayClose,
   menuGroups, menuName, moveInput, moveLabel, moveResult, noticeOf, offersMove, onOf, openerId, outcomeInput, panelLine, panelMore, panelRows,
-  pastInput, pickerChoices, pickerLabel, pickerNotes, pickerOptions, searchesServer, placeHelper, placeLabel, refreshAfter, refusalWord, rowMenu, sayOnNotice, scheduleInput,
+  pastInput, pickerChoices, pickerLabel, pickerNotes, pickerOptions, searchFailed, searchesServer, placeHelper, placeLabel, refreshAfter, refusalWord, rowMenu, sayOnNotice, scheduleInput,
   stepAfter, stillScheduledNotice, submission, submitLabel, tagsFor, timeCell, timeHelper, valuesFrom, type InterviewFormValues,
   GETTING_INVITATION, LOAD_CURRENT, LOAD_CURRENT_HELP, calendarOf, clockAt, currentResult, offersReload, rowWithCurrent, handoverAfter, handoverResult, mayAskHandover, rowWaitingWord,
 } from '@/lib/hire/interview-dialog-state';
@@ -366,6 +366,13 @@ describe('the application picker asks the server once the list was cut', () => {
     const got = choices({ query: 'aina', found: { query: 'aina', failed: true } });
     expect(got.options.map((o) => o.id)).toEqual(['1']);
     expect(got.said).toBe('The search could not be finished, so only the newest 1,000 applications were searched.');
+  });
+  it('offers "Search again" only while the answer for exactly the text typed is a failure', () => {
+    expect(searchFailed({ cut: true, query: 'aina', found: { query: 'aina', failed: true } })).toBe(true);
+    expect(searchFailed({ cut: true, query: 'ain', found: { query: 'aina', failed: true } })).toBe(false);
+    expect(searchFailed({ cut: true, query: 'aina', found: { query: 'aina', applications: [], more: false } })).toBe(false);
+    expect(searchFailed({ cut: true, query: 'aina', found: null })).toBe(false);
+    expect(searchFailed({ cut: false, query: 'aina', found: { query: 'aina', failed: true } })).toBe(false);
   });
   it('keeps the chosen application whatever is searched next', () => {
     const got = choices({ query: 'ben', found: { query: 'ben', applications: [], more: false }, chosen: old });

@@ -16,7 +16,7 @@ import {
   COPY_FAILED, DONE, DOWNLOAD_HELP, LOAD_CURRENT, LOAD_CURRENT_HELP, DOWNLOAD_LABEL, FIND_HELP, ICS_MIME, INTERVIEWER_HELP, MOVED, NOTES_HELP, NOTHING_CHANGED, OUTCOME_HELP,
   canSubmit, copyLabel, dateBounds, dateHelper, dialogDescription, dialogTitle, discardTitle, durationOptions, emptyValues, fieldId,
   fieldOfRefusal, focusIdAfter, interviewProblems, interviewResult, inviteLead, inviteTitle, isDirty, foundFrom,
-  moveInput, moveLabel, moveResult, noticeOf, offersMove, onOf, pickerChoices, searchesServer, placeHelper, placeLabel, refreshAfter, refusalWord,
+  moveInput, moveLabel, moveResult, noticeOf, offersMove, onOf, pickerChoices, searchFailed, searchesServer, placeHelper, placeLabel, refreshAfter, refusalWord,
   calendarOf, clockAt, currentResult, offersReload, rowWithCurrent, stepAfter, submission, submitLabel, timeHelper, valuesFrom,
   type CalendarFile, type FieldPart, type InterviewField, type InterviewFormMode, type InterviewFormValues, type InterviewProblems, type PastOutcome, type ServerFound, type Submission,
 } from '@/lib/hire/interview-dialog-state';
@@ -145,6 +145,8 @@ export type InterviewFormViewProps = {
   onCancel: () => void;
   /** Given once the interview's current details were read after a "changed a moment ago" refusal: loads them into the form. */
   onLoadCurrent?: () => void;
+  /** Asks the server again for what is typed, after its search failed. */
+  onSearchAgain?: () => void;
 };
 
 /**
@@ -155,7 +157,7 @@ export type InterviewFormViewProps = {
  */
 export function InterviewFormView({
   base, mode, fixed, picker, query, found = null, chosen = null, values, problems, refusal, unchanged, pending, today, storedDuration, onQuery, onChange,
-  onSubmit, onCancel, onLoadCurrent,
+  onSubmit, onCancel, onLoadCurrent, onSearchAgain,
 }: InterviewFormViewProps) {
   const id = (part: FieldPart) => fieldId(base, part);
   const helpId = (part: FieldPart) => `${id(part)}-help`;
@@ -176,6 +178,7 @@ export function InterviewFormView({
   const bounds = dateBounds(mode, today);
   const picked = fixed ? null : pickerChoices({ ...picker, query, mode, found, chosen });
   const pickerSaid = picked?.said ?? '';
+  const offerSearchAgain = !fixed && onSearchAgain !== undefined && searchFailed({ cut: picker.cut, query, found });
   const waiting = pending || undefined;
 
   return (
@@ -243,6 +246,11 @@ export function InterviewFormView({
             <p id={helpId('application_id')} aria-live="polite" className={cn(HELP, !pickerSaid && 'sr-only')}>
               {pickerSaid}
             </p>
+            {offerSearchAgain ? (
+              <Button type="button" variant="outline" size="sm" className={cn('self-start', TARGET)} onClick={onSearchAgain}>
+                Search again
+              </Button>
+            ) : null}
             {errorOf('application_id')}
           </div>
         </>
@@ -485,6 +493,8 @@ function InterviewForm({
   const [query, setQuery] = useState('');
   /** The server's answer to the newest search (only once the list read was cut). */
   const [found, setFound] = useState<ServerFound | null>(null);
+  /** Counts "Search again" presses: each asks the server once more for the same text. */
+  const [attempt, setAttempt] = useState(0);
   /** The chosen application itself: a search may have found it, and the next search may not list it. */
   const [chosen, setChosen] = useState<PickerApplication | null>(null);
   /** Only the answer to the newest search is used: an older one that comes back late is dropped. */
@@ -520,7 +530,7 @@ function InterviewForm({
       searchInterviewPickerAction({ query: text, mode }).then(settle, () => settle(null));
     }, SEARCH_PAUSE_MS);
     return () => window.clearTimeout(timer);
-  }, [asksServer, query, mode]);
+  }, [asksServer, query, mode, attempt]);
   useEffect(() => {
     const questions = latest.current;
     return () => questions.cancel();
@@ -583,6 +593,11 @@ function InterviewForm({
       picker={picker}
       query={query}
       found={found}
+      onSearchAgain={() => {
+        // The failure is cleared at once, so the line reads "Searching…" until the new answer comes.
+        setFound(null);
+        setAttempt((n) => n + 1);
+      }}
       chosen={chosen}
       values={values}
       problems={problems}

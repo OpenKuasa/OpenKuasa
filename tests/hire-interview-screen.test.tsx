@@ -427,6 +427,14 @@ describe('the form\'s inner content', () => {
     expect(options(kept, 'f-application_id')).toEqual(['Choose an application', 'Zulaikha Old — Driver (Applied)', 'Ben Tan — Cashier (Applied)']);
     expect(kept).toMatch(/<option[^>]*value="app-old"[^>]*selected=""|<option[^>]*selected=""[^>]*value="app-old"/);
   });
+  it('after a failed search, offers "Search again"; not before, and not once the answer came', () => {
+    const cut = { applications: APPS, cut: true };
+    const failed = view({ picker: cut, query: 'zul', found: { query: 'zul', failed: true }, onSearchAgain: noop });
+    expect(buttons(failed)).toEqual(['Search again', 'Cancel', 'Schedule interview']);
+    expect(text(failed)).toContain('The search could not be finished, so only the newest 1,000 applications were searched.');
+    expect(buttons(view({ picker: cut, query: 'zul', onSearchAgain: noop }))).not.toContain('Search again');
+    expect(buttons(view({ picker: cut, query: 'zul', found: { query: 'zul', applications: [], more: false }, onSearchAgain: noop }))).not.toContain('Search again');
+  });
   it('a fixed application (from a card or a panel): shown as text, with no search field and no select for it', () => {
     const html = view({ fixed: { name: 'Aina Rahman', job: 'Sales Executive' } });
     expect(labels(html).map((l) => l.text)).toEqual(['Date', 'Time', 'Duration', 'Type', 'Meeting link', 'Interviewer', 'Notes']);

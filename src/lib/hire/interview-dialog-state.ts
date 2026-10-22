@@ -374,6 +374,10 @@ export function foundFrom(result: unknown, query: string): ServerFound {
   return { query, applications, more: data.more === true };
 }
 
+/** Whether the server's answer for exactly the text typed is a failure: the form then offers "Search again". */
+export const searchFailed = (input: { cut: boolean; query: string; found: ServerFound | null }): boolean =>
+  searchesServer(input.cut, input.query) && input.found !== null && input.found.query === input.query && 'failed' in input.found;
+
 /**
  * What the picker's select offers and the one line under it. Without a cut, or with nothing typed: the list read,
  * filtered here, as it always was. Once the list was cut and something is typed, the server's answer for exactly
