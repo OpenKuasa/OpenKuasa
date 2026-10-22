@@ -115,6 +115,8 @@ export const LIVE_SCREENS: ReadonlySet<string> = new Set([
   'finance/sst-report',
   // Reads the finance rows of the activity log (2026-10-23); history starts on the go-live date.
   'finance/audit-trail',
+  // Financial year, books lock, numbering, and the company details from Account → Company (2026-10-23).
+  'finance/settings',
 ]);
 
 /** Whether the app path is a screen that is not connected to live data yet. */

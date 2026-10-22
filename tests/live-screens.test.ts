@@ -58,6 +58,10 @@ describe('live screens', () => {
     expect(isSampleScreen('/finance/audit-trail')).toBe(false);
   });
 
+  it('counts the Bendahara Accounting Settings as live', () => {
+    expect(isSampleScreen('/finance/settings')).toBe(false);
+  });
+
   it('counts FX Revaluation as live', () => {
     expect(isSampleScreen('/finance/fx-revaluation')).toBe(false);
   });
