@@ -49,6 +49,11 @@ describe('live screens', () => {
     expect(isSampleScreen('/finance/contra-entries')).toBe(false);
   });
 
+  it('counts the Bendahara Dashboard and Overview as live', () => {
+    expect(isSampleScreen('/finance/dashboard')).toBe(false);
+    expect(isSampleScreen('/finance/assistant')).toBe(false);
+  });
+
   it('counts FX Revaluation as live', () => {
     expect(isSampleScreen('/finance/fx-revaluation')).toBe(false);
   });

@@ -85,8 +85,10 @@ export const LIVE_SCREENS: ReadonlySet<string> = new Set([
   'people/training',
   'people/settings',
 
-  // Bendahara. Its Overview stays sample: half its cards have no source yet, and the
-  // demo shows fixed figures there.
+  // Bendahara. Dashboard and Overview read the books (2026-10-23); the Overview's cards with no
+  // source say so, and its demo still shows fixed figures.
+  'finance/assistant',
+  'finance/dashboard',
   'finance/customers-suppliers',
   'finance/products',
   'finance/invoices',
