@@ -1,4 +1,8 @@
-/** What a finance row in the audit trail is about: the `entity_type` the database writes on `activity_log`. */
+import { z } from 'zod';
+import { addDays, formatDay, malaysiaDate } from '@/lib/people/dates';
+import type { FinanceWriteContext } from './result';
+
+/** What a finance row in the audit trail is about:the `entity_type` the database writes on `activity_log`. */
 export type AuditEntityType =
   | 'finance_invoice'
   | 'finance_quotation'
@@ -85,3 +89,169 @@ export type AuditSummary = {
   byType: { type: AuditEntityType; label: string; count: number }[];
   actors: string[];
 };
+
+const DAY_MS = 86_400_000;
+const SUMMARY_DAYS = 30;
+const SUMMARY_ROW_CAP = 5000;
+
+const ENTITY_VALUES = AUDIT_ENTITY_TYPES.map((t) => t.value) as [AuditEntityType, ...AuditEntityType[]];
+const PERIOD_VALUES = AUDIT_PERIODS.map((p) => p.value) as [AuditPeriod, ...AuditPeriod[]];
+
+// Each field falls back on its own, so one bad value (or a repeated param,
+// which arrives as an array) does not reset the others.
+const filtersSchema = z.object({
+  type: z.enum(ENTITY_VALUES).nullable().catch(null),
+  actor: z.string().trim().min(1).max(200).nullable().catch(null),
+  period: z.enum(PERIOD_VALUES).catch('30d'),
+  q: z.string().trim().max(100).catch(''),
+  before: z.iso.datetime({ offset: true }).nullable().catch(null),
+});
+
+/** Reads the audit screen's filters off the address; a bad value falls back on its own. */
+export function parseAuditFilters(params: Record<string, string | string[] | undefined>): AuditFilters {
+  // A search longer than 100 characters is cut, not thrown away.
+  const q = typeof params.q === 'string' ? params.q.trim().slice(0, 100) : '';
+  return filtersSchema.parse({
+    type: params.type ?? null,
+    actor: params.actor ?? null,
+    period: params.period,
+    q,
+    before: params.before ?? null,
+  });
+}
+
+/** Escapes `%`, `_` and `\` so a search is matched as typed, not as a pattern. */
+function escapeLike(text: string): string {
+  return text.replace(/[\\%_]/g, (c) => `\\${c}`);
+}
+
+const typeLabels = new Map(AUDIT_ENTITY_TYPES.map((t) => [t.value as string, t.label]));
+
+function isEntityType(value: unknown): value is AuditEntityType {
+  return typeof value === 'string' && typeLabels.has(value);
+}
+
+type ActivityRow = {
+  id: string;
+  created_at: string;
+  actor_name: string | null;
+  action: string;
+  target: string | null;
+  entity_type: string | null;
+  entity_id: string | null;
+  details: AuditDetails | null;
+};
+
+/**
+ * One page of the workspace's finance audit trail, newest first. Reads one row more than the page to know
+ * whether an older page exists; a row whose type this code does not know is left out.
+ */
+export async function listFinanceAudit(
+  ctx: FinanceWriteContext,
+  filters: AuditFilters,
+  pageSize: number = AUDIT_PAGE_SIZE,
+): Promise<{ entries: AuditEntry[]; nextBefore: string | null }> {
+  let query = ctx.client
+    .from('activity_log')
+    .select('id, created_at, actor_name, action, target, entity_type, entity_id, details')
+    .eq('org_id', ctx.orgId);
+  query = filters.type ? query.eq('entity_type', filters.type) : query.like('entity_type', 'finance\\_%');
+  if (filters.actor) query = query.eq('actor_name', filters.actor);
+  const days = AUDIT_PERIODS.find((p) => p.value === filters.period)?.days;
+  if (days) query = query.gte('created_at', new Date(Date.now() - days * DAY_MS).toISOString());
+  if (filters.before) query = query.lt('created_at', filters.before);
+  if (filters.q) query = query.ilike('target', `%${escapeLike(filters.q)}%`);
+
+  const { data, error } = await query
+    .order('created_at', { ascending: false })
+    .order('id', { ascending: false })
+    .limit(pageSize + 1);
+  if (error) throw error;
+
+  const rows = (data ?? []) as ActivityRow[];
+  const page = rows.slice(0, pageSize);
+  const entries: AuditEntry[] = [];
+  for (const r of page) {
+    if (!isEntityType(r.entity_type)) continue;
+    entries.push({
+      id: r.id,
+      createdAt: r.created_at,
+      actorName: r.actor_name?.trim() || 'System',
+      action: r.action,
+      target: r.target ?? null,
+      entityType: r.entity_type,
+      entityId: r.entity_id ?? null,
+      details: r.details && typeof r.details.event === 'string' ? r.details : { ...(r.details ?? {}), event: '' },
+    });
+  }
+  // The raw database timestamp keeps its microseconds, so the next page starts exactly after this row.
+  const nextBefore = rows.length > pageSize ? page[page.length - 1].created_at : null;
+  return { entries, nextBefore };
+}
+
+type SummaryRow = { created_at: string; entity_type: string; actor_name: string; event: string };
+
+/** The last 31 days of finance rows (just what the summary counts), at most 5000. */
+export async function readAuditSummaryRows(ctx: FinanceWriteContext): Promise<SummaryRow[]> {
+  const since = new Date(Date.now() - (SUMMARY_DAYS + 1) * DAY_MS).toISOString();
+  const { data, error } = await ctx.client
+    .from('activity_log')
+    .select('created_at, entity_type, actor_name, event:details->>event')
+    .eq('org_id', ctx.orgId)
+    .like('entity_type', 'finance\\_%')
+    .gte('created_at', since)
+    .order('created_at', { ascending: false })
+    .limit(SUMMARY_ROW_CAP);
+  if (error) throw error;
+  return ((data ?? []) as Partial<SummaryRow>[]).map((r) => ({
+    created_at: r.created_at ?? '',
+    entity_type: r.entity_type ?? '',
+    actor_name: r.actor_name ?? '',
+    event: r.event ?? '',
+  }));
+}
+
+/** Counts for the strip above the trail. Days are Malaysia days, so a late-evening row lands on the right one. */
+export function buildAuditSummary(rows: SummaryRow[], today: string): AuditSummary {
+  const weekStart = addDays(today, -6);
+  const month = today.slice(0, 7);
+  const perDay = new Map<string, number>();
+  const perType = new Map<AuditEntityType, number>();
+  const actors = new Set<string>();
+  let todayCount = 0;
+  let week = 0;
+  let voids = 0;
+  let deletions = 0;
+
+  for (const r of rows) {
+    const day = malaysiaDate(r.created_at);
+    if (!day) continue;
+    perDay.set(day, (perDay.get(day) ?? 0) + 1);
+    if (day === today) todayCount += 1;
+    if (day >= weekStart && day <= today) week += 1;
+    if (day.slice(0, 7) === month && day <= today) {
+      if (r.event === 'voided') voids += 1;
+      if (r.event === 'deleted') deletions += 1;
+    }
+    if (isEntityType(r.entity_type)) perType.set(r.entity_type, (perType.get(r.entity_type) ?? 0) + 1);
+    if (r.actor_name) actors.add(r.actor_name);
+  }
+
+  const daily = Array.from({ length: SUMMARY_DAYS }, (_, i) => {
+    const date = addDays(today, i - (SUMMARY_DAYS - 1));
+    return { date, label: formatDay(date), count: perDay.get(date) ?? 0 };
+  });
+  const byType = [...perType.entries()]
+    .map(([type, count]) => ({ type, label: typeLabels.get(type) ?? type, count }))
+    .sort((a, b) => b.count - a.count);
+
+  return {
+    today: todayCount,
+    week,
+    voidsThisMonth: voids,
+    deletionsThisMonth: deletions,
+    daily,
+    byType,
+    actors: [...actors].sort((a, b) => a.localeCompare(b)),
+  };
+}
