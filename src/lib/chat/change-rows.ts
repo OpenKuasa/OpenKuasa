@@ -132,6 +132,7 @@ const ITEM_KINDS: ReadonlySet<string> = new Set<ItemKind>([
   'campaign', 'creative', 'form', 'lead', 'contact', 'deal', 'stage', 'follow-up', 'schedule', 'job', 'application',
   'candidate', 'employee', 'department', 'leave', 'time-off', 'claim', 'overtime', 'holiday', 'settings', 'payslip',
   'payslip-line', 'payroll-run', 'goal', 'review', 'training', 'announcement', 'rfq', 'purchase-order', 'journal',
+  'invoice', 'credit-note', 'letter', 'document', 'appointment',
 ]);
 
 /** Finance subjects whose nested `line_id`/`run_id` mean a quote, receipt or journal line — never a payroll row. */
@@ -166,6 +167,9 @@ const KIND_WORDS: Partial<Record<ItemKind, string>> = {
   schedule: 'Schedule',
   rfq: 'RFQ',
   'purchase-order': 'Purchase order',
+  'credit-note': 'Credit note',
+  'payment-in': 'Payment in',
+  'payment-out': 'Payment out',
 };
 const kindLabel = (kind: ItemKind | undefined): string =>
   kind ? (KIND_WORDS[kind] ?? kind.charAt(0).toUpperCase() + kind.slice(1)) : 'Record';
@@ -178,7 +182,7 @@ const CONTROL_CHARS = new RegExp('[\\u0000-\\u001f\\u007f\\u2028\\u2029]+', 'g')
  * the card's own layout. Some kinds are "named" by a set of facts kept as JSON
  * (a payslip, a goal): of those only the person or the title is a name.
  */
-function recordName(raw: string | null): string | null {
+function recordName(raw: string | null, kind?: ItemKind): string | null {
   if (!raw) return null;
   let name = raw;
   if (raw.startsWith('{')) {
@@ -187,6 +191,10 @@ function recordName(raw: string | null): string | null {
       const first = [facts.employee, facts.title, facts.name, facts.label].find((v) => typeof v === 'string' && v.trim());
       if (typeof first !== 'string') return null;
       name = first;
+      // A letter or a document is its title, and whose it is: "Passport (Faiz Hakim)".
+      if ((kind === 'letter' || kind === 'document') && typeof facts.title === 'string' && facts.title.trim()) {
+        name = typeof facts.employee === 'string' && facts.employee.trim() ? `${facts.title} (${facts.employee})` : facts.title;
+      }
     } catch {
       return null;
     }
@@ -234,7 +242,7 @@ export function changeRows(toolName: string, input: unknown, find?: NameFinder, 
         const kind = subject ? subjectKind : kindOfKey(key, subjectKind);
         // Named by a lookup; else, for the row the change is about, by what that row calls itself.
         const shown = subject && current ? [current.name, current.title, current.contact_name].find((v) => typeof v === 'string') : null;
-        const name = recordName(find?.(inner, kind) ?? null) ?? recordName(typeof shown === 'string' ? shown : null);
+        const name = recordName(find?.(inner, kind) ?? null, kind) ?? recordName(typeof shown === 'string' ? shown : null);
         rows.push({
           key: at.join('.'),
           kind: 'record',

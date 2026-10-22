@@ -18,6 +18,7 @@ import { toPeriod, toScore } from '@/lib/people/performance-forms';
 import { STATUTORY_FIELDS } from '@/lib/people/statutory-fields';
 import { centsToRinggit, monthLabel as payrollMonthLabel, ringgitToCents, toStatutoryInput } from '@/lib/people/payroll-forms';
 import type { ReceiptState } from '@/lib/people/receipts';
+import { money } from '@/lib/finance/format';
 
 const APPOINTMENT_STATUS_LABELS: Record<string, string> = {
   scheduled: 'scheduled',
@@ -25,6 +26,32 @@ const APPOINTMENT_STATUS_LABELS: Record<string, string> = {
   cancelled: 'cancelled',
   no_show: 'no-show',
 };
+
+/** "Wed 28 Oct 3:00 pm": when an appointment is, in Malaysian time. Null for a time that cannot be read. */
+function appointmentTime(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const at = new Date(value);
+  if (Number.isNaN(at.getTime())) return null;
+  const parts = Object.fromEntries(
+    new Intl.DateTimeFormat('en-GB', {
+      weekday: 'short',
+      day: 'numeric',
+      month: 'short',
+      hour: 'numeric',
+      minute: '2-digit',
+      hour12: true,
+      timeZone: 'Asia/Kuala_Lumpur',
+    })
+      .formatToParts(at)
+      .map((p) => [p.type, p.value]),
+  );
+  return `${parts.weekday} ${parts.day} ${parts.month} ${parts.hour}:${parts.minute} ${String(parts.dayPeriod).toLowerCase()}`;
+}
+
+/** Refunds and payments: their rows (one per invoice or bill they pay) carry the transaction's id as `transaction_id`. */
+const TRANSACTION_KINDS: ReadonlySet<ItemKind> = new Set<ItemKind>(['refund', 'payment-in', 'payment-out']);
+const idOf = (row: Record<string, unknown>, kind?: ItemKind): unknown =>
+  kind && TRANSACTION_KINDS.has(kind) ? row.transaction_id : row.id;
 
 /**
  * What a row is called: its name, or for a leave or time-off request the words
@@ -80,9 +107,27 @@ function labelOf(row: Record<string, unknown>, kind?: ItemKind): string | null {
     const type = typeof row.leave_type === 'string' ? LEAVE_WORDS[row.leave_type] : undefined;
     return `${who}'s ${type ?? 'leave'}, ${when}`;
   }
+  if (kind === 'appointment') {
+    const who = text(row.contact_name);
+    if (!who) return null;
+    return [who, text(row.kind), appointmentTime(row.scheduled_at) ?? text(row.malaysia_time)].filter(Boolean).join(', ');
+  }
+  if (kind === 'refund' || kind === 'payment-in' || kind === 'payment-out') {
+    // "RF-0012 to Acme, RM 120.00". The whole movement, not one row's share of it.
+    const who = text(kind === 'payment-out' ? row.supplier_name : row.customer_name);
+    const no = text(row.number);
+    if (!who && !no) return null;
+    const head = [no ?? (kind === 'refund' ? 'Refund' : 'Payment'), who ? `${kind === 'payment-in' ? 'from' : 'to'} ${who}` : null]
+      .filter(Boolean)
+      .join(' ');
+    const amount =
+      typeof row.transaction_amount === 'number' && Number.isFinite(row.transaction_amount)
+        ? money(row.transaction_amount, text(row.transaction_currency) ?? undefined)
+        : null;
+    return amount ? `${head}, ${amount}` : head;
+  }
   // Finance documents are named by their number, falling back to the counterparty
-  // while still a draft (no number yet). Payments and refunds key on a transaction
-  // id, not `id`, so they are not named here.
+  // while still a draft (no number yet).
   if (kind === 'invoice') return text(row.invoice_no) ?? text(row.customer_name);
   if (kind === 'quotation') return text(row.quotation_no) ?? text(row.customer_name);
   if (kind === 'rfq') return text(row.rfq_no) ?? text(row.supplier_name);
@@ -105,7 +150,7 @@ function nameOf(value: unknown, id: string, kind?: ItemKind, depth = 0): string 
     return null;
   }
   const row = value as Record<string, unknown>;
-  if (row.id === id) {
+  if (idOf(row, kind) === id) {
     const label = labelOf(row, kind);
     if (label) return label;
   }
@@ -157,7 +202,11 @@ export type ItemKind =
   | 'bill'
   | 'credit-note'
   | 'finance-contact'
-  | 'item';
+  | 'item'
+  | 'appointment'
+  | 'refund'
+  | 'payment-in'
+  | 'payment-out';
 const KIND_OF_TOOL: Record<string, ItemKind> = {
   getCampaigns: 'campaign',
   createCampaign: 'campaign',
@@ -176,6 +225,11 @@ const KIND_OF_TOOL: Record<string, ItemKind> = {
   setLeadStage: 'lead',
   // Its result is the contact it made.
   promoteLeadToContact: 'contact',
+  // The lookup's rows and each change's result are the appointment as it is.
+  getUpcomingAppointments: 'appointment',
+  createAppointment: 'appointment',
+  updateAppointment: 'appointment',
+  setAppointmentStatus: 'appointment',
   listCrmContacts: 'contact',
   createContact: 'contact',
   updateContact: 'contact',
@@ -328,13 +382,22 @@ const KIND_OF_TOOL: Record<string, ItemKind> = {
   updateFinanceItem: 'item',
   setFinanceItemActive: 'item',
   deleteFinanceItem: 'item',
+  listRefunds: 'refund',
+  listPaymentsIn: 'payment-in',
+  listPaymentsOut: 'payment-out',
 };
 
 /** The kind of thing a tool's result, or a change tool's `id`, is about. Undefined for a tool that names none. */
 export function kindOfTool(toolName: string): ItemKind | undefined {
+  if (Object.hasOwn(ID_KIND, toolName)) return ID_KIND[toolName];
   if (Object.hasOwn(KIND_OF_TOOL, toolName)) return KIND_OF_TOOL[toolName];
   return Object.hasOwn(SUBJECT_ONLY, toolName) ? SUBJECT_ONLY[toolName] : undefined;
 }
+
+// Tools whose `id` is of another kind than their result: promoting a lead answers with the contact it made.
+const ID_KIND: Record<string, ItemKind> = {
+  promoteLeadToContact: 'lead',
+};
 
 // Tools whose `id` is of a known kind but whose result is not read for names (the row is gone, or the
 // result is not a lookup row). Their card names the row the same way their title does.
@@ -354,6 +417,15 @@ const SUBJECT_ONLY: Record<string, ItemKind> = {
   decideOvertime: 'overtime',
   cancelOvertime: 'overtime',
   removeHoliday: 'holiday',
+  deleteAppointment: 'appointment',
+  // Their results carry only the id (and a number), so the lookup's row names them.
+  markRefundPaid: 'refund',
+  voidRefund: 'refund',
+  deleteRefund: 'refund',
+  markPaymentPaid: 'payment-out',
+  voidPayment: 'payment-out',
+  deleteScheduledPayment: 'payment-out',
+  voidPaymentIn: 'payment-in',
 };
 
 /** Names by `kind:id`, so a later turn can still say what an id refers to. */
@@ -368,9 +440,10 @@ function gather(value: unknown, kind: ItemKind, into: KnownNames, depth = 0): vo
     return;
   }
   const row = value as Record<string, unknown>;
-  const label = typeof row.id === 'string' ? labelOf(row, kind) : null;
-  if (typeof row.id === 'string' && label) {
-    const key = `${kind}:${row.id}`;
+  const id = idOf(row, kind);
+  const label = typeof id === 'string' ? labelOf(row, kind) : null;
+  if (typeof id === 'string' && label) {
+    const key = `${kind}:${id}`;
     if (key in into || Object.keys(into).length < NAMES_MAX) into[key] = label;
   }
   for (const inner of Object.values(row)) gather(inner, kind, into, depth + 1);
@@ -531,19 +604,19 @@ export function nameIn(results: ToolResult[]): NameFinder {
 /** Looks up a row by its id, as a lookup or an earlier change last returned it. */
 export type RowFinder = (id: unknown, kind?: ItemKind) => Record<string, unknown> | null;
 
-function rowOf(value: unknown, id: string, depth = 0): Record<string, unknown> | null {
+function rowOf(value: unknown, id: string, kind?: ItemKind, depth = 0): Record<string, unknown> | null {
   if (!value || typeof value !== 'object' || depth > 3) return null;
   if (Array.isArray(value)) {
     for (const item of value) {
-      const found = rowOf(item, id, depth + 1);
+      const found = rowOf(item, id, kind, depth + 1);
       if (found) return found;
     }
     return null;
   }
   const row = value as Record<string, unknown>;
-  if (row.id === id) return row;
+  if (idOf(row, kind) === id) return row;
   for (const inner of Object.values(row)) {
-    const found = rowOf(inner, id, depth + 1);
+    const found = rowOf(inner, id, kind, depth + 1);
     if (found) return found;
   }
   return null;
@@ -559,7 +632,7 @@ export function rowIn(results: ToolResult[]): RowFinder {
     if (typeof id !== 'string' || !id) return null;
     for (let r = results.length - 1; r >= 0; r -= 1) {
       if (kind && KIND_OF_TOOL[results[r].tool] !== kind) continue;
-      const found = rowOf(results[r].output, id);
+      const found = rowOf(results[r].output, id, kind);
       if (found) return found;
     }
     return null;
@@ -1698,12 +1771,12 @@ export function approvalTitle(
     case 'deleteLead': return `Delete ${the('lead', 'lead')}?`;
     case 'promoteLeadToContact': return `Promote ${the('lead', 'lead')} to a CRM contact?`;
     case 'createAppointment': return `Book appointment with “${i.contact_name ?? ''}”?`;
-    case 'updateAppointment': return 'Save changes to this appointment?';
+    case 'updateAppointment': return `Save changes to ${the('appointment', 'appointment')}?`;
     case 'setAppointmentStatus': {
       const label = APPOINTMENT_STATUS_LABELS[String(i.status)] ?? String(i.status ?? '');
-      return `Mark this appointment as ${label}?`;
+      return `Mark ${the('appointment', 'appointment')} as ${label}?`;
     }
-    case 'deleteAppointment': return 'Delete this appointment?';
+    case 'deleteAppointment': return `Delete ${the('appointment', 'appointment')}?`;
     case 'scheduleWeeklyStudio': {
       const secs = Number(i.interval_seconds);
       const every = !Number.isFinite(secs) || secs <= 0 ? '' : ` every ${intervalLabel(secs)}`;
