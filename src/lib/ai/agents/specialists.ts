@@ -287,7 +287,7 @@ function applyGate(products: ProductToolkit[], team: TeamContext, turn: TurnStat
         ? (product?.checkDeletion ? cardDecision(await product.checkDeletion(proposal.action, target), was) : 'user-approval')
         : kind === 'pool'
           ? (product?.checkPoolChange ? poolCardDecision(await product.checkPoolChange(proposal.action, target), was) : 'user-approval')
-          // The whole input, not an id: two of the six name an application and four an interview, and the check knows which.
+          // The whole input, not an id: two of the eight name an application and six an interview, and the check knows which.
           : (product?.checkInterviewChange ? interviewCardDecision(await product.checkInterviewChange(proposal.action, proposal.input), was) : 'user-approval');
     if (typeof decision === 'object' && decision.type === 'denied') {
       // Stopped after the user's yes (the card had been shown): it will not run, so it stops being the turn's one,
@@ -444,7 +444,7 @@ function specialistTools(
           }
         }
         if (INTERVIEW_CHANGES.has(name)) {
-          // A new interview names an application, from listApplications; the other four name an interview, from
+          // A new interview names an application, from listApplications; the other six name an interview, from
           // listInterviews or from the result of the change that made it. In this delegation or an earlier turn;
           // never an id seen as the other kind.
           const id = interviewTarget(name, input);

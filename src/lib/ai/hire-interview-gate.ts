@@ -164,7 +164,7 @@ const isInterviewChange = (name: unknown): boolean =>
 const isFeedbackChange = (name: unknown): boolean =>
   typeof name === 'string' && (HIRE_FEEDBACK_TOOL_NAMES as readonly string[]).includes(name);
 
-/** The two that make an interview: there is none yet, so they name an application. The other four name an interview. */
+/** The two that make an interview: there is none yet, so they name an application. The other six (feedback included) name an interview. */
 const ON_APPLICATION = new Set<string>(['scheduleInterview', 'recordPastInterview']);
 export const actsOnApplication = (tool: unknown): boolean => typeof tool === 'string' && ON_APPLICATION.has(tool);
 
@@ -400,13 +400,13 @@ function placesOf(value: unknown, id: string, depth = 0): string[] {
   return [...own, ...Object.values(row).flatMap((inner) => placesOf(inner, id, depth + 1))];
 }
 
-/** The tools whose results hold an interview's row: the lookup, and the six changes. */
+/** The tools whose results hold an interview's row: the lookup, and the eight interview changes (the six and the two feedback changes). */
 const INTERVIEW_RESULTS = new Set<string>(['listInterviews', ...HIRE_INTERVIEW_KIND_TOOL_NAMES]);
 type Result = { tool: string; output: unknown };
 
 /**
  * The place of ONE interview, as these tool results hold it. Only the results
- * of the interview lookup and of the six interview changes are read, only the
+ * of the interview lookup and of the eight interview changes are read, only the
  * rows with this interview's id, and of those only the `place`: a link there
  * was typed by someone in the team, or approved on a card, for this very
  * interview. Nothing else a tool returns counts, because much of it is a
@@ -433,7 +433,7 @@ function resultsIn(messages: readonly ModelMessage[]): Result[] {
 
 /** A call in a conversation that put an interview change in front of the user, for `linkNobodyGave`. */
 export type IsInterviewCard = (call: { toolName?: unknown; toolCallId?: unknown; input?: unknown }) => boolean;
-/** For an agent that holds the tools itself: a call of one of the six. */
+/** For an agent that holds the tools itself: a call of one of the eight interview changes. */
 const anInterviewCall: IsInterviewCard = (call) => isInterviewChange(call.toolName);
 
 /**
@@ -502,7 +502,7 @@ function saidSinceLastCard(messages: readonly ModelMessage[], isCard: IsIntervie
  * `extra` is more text that counts: the caller passes the stored place of the
  * very interview being changed (`interviewLinkProblem`), so that a change may
  * keep the link the interview already has. `isCard` says which calls were an
- * interview card: one of the six tools by default; Tuah's team passes its
+ * interview card: one of the eight interview changes by default; Tuah's team passes its
  * own, because there the card is an `applyChange` call.
  *
  * The other way for the person, when a link is refused: give it again in
@@ -578,7 +578,7 @@ export function feedbackRuleProblem(tool: string, input: unknown, target: Pick<I
 
 /**
  * Asks the server about an interview change's row. Given the tool's whole
- * input, not an id: two of the six tools name an application and four an
+ * input, not an id: two of the eight tools name an application and six an
  * interview, and the check, not each of its three callers, knows which key
  * holds the row's id. One other thing of the input is read: the date and time
  * of a change, to see whether they are the ones the interview already has.
