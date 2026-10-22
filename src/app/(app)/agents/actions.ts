@@ -5,7 +5,7 @@ import { z } from 'zod';
 import { createClient } from '@/lib/supabase/server';
 import { getViewer } from '@/lib/auth/viewer';
 import { can } from '@/lib/auth/permissions';
-import { approveProposal, rejectProposal, type DecideResult } from '@/lib/agents/decide-proposal';
+import { approveProposal, rejectProposal, screensToRefresh, type DecideResult } from '@/lib/agents/decide-proposal';
 
 const proposalIdInput = z.object({ id: z.string().uuid() });
 const INVALID = 'That input was not valid.';
@@ -22,7 +22,7 @@ async function decide(
   if (viewer.isDemo || !can(viewer.role, 'edit-data')) return { ok: false, error: FORBIDDEN };
   const client = await createClient();
   const { screenPath, ...result } = await fn(client, viewer.orgId, viewer.userId, parsed.data.id);
-  if (screenPath) revalidatePath(screenPath);
+  for (const path of screensToRefresh({ screenPath })) revalidatePath(path);
   return result;
 }
 

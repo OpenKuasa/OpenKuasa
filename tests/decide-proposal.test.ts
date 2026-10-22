@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 import { entry, type AgentRegistry } from '@/lib/agents/definition';
-import { approveProposal, rejectProposal } from '@/lib/agents/decide-proposal';
+import { approveProposal, rejectProposal, screensToRefresh } from '@/lib/agents/decide-proposal';
 
 type Update = { patch: Record<string, unknown>; chain: string[] };
 let claimResult: Record<string, unknown> | null = null;
@@ -99,5 +99,19 @@ describe('rejectProposal', () => {
   it('reports already handled when nothing matched', async () => {
     const res = await rejectProposal(client, 'org-1', 'user-1', ID, registry);
     expect(res).toEqual({ ok: false, error: 'That suggestion has already been handled.' });
+  });
+});
+
+describe('screensToRefresh', () => {
+  it('uses the result screen when there is one', () => {
+    expect(screensToRefresh({ screenPath: '/crm/agents' }, registry)).toEqual(['/crm/agents']);
+  });
+
+  it('refreshes every registered agent screen, once each, when already handled', () => {
+    const dup: AgentRegistry = new Map([
+      ...registry,
+      ['other', stub('other', 'reach', reachRun, reachCtx, '/reach/agents')],
+    ]);
+    expect(screensToRefresh({}, dup)).toEqual(['/reach/agents', '/crm/agents']);
   });
 });

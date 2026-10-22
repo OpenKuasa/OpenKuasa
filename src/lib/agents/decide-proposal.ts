@@ -5,7 +5,16 @@ import { AGENTS } from '@/lib/agents/registry';
 
 export type DecideResult = { ok: boolean; error?: string; screenPath?: string };
 
-const HANDLED = 'That suggestion has already been handled.';
+/** Screens to refresh after a decision: the result's own, else (already handled) every agent screen. */
+export function screensToRefresh(
+  result: { screenPath?: string },
+  registry: AgentRegistry = AGENTS,
+): string[] {
+  if (result.screenPath) return [result.screenPath];
+  return [...new Set([...registry.values()].map((def) => def.ui.screenPath))];
+}
+
+const HANDLED ='That suggestion has already been handled.';
 
 /**
  * Approve a queued proposal, claim-first: atomically flip pending -> approved (pending and
