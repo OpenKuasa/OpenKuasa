@@ -6,6 +6,7 @@ import { REACH_WRITE_TOOL_NAMES } from '@/lib/ai/products';
 import { createReachTools } from '@/lib/ai/tools';
 import { toolMeta } from '@/components/chat/tool-parts';
 import { buildPeopleOverviewModel } from '@/lib/people/overview';
+import { loadPeopleCalendar } from '@/lib/people/calendar';
 import { createSeedPeopleData } from '@/lib/people/seed';
 import { asMember } from './setup/people-member-view';
 import { createSeedReachData } from '@/lib/reach/seed';
@@ -43,12 +44,12 @@ const EMPTY: PeopleData = {
 };
 
 describe('people tools', () => {
-  it('is exactly the twenty-five lookups, none sharing a name with another product', () => {
+  it('is exactly the twenty-six lookups, none sharing a name with another product', () => {
     expect(Object.keys(createPeopleTools(data, HR, NOW))).toEqual([...PEOPLE_TOOL_NAMES]);
     expect(PEOPLE_TOOL_NAMES).toEqual([
       'getPeopleOverview', 'listEmployees', 'getEmployee', 'listDepartments', 'getHeadcountByDepartment',
       'listWhoIsOnLeave', 'listLeaveRequests', 'listTimeOffRequests', 'getLeaveBalances', 'listPendingApprovals', 'listClaims',
-      'listOvertime', 'getAttendanceSummary', 'getTimesheet', 'listShifts', 'listPublicHolidays',
+      'listOvertime', 'getAttendanceSummary', 'getTimesheet', 'listShifts', 'listPublicHolidays', 'getHrCalendar',
       'getPayrollSummary', 'listPayslips', 'getPerformanceSummary', 'listGoals', 'listReviews', 'listTrainings', 'listAnnouncements',
       'listDocuments', 'listLetters',
     ]);
@@ -471,6 +472,36 @@ describe('people tools', () => {
     const refused = Object.keys(createPeopleTools(data, HR, NOW, { ctx: { client: {} as never, orgId: 'o' }, tier: 'self', employeeId: null, receipt: null, userId: 'u1' }));
     expect(none).toEqual([...PEOPLE_TOOL_NAMES]);
     expect(refused).toEqual([...PEOPLE_TOOL_NAMES]);
+  });
+});
+
+describe('HR calendar lookup', () => {
+  it('gives the same month and counts as the Calendar screen', async () => {
+    const model = await loadPeopleCalendar(data, HR, '2026-10', NOW);
+    const result = await run('getHrCalendar')({});
+    expect(result).toMatchObject({
+      month: '2026-10',
+      today_in_malaysia: '2026-10-09',
+      counts: {
+        away_today: model.stats.awayToday,
+        away_next_7_days: model.stats.away7,
+        public_holidays_in_month: model.stats.holidaysInMonth,
+        next_30_days: model.stats.next30,
+      },
+      total: model.events.length,
+      scope: 'everyone in the workspace',
+    });
+    expect(result.entries.map((e: Loose) => e.what)).toEqual(model.events.slice(0, 100).map((e) => e.label));
+    expect((await run('getHrCalendar')({ month: '2026-11' })).month).toBe('2026-11');
+  });
+
+  it('gives a member their own requests only, and never a birth year', async () => {
+    const result = await runner(data, MEMBER)('getHrCalendar')({});
+    expect(result.scope).toBe('your own records only');
+    for (const entry of result.entries as Loose[]) {
+      if (entry.kind === 'leave' || entry.kind === 'time-off') expect(entry.what.startsWith('Faiz Hakim ·'), entry.what).toBe(true);
+    }
+    expect(JSON.stringify(result)).not.toMatch(/date_of_birth|\bage\b/);
   });
 });
 

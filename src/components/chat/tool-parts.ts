@@ -128,6 +128,7 @@ const TOOL_META: Record<string, ToolMeta> = {
   getTimesheet: { label: 'Timesheet', Icon: Timer },
   listShifts: { label: 'Shift roster', Icon: CalendarDays },
   listPublicHolidays: { label: 'Public holidays', Icon: CalendarDays },
+  getHrCalendar: { label: 'HR calendar', Icon: CalendarDays },
   getMyAttendanceToday: { label: 'Your attendance today', Icon: Timer },
   getAttendanceSettings: { label: 'Attendance settings', Icon: SlidersHorizontal },
   getPayrollSummary: { label: 'Payroll', Icon: Coins },

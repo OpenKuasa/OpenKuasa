@@ -187,6 +187,7 @@ import { type PeopleTier, peopleTier } from '@/lib/people/tier';
 import { readTeamOvertime } from '@/lib/people/supabase';
 import { readWaitingCountsStrict, waitingTotal } from '@/lib/people/waiting-counts';
 import { ownRows } from '@/lib/people/own';
+import { loadPeopleCalendar, parsePeopleMonth } from '@/lib/people/calendar';
 
 export const PEOPLE_TOOL_NAMES = [
   'getPeopleOverview',
@@ -205,6 +206,7 @@ export const PEOPLE_TOOL_NAMES = [
   'getTimesheet',
   'listShifts',
   'listPublicHolidays',
+  'getHrCalendar',
   'getPayrollSummary',
   'listPayslips',
   'getPerformanceSummary',
@@ -1361,6 +1363,50 @@ export function createPeopleTools(
               scope: h.scope,
               state: h.state,
             })),
+          };
+        }),
+    }),
+
+    getHrCalendar: tool({
+      description:
+        'The HR calendar for one month, the same as the Calendar screen: approved and pending leave and time-off, ' +
+        'public holidays, trainings, birthdays (day and month only) and work anniversaries, earliest first. Each entry ' +
+        'has its first and last day (YYYY-MM-DD, Malaysian dates) and "pending": true while a request waits for a decision; a ' +
+        'pending request is not time away yet. Also counts the people away today and in the next 7 days (approved only), the ' +
+        'public holidays in the month and everything in the next 30 days. Holidays, birthdays and anniversaries are the whole ' +
+        'company\'s; trainings are every course for an HR admin, otherwise the ones the person is enrolled in. Use it for "who is ' +
+        'away next week" or "what is on this month"; for a week across two months, ask for both months. Leave the month out for the current month.' +
+        SCOPE_NOTE,
+      inputSchema: z.object({
+        month: z
+          .string()
+          .regex(/^\d{4}-\d{2}$/)
+          .optional()
+          .describe('YYYY-MM. Defaults to the current month in Malaysia.'),
+      }),
+      execute: async ({ month }) =>
+        safe('getHrCalendar', async () => {
+          const at = now();
+          const calendar = await loadPeopleCalendar(data, viewer, parsePeopleMonth(month, at), at);
+          return {
+            month: calendar.month,
+            today_in_malaysia: todayInMalaysia(at),
+            counts: {
+              away_today: calendar.stats.awayToday,
+              away_next_7_days: calendar.stats.away7,
+              public_holidays_in_month: calendar.stats.holidaysInMonth,
+              next_30_days: calendar.stats.next30,
+            },
+            total: calendar.events.length,
+            entries: calendar.events.slice(0, 100).map((e) => ({
+              from: e.from,
+              to: e.to,
+              kind: e.kind,
+              what: e.label,
+              pending: e.pending,
+            })),
+            scope: widenedScope,
+            ...notLinked, ...askedBy,
           };
         }),
     }),
