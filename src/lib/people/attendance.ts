@@ -18,6 +18,7 @@ import type {
   LeaveRequest,
   LeaveType,
   OvertimeRecord,
+  PeopleData,
   PeopleViewer,
   Shift,
   ShiftKind,
@@ -229,9 +230,29 @@ export function clockResultMessage(
   return `Clocked out at ${state.to}. You worked ${state.worked}.`;
 }
 
-/** The work week for the Today card. Someone who cannot read the settings gets all seven days: a guess would be wrong, and the database's own sentence explains a refusal. */
+/** The work week for the Today card. When the week is unknown every day counts: a guess would be wrong, and the database's own sentence explains a refusal. */
 export function workWeekFor(settings: { work_week: Weekday[] } | null): Weekday[] {
   return settings ? settings.work_week : [...ALL_WEEKDAYS];
+}
+
+/**
+ * The work week as the caller may know it: from the settings when they can read them (HR, the sample company),
+ * otherwise from `readWorkWeek` (the members' read). Null when it stays unknown: no read, no answer, or a failed
+ * read, which is logged and never thrown, so the caller carries on as if every day were a working day.
+ */
+export async function knownWorkWeek(
+  data: Pick<PeopleData, 'getSettings'>,
+  readsSettings: boolean,
+  readWorkWeek?: () => Promise<Weekday[] | null>,
+): Promise<Weekday[] | null> {
+  if (readsSettings) return (await data.getSettings()).work_week;
+  if (!readWorkWeek) return null;
+  try {
+    return await readWorkWeek();
+  } catch (error) {
+    console.error('[people/attendance] work week:', error instanceof Error ? error.name : 'error');
+    return null;
+  }
 }
 
 /** The viewer's own attendance row for today, if there is one. */
