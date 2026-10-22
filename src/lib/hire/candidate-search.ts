@@ -49,7 +49,7 @@ export async function readPoolPicker(
 ): Promise<{ people: PickerPerson[]; more: boolean }> {
   let request = client.from('hire_candidates').select(PICKER_COLUMNS).eq('org_id', orgId).eq('pool_status', 'none');
   if (cleaned(text)) request = request.filter('name', 'imatch', searchPattern(text));
-  const { data, error } = await request.order('created_at', { ascending: false }).limit(POOL_PICKER_LIMIT + 1);
+  const { data, error } = await request.order('created_at', { ascending: false }).order('id', { ascending: true }).limit(POOL_PICKER_LIMIT + 1);
   if (error) throw error;
   const rows = (data ?? []) as unknown as (Omit<PickerPerson, 'skills'> & { skills: string[] | null })[];
   return {
@@ -77,6 +77,7 @@ export async function readPool(client: SupabaseClient, orgId: string): Promise<C
     .eq('org_id', orgId)
     .neq('pool_status', 'none')
     .order('created_at', { ascending: false })
+    .order('id', { ascending: true })
     .limit(HIRE_READ_CAP);
   if (error) throw error;
   return asCandidates(data);
@@ -102,7 +103,7 @@ export async function readCandidateSearch(
   const bound = boundOf(query);
   // One more than kept, to tell "exactly this many" from "more". The API never answers with more than
   // HIRE_READ_CAP rows, so a read that asks for the cap counts as "more" when it comes back full.
-  const { data, error } = await request.order('created_at', { ascending: false }).limit(Math.min(bound + 1, HIRE_READ_CAP));
+  const { data, error } = await request.order('created_at', { ascending: false }).order('id', { ascending: true }).limit(Math.min(bound + 1, HIRE_READ_CAP));
   if (error) throw error;
   return cut(asCandidates(data), bound);
 }

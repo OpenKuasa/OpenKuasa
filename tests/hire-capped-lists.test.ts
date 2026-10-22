@@ -61,6 +61,7 @@ describe('readPool', () => {
     expect(has(q, 'eq', 'org_id', 'org1')).toBe(true);
     expect(has(q, 'neq', 'pool_status', 'none')).toBe(true);
     expect(has(q, 'order', 'created_at', { ascending: false })).toBe(true);
+    expect(has(q, 'order', 'id', { ascending: true })).toBe(true);
     expect(has(q, 'limit', HIRE_READ_CAP)).toBe(true);
     expect(rows[0].skills).toEqual([]);
   });
@@ -118,6 +119,7 @@ describe('readPoolPicker', () => {
     expect(has(q, 'eq', 'pool_status', 'none')).toBe(true);
     expect(has(q, 'filter', 'name', 'imatch', 'D\\.J\\. 50%\\*')).toBe(true);
     expect(has(q, 'order', 'created_at', { ascending: false })).toBe(true);
+    expect(has(q, 'order', 'id', { ascending: true })).toBe(true);
     expect(has(q, 'limit', 51)).toBe(true);
     expect(JSON.stringify(q.calls)).not.toMatch(/email|phone|ilike|"or"/);
   });
@@ -191,6 +193,7 @@ describe('readApplicationSearch', () => {
     expect(has(q, 'eq', 'org_id', 'org1')).toBe(true);
     expect(has(q, 'filter', 'candidate.name', 'imatch', 'D\\.J\\. \\(Dee\\)\\*')).toBe(true);
     expect(has(q, 'order', 'applied_at', { ascending: false })).toBe(true);
+    expect(has(q, 'order', 'id', { ascending: true })).toBe(true);
     expect(has(q, 'limit', APPLICATION_SEARCH_LIMIT + 1)).toBe(true);
     expect(JSON.stringify(q.calls)).not.toMatch(/ilike|"or"/);
     expect(got.rows[0]).toMatchObject({ id: 'a1', candidate_name: 'Person 1', job_title: 'Sales Executive', candidate_pool_status: 'none' });

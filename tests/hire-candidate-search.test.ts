@@ -68,6 +68,8 @@ describe('readCandidateSearch', () => {
     expect(has(q, 'eq', 'org_id', 'org1')).toBe(true);
     expect(has(q, 'filter', 'name', 'imatch', '50%_off')).toBe(true);
     expect(has(q, 'order', 'created_at', { ascending: false })).toBe(true);
+    // The id breaks a tie between rows put on file at the same instant, so the order never varies.
+    expect(has(q, 'order', 'id', { ascending: true })).toBe(true);
     expect(has(q, 'limit', CANDIDATE_SEARCH_LIMIT + 1)).toBe(true);
     expect(q.calls.some((c) => c[0] === 'neq' || (c[0] === 'eq' && c[1] === 'pool_status'))).toBe(false);
   });

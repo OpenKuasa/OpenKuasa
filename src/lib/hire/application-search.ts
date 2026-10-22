@@ -71,7 +71,7 @@ export async function readApplicationSearch(
       .filter(on === 'candidate' ? 'candidate.name' : 'job.title', 'imatch', pattern);
     if (query.stage) request = request.eq('stage', query.stage);
     if (query.outcome) request = request.eq('outcome', query.outcome);
-    const { data, error } = await request.order('applied_at', { ascending: false }).limit(asked);
+    const { data, error } = await request.order('applied_at', { ascending: false }).order('id', { ascending: true }).limit(asked);
     if (error) throw error;
     return ((data ?? []) as unknown as ApplicationRow[]).map(toApplication);
   }
