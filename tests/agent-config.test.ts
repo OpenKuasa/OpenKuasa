@@ -1,6 +1,9 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { describe, expect, it, vi } from 'vitest';
+import { AGENTS } from '@/lib/agents/registry';
 import {
+  AGENT_KEYS,
+  agentKeySchema,
   listAgentConfigs,
   setAgentCadence,
   setAgentCadenceInput,
@@ -50,6 +53,11 @@ describe('agent config input schemas', () => {
   it('rejects an unknown agent_key', () => {
     expect(setAgentEnabledInput.safeParse({ agent_key: 'other', enabled: true }).success).toBe(false);
     expect(setAgentEnabledInput.safeParse({ agent_key: 'weekly-studio', enabled: true }).success).toBe(true);
+  });
+  it('derives AGENT_KEYS from the registry and rejects keys outside it', () => {
+    expect([...AGENT_KEYS]).toEqual([...AGENTS.keys()]);
+    expect(agentKeySchema.safeParse('nope').success).toBe(false);
+    expect(agentKeySchema.safeParse(AGENT_KEYS[0]).success).toBe(true);
   });
   it('rejects a cadence outside off/daily/weekly', () => {
     expect(setAgentCadenceInput.safeParse({ agent_key: 'weekly-studio', cadence: 'hourly' }).success).toBe(false);

@@ -65,7 +65,7 @@ export default async function AgentsScreen() {
     // The same database-side sum the runner's budget gate reads. If it cannot be
     // read the strip shows nothing spent; the gate itself refuses to run instead.
     const spentSince = (ms: number) =>
-      workspaceSpendCents(supabase, viewer.orgId, isoAgo(ms)).catch(() => {
+      workspaceSpendCents(supabase, viewer.orgId, isoAgo(ms), WEEKLY_STUDIO).catch(() => {
         console.error('[agents] workspace spend could not be read');
         return 0;
       });

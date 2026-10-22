@@ -13,6 +13,7 @@ import {
   updateSchedule,
   updateScheduleInput,
 } from '@/lib/reach/schedule-capabilities';
+import { agentKeySchema } from '@/lib/agents/config';
 
 type Call = { table: string; op: string; payload?: unknown; eq: [string, unknown][] };
 
@@ -183,6 +184,48 @@ describe('workspace caps', () => {
     expect(r.ok).toBe(true);
     expect(calls.map((c) => c.op)).toEqual(['update', 'insert']);
     expect(calls[1].payload).toEqual({ org_id: ORG, agent_key: 'weekly-studio', ...caps });
+  });
+});
+
+describe('agent key on caps and cadence sync', () => {
+  const caps = { daily_cap_cents: 100, weekly_cap_cents: 500 };
+  it('setWorkspaceCaps writes the row for the given agent_key and never SETs it', async () => {
+    const { client, calls } = fakeClient([ok(null), ok(caps)]);
+    const r = await setWorkspaceCaps({ client, orgId: ORG }, { ...caps, agent_key: 'crm-focus' });
+    expect(r.ok).toBe(true);
+    expect(calls[0].eq).toContainEqual(['agent_key', 'crm-focus']);
+    expect(calls[0].payload).not.toHaveProperty('agent_key');
+    expect(calls[1].payload).toEqual({ org_id: ORG, agent_key: 'crm-focus', ...caps });
+  });
+  it('setWorkspaceCaps without agent_key defaults to weekly-studio', async () => {
+    const { client, calls } = fakeClient([ok(caps)]);
+    await setWorkspaceCaps({ client, orgId: ORG }, caps);
+    expect(calls[0].eq).toContainEqual(['agent_key', 'weekly-studio']);
+  });
+  it('agentKeySchema rejects an unknown key and accepts the registered one', () => {
+    expect(agentKeySchema.safeParse('nope').success).toBe(false);
+    expect(agentKeySchema.safeParse('weekly-studio').success).toBe(true);
+  });
+  it('syncCadenceSchedule scopes to a given agent key and uses firstRunAt', async () => {
+    const { client, calls } = fakeClient([ok(null), ok({ id: ID })]);
+    const r = await syncCadenceSchedule({ client, orgId: ORG }, 'daily', {
+      agentKey: 'crm-focus',
+      firstRunAt: () => new Date('2026-10-24T23:00:00Z'),
+    });
+    expect(r.ok).toBe(true);
+    expect(calls[0].eq).toContainEqual(['agent_key', 'crm-focus']);
+    expect(calls[0].payload).toMatchObject({ next_run_at: '2026-10-24T23:00:00.000Z' });
+    expect(calls[1].payload).toMatchObject({ agent_key: 'crm-focus', next_run_at: '2026-10-24T23:00:00.000Z' });
+  });
+  it('syncCadenceSchedule with no opts keeps weekly-studio and now + interval', async () => {
+    const before = Date.now();
+    const { client, calls } = fakeClient([ok(null), ok({ id: ID })]);
+    await syncCadenceSchedule({ client, orgId: ORG }, 'daily');
+    expect(calls[0].eq).toContainEqual(['agent_key', 'weekly-studio']);
+    expect(calls[1].payload).toMatchObject({ agent_key: 'weekly-studio' });
+    const next = new Date((calls[1].payload as { next_run_at: string }).next_run_at).getTime();
+    expect(next).toBeGreaterThanOrEqual(before + 86_400_000);
+    expect(next).toBeLessThan(before + 86_400_000 + 5000);
   });
 });
 

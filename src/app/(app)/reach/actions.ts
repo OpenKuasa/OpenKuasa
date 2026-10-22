@@ -328,7 +328,7 @@ export async function setAgentCadenceAction(input: unknown) {
   return runAgentConfig(setAgentCadenceInput, input, async (ctx, parsed) => {
     const result = await setAgentCadence(ctx, parsed);
     if (!result.ok) return result;
-    const synced = await syncCadenceSchedule(ctx, parsed.cadence);
+    const synced = await syncCadenceSchedule(ctx, parsed.cadence, { agentKey: parsed.agent_key });
     return synced.ok ? result : { ok: false, error: synced.error };
   });
 }

@@ -1,11 +1,14 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { z } from 'zod';
-import { WEEKLY_STUDIO, type AgentConfig } from './types';
+import { agentKeySchema } from './agent-keys';
+import type { AgentConfig } from './types';
+
+export { AGENT_KEYS, agentKeySchema } from './agent-keys';
 
 export type AgentWriteContext = { client: SupabaseClient; orgId: string };
 export type AgentCapResult<T> = { ok: true; data: T } | { ok: false; error: string };
 
-const agentKey = z.enum([WEEKLY_STUDIO]);
+const agentKey = agentKeySchema;
 const cadence = z.enum(['off', 'daily', 'weekly']);
 export const setAgentEnabledInput = z.object({ agent_key: agentKey, enabled: z.boolean() });
 export const setAgentCadenceInput = z.object({ agent_key: agentKey, cadence });

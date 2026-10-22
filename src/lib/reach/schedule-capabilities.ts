@@ -2,12 +2,13 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { z } from 'zod';
 import type { ReachWriteContext, CapResult } from '@/lib/reach/capabilities';
 import { WEEKLY_STUDIO, type AgentSchedule } from '@/lib/agents/types';
+import { agentKeySchema } from '@/lib/agents/agent-keys';
 
 // Server-only. Writes go through the caller's session client, so they may only
 // touch columns granted to `authenticated`: never spent_cents, runs_used,
 // last_run_at or paused_reason (the runner owns those).
 
-const agentKey = z.enum([WEEKLY_STUDIO]);
+const agentKey = agentKeySchema;
 const iso = z.string().datetime({ offset: true });
 const FAILED = { ok: false, error: 'That change could not be saved.' } as const;
 
@@ -39,6 +40,7 @@ export const resumeScheduleInput = z.object({ id: z.string().uuid() });
 export const cancelScheduleInput = z.object({ id: z.string().uuid() });
 
 export const setWorkspaceCapsInput = z.object({
+  agent_key: agentKey.default(WEEKLY_STUDIO),
   daily_cap_cents: z.number().int().min(0).max(1_000_000),
   weekly_cap_cents: z.number().int().min(0).max(1_000_000),
 });
@@ -134,16 +136,20 @@ export async function cancelSchedule(
 
 export async function setWorkspaceCaps(
   ctx: ReachWriteContext,
-  input: z.infer<typeof setWorkspaceCapsInput>,
+  input: z.input<typeof setWorkspaceCapsInput>,
 ): Promise<CapResult<{ daily_cap_cents: number; weekly_cap_cents: number }>> {
-  const p = setWorkspaceCapsInput.parse(input);
+  // Callers (the server action) have already checked agent_key against the registry via
+  // setWorkspaceCapsInput; here any non-empty key is accepted as trusted server input.
+  const { agent_key, ...p } = setWorkspaceCapsInput
+    .extend({ agent_key: z.string().min(1).default(WEEKLY_STUDIO) })
+    .parse(input);
   const cols = 'daily_cap_cents,weekly_cap_cents';
   // Update-first: the column-level UPDATE grant makes ON CONFLICT (upsert) 42501.
   const upd = await ctx.client
     .from('agent_configs')
     .update({ ...p, updated_at: new Date().toISOString() })
     .eq('org_id', ctx.orgId)
-    .eq('agent_key', WEEKLY_STUDIO)
+    .eq('agent_key', agent_key)
     .select(cols)
     .maybeSingle();
   if (upd.error) {
@@ -153,7 +159,7 @@ export async function setWorkspaceCaps(
   if (upd.data) return { ok: true, data: upd.data as { daily_cap_cents: number; weekly_cap_cents: number } };
   const ins = await ctx.client
     .from('agent_configs')
-    .insert({ org_id: ctx.orgId, agent_key: WEEKLY_STUDIO, ...p })
+    .insert({ org_id: ctx.orgId, agent_key, ...p })
     .select(cols)
     .single();
   if (ins.error || !ins.data) {
@@ -176,8 +182,12 @@ const CADENCE_SECONDS = { daily: 86_400, weekly: 604_800 } as const;
 export async function syncCadenceSchedule(
   ctx: ReachWriteContext,
   cadence: 'off' | 'daily' | 'weekly',
+  opts: { agentKey?: string; firstRunAt?: (now: Date) => Date } = {},
 ): Promise<CapResult<null>> {
+  const agentKey = opts.agentKey ?? WEEKLY_STUDIO;
   const now = new Date();
+  const firstRun = (secs: number) =>
+    (opts.firstRunAt ? opts.firstRunAt(now) : new Date(now.getTime() + secs * 1000)).toISOString();
   const scope = () =>
     ctx.client
       .from('agent_schedules')
@@ -186,14 +196,14 @@ export async function syncCadenceSchedule(
           ? { status: 'completed', updated_at: now.toISOString() }
           : {
               interval_seconds: CADENCE_SECONDS[cadence],
-              next_run_at: new Date(now.getTime() + CADENCE_SECONDS[cadence] * 1000).toISOString(),
+              next_run_at: firstRun(CADENCE_SECONDS[cadence]),
               status: 'active',
               nl_text: CADENCE_PRESET,
               updated_at: now.toISOString(),
             },
       )
       .eq('org_id', ctx.orgId)
-      .eq('agent_key', WEEKLY_STUDIO)
+      .eq('agent_key', agentKey)
       .in('nl_text', PRESET_TAGS)
       .select('id')
       .maybeSingle();
@@ -209,10 +219,10 @@ export async function syncCadenceSchedule(
     .from('agent_schedules')
     .insert({
       org_id: ctx.orgId,
-      agent_key: WEEKLY_STUDIO,
+      agent_key: agentKey,
       nl_text: CADENCE_PRESET,
       interval_seconds: secs,
-      next_run_at: new Date(now.getTime() + secs * 1000).toISOString(),
+      next_run_at: firstRun(secs),
       status: 'active',
     })
     .select('id')
