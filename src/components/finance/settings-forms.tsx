@@ -6,22 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import type { FinResult } from '@/lib/finance/result';
-import { type SequenceDoc, type SequenceRow, formatSequence } from '@/lib/finance/settings';
-
-const MONTH_NAMES = [
-  'January',
-  'February',
-  'March',
-  'April',
-  'May',
-  'June',
-  'July',
-  'August',
-  'September',
-  'October',
-  'November',
-  'December',
-];
+import { MONTHS, type SequenceDoc, type SequenceRow, formatSequence } from '@/lib/finance/settings';
 
 const SELECT_CLASS =
   'h-8 w-full rounded-lg border border-input bg-transparent px-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:opacity-50 dark:bg-input/30';
@@ -78,7 +63,7 @@ export function FinanceYearLockForm({
               setMonth(Number(e.target.value));
             }}
           >
-            {MONTH_NAMES.map((name, i) => (
+            {MONTHS.map((name, i) => (
               <option key={name} value={i + 1}>
                 {name}
               </option>
@@ -141,11 +126,21 @@ export function SequenceRowForm({
 
   if (!save) {
     return (
-      <div className="grid grid-cols-2 gap-x-3 gap-y-1 py-3 text-sm sm:grid-cols-4">
-        <span className="col-span-2 font-medium sm:col-span-1">{row.label}</span>
-        <span className="font-mono">{row.prefix}</span>
-        <span className="font-mono">{row.nextNumber}</span>
-        <span className="font-mono text-muted-foreground">{formatSequence(row)}</span>
+      <div className="grid grid-cols-3 gap-x-3 gap-y-1 py-3 text-sm sm:grid-cols-4">
+        <span className="col-span-3 font-medium sm:col-span-1">{row.label}</span>
+        {/* On a phone the three values sit under the name, each with a small label; the header row names them on wider screens. */}
+        <span className="min-w-0">
+          <span className="block text-xs text-muted-foreground sm:sr-only">Prefix</span>
+          <span className="font-mono">{row.prefix}</span>
+        </span>
+        <span className="min-w-0">
+          <span className="block text-xs text-muted-foreground sm:sr-only">Next number</span>
+          <span className="font-mono">{row.nextNumber}</span>
+        </span>
+        <span className="min-w-0">
+          <span className="block text-xs text-muted-foreground sm:sr-only">Example</span>
+          <span className="font-mono text-muted-foreground">{formatSequence(row)}</span>
+        </span>
       </div>
     );
   }
@@ -173,6 +168,7 @@ export function SequenceRowForm({
           </Label>
           <Input
             id={`${id}-prefix`}
+            aria-label={`${row.label} prefix`}
             value={prefix}
             maxLength={10}
             autoComplete="off"
@@ -190,6 +186,7 @@ export function SequenceRowForm({
           </Label>
           <Input
             id={`${id}-next`}
+            aria-label={`${row.label} next number`}
             value={next}
             inputMode="numeric"
             autoComplete="off"

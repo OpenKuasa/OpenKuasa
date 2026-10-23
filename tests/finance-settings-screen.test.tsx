@@ -93,6 +93,9 @@ describe('Accounting Settings, signed in', () => {
     expect(html).toContain('href="/account/company"');
     expect(text).toContain('Edit company details');
     expect(text).toContain('INV-0043');
+    // Each row's two boxes are named for their document.
+    expect(html).toContain('aria-label="Invoice prefix"');
+    expect(html).toContain('aria-label="Invoice next number"');
     expect(text).toContain('C999');
     expect(count(html, 'Coming soon')).toBe(6);
   });
@@ -106,6 +109,10 @@ describe('Accounting Settings, signed in', () => {
     expect(html).not.toContain('href="/account/company"');
     expect(text).toContain('Books locked to 30 Sep 2026');
     expect(text).toContain('INV-0043');
+    // On a phone each read-only value carries its own small label (hidden from sight on wider screens).
+    expect(html).toMatch(/<span class="[^"]*sm:sr-only[^"]*">Prefix<\/span>/);
+    expect(html).toMatch(/<span class="[^"]*sm:sr-only[^"]*">Next number<\/span>/);
+    expect(html).toMatch(/<span class="[^"]*sm:sr-only[^"]*">Example<\/span>/);
   });
 
   it('shows the demo workspace read-only even to its owner', async () => {

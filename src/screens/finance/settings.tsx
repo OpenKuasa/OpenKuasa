@@ -16,6 +16,7 @@ import { displayDate } from '@/lib/finance/view-helpers';
 import {
   DEFAULT_FINANCE_SETTINGS,
   type FinanceSettings,
+  MONTHS,
   SEQUENCE_DOCS,
   type SequenceRow,
   getFinanceSettings,
@@ -32,21 +33,6 @@ import { SAMPLE_TODAY } from './sales-sample';
  * changes the year end, the lock and the numbering. Each card is read on its own, so one failed read says
  * "Couldn't load" in that card and leaves the rest.
  */
-
-const MONTHS = [
-  'January',
-  'February',
-  'March',
-  'April',
-  'May',
-  'June',
-  'July',
-  'August',
-  'September',
-  'October',
-  'November',
-  'December',
-];
 
 const COULD_NOT_LOAD = "Couldn't load";
 
