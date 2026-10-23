@@ -35,12 +35,14 @@
 --      differently.
 --   4. Numbering: public.finance_set_sequence(target_org, doc, new_prefix, new_next) changes a document's prefix and
 --      next number (owner or admin; FIN66 for a bad prefix, stored in capitals; FIN65 when the next number would go
---      back, so no number is ever given twice; logged per changed field), and public.finance_sequence_list(target_org)
+--      back, so no number is ever given twice; FIN67 when another document of the workspace already uses the new
+--      prefix; logged per changed field), and public.finance_sequence_list(target_org)
 --      lists all 13 documents, with the defaults for those never numbered. public.finance_next_number is not changed.
 --   5. A closing block checks the triggers, the grants and the document list.
 --
 -- New error codes: FIN63 (a date in the locked period), FIN64 (a lock date in the future), FIN65 (a next number
--- going back), FIN66 (a bad prefix). Safe to run once (it creates the table, functions and triggers).
+-- going back), FIN66 (a bad prefix), FIN67 (a prefix another document uses). FIN63 names the lock date as
+-- 'FMDD Mon YYYY' (5 Dec 1999). Safe to run once (it creates the table, functions and triggers).
 
 -- Fail fast instead of queueing behind a long transaction and stalling sign-ins.
 set local lock_timeout = '5s';
@@ -188,7 +190,7 @@ begin
       end if;
       select s.lock_date into l from public.finance_settings s where s.org_id = old.org_id;
       if l is not null and old.opening_date <= l then
-        raise exception 'This date is in a closed period: the books are locked to %.', to_char(l, 'DD Mon YYYY')
+        raise exception 'This date is in a closed period: the books are locked to %.', to_char(l, 'FMDD Mon YYYY')
           using errcode = 'FIN63';
       end if;
       return old;
@@ -207,7 +209,7 @@ begin
     end if;
     if (new.opening_balance <> 0 and new.opening_date <= l)
        or (tg_op = 'UPDATE' and old.opening_balance <> 0 and old.opening_date <= l) then
-      raise exception 'This date is in a closed period: the books are locked to %.', to_char(l, 'DD Mon YYYY')
+      raise exception 'This date is in a closed period: the books are locked to %.', to_char(l, 'FMDD Mon YYYY')
         using errcode = 'FIN63';
     end if;
     return new;
@@ -254,7 +256,7 @@ begin
   if (is_ledger is not false and d <= l)
      or (was_ledger and od <= l)
      or (st = 'void' and (now() at time zone 'UTC')::date <= l) then
-    raise exception 'This date is in a closed period: the books are locked to %.', to_char(l, 'DD Mon YYYY')
+    raise exception 'This date is in a closed period: the books are locked to %.', to_char(l, 'FMDD Mon YYYY')
       using errcode = 'FIN63';
   end if;
   return new;
@@ -340,6 +342,9 @@ begin
   end if;
   p := upper(new_prefix);
 
+  -- One change of numbering at a time per workspace, so two documents cannot take the same prefix at once.
+  perform pg_advisory_xact_lock(hashtextextended('finance_set_sequence:' || target_org::text, 0));
+
   -- As public.finance_next_number does, the row is made with its default prefix when the document was never
   -- numbered; then it is locked, so a number handed out at the same moment is counted.
   insert into public.finance_sequences (org_id, doc_type, prefix)
@@ -351,6 +356,18 @@ begin
 
   if new_next is null or new_next < cur.next_number then
     raise exception 'The next number can''t go back: it must be % or more.', cur.next_number using errcode = 'FIN65';
+  end if;
+
+  -- A new prefix may not be one another document of the workspace uses now (its stored prefix, or its default when
+  -- it was never numbered): receipts and vouchers share finance_transactions.number, and a shared prefix would hand
+  -- out the same number twice. Keeping a document's own prefix is never refused.
+  if p is distinct from cur.prefix and exists (
+    select 1
+      from private.finance_sequence_docs() o
+      left join public.finance_sequences s on s.org_id = target_org and s.doc_type = o.doc_type
+     where o.doc_type <> doc and upper(coalesce(s.prefix, o.default_prefix)) = p
+  ) then
+    raise exception 'Another document already uses this prefix.' using errcode = 'FIN67';
   end if;
 
   if p is distinct from cur.prefix then

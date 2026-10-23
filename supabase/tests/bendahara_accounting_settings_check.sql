@@ -334,6 +334,25 @@ begin
     fails := fails || 'numbering: after a prefix change the next number is not INV-0051'::text;
   end if;
   perform public.finance_set_sequence(org, 'journal', 'GJ-', 1);
+  -- A prefix another document uses now (receipts and vouchers share one number column): the voucher's default, a
+  -- prefix set on another document, in any case. Nothing is written or logged.
+  fails := fails || public.bendahara_check_try('numbering: a receipt takes the vouchers'' prefix', 'FIN67',
+    format('select public.finance_set_sequence(%L, %L, %L, %s)', org, 'receipt', 'PV-', 1));
+  fails := fails || public.bendahara_check_try('numbering: a quotation takes the journals'' new prefix', 'FIN67',
+    format('select public.finance_set_sequence(%L, %L, %L, %s)', org, 'quotation', 'gj-', 1));
+  fails := fails || public.bendahara_check_try('numbering: a bill takes the journals'' old prefix, now free', 'ok',
+    format('select public.finance_set_sequence(%L, %L, %L, %s)', org, 'bill', 'JV-', 1));
+  fails := fails || public.bendahara_check_try('numbering: the journal keeps its own prefix and moves on', 'ok',
+    format('select public.finance_set_sequence(%L, %L, %L, %s)', org, 'journal', 'GJ-', 5));
+  begin
+    perform public.finance_set_sequence(org, 'receipt', 'PV-', 1);
+  exception when others then
+    if sqlerrm <> 'Another document already uses this prefix.' then
+      fails := fails || format('numbering: FIN67 reads %s', sqlerrm);
+    end if;
+  end;
+  select prefix into t from public.finance_sequence_list(org) where doc_type = 'receipt';
+  if t is distinct from 'RC-' then fails := fails || format('numbering: the receipt prefix is %s after a refusal', t); end if;
 
   -- ==== the books lock: what was posted before it ===============================================================
   -- With books open: documents dated 1999 posted, ready to be voided (or paid against) once locked.
@@ -632,6 +651,8 @@ begin
     jsonb_build_array('Changed document numbering', 'Invoice numbering', '{"event":"changed","doc":"invoice","changed":{"next_number":{"from":1,"to":50}}}'::jsonb),
     jsonb_build_array('Changed document numbering', 'Invoice numbering', '{"event":"changed","doc":"invoice","changed":{"prefix":{"from":"SI/","to":"INV-"}}}'::jsonb),
     jsonb_build_array('Changed document numbering', 'Journal numbering', '{"event":"changed","doc":"journal","changed":{"prefix":{"from":"JV-","to":"GJ-"}}}'::jsonb),
+    jsonb_build_array('Changed document numbering', 'Supplier bill numbering', '{"event":"changed","doc":"bill","changed":{"prefix":{"from":"BILL-","to":"JV-"}}}'::jsonb),
+    jsonb_build_array('Changed document numbering', 'Journal numbering', '{"event":"changed","doc":"journal","changed":{"next_number":{"from":1,"to":5}}}'::jsonb),
     jsonb_build_array('Changed the books lock date', 'Books lock date',
       jsonb_build_object('event', 'changed', 'changed', jsonb_build_object('lock_date', jsonb_build_object('from', null, 'to', lock1)))),
     jsonb_build_array('Changed the books lock date', 'Books lock date',
@@ -665,6 +686,17 @@ begin
   -- (After the log comparison: this change of lock date is logged but not in the list above.)
   perform set_config('request.jwt.claims', owner_claims, true);
   set local role authenticated;
+  -- The lock date in the message has no leading zero: 5 Dec 1999.
+  update public.finance_settings set lock_date = '1999-12-05' where org_id = org;
+  inv_d := public.finance_save_invoice(org, jsonb_build_object('customer_id', cust, 'invoice_date', '1999-12-01', 'due_date', '1999-12-31'), one_line);
+  begin
+    perform public.finance_post_invoice(org, inv_d);
+    fails := fails || 'a single-digit lock date: the invoice was posted'::text;
+  exception when others then
+    if sqlstate <> 'FIN63' or sqlerrm <> 'This date is in a closed period: the books are locked to 5 Dec 1999.' then
+      fails := fails || format('a single-digit lock date: %s %s', sqlstate, sqlerrm);
+    end if;
+  end;
   update public.finance_settings set lock_date = (now() at time zone 'UTC')::date where org_id = org;
   fails := fails || public.bendahara_check_try('lock at today (UTC): void of a later invoice', 'FIN63',
     format('update public.finance_invoices set status = %L, updated_at = now() where id = %L', 'void', inv_future));
