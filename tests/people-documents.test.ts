@@ -479,7 +479,8 @@ describe('Settings', () => {
     expect(model.medical_leave_days).toBe('14');
     expect(model.emergency_leave_days).toBe('3');
     expect(model.overtime.map((o) => o.value)).toEqual(['1.5x', '2x', '3x']);
-    expect(model.notifications.map((n) => n.on)).toEqual([true, true, true, false]);
+    // The notification switches were never wired to anything, so the screen no longer shows them.
+    expect(model).not.toHaveProperty('notifications');
   });
 
   it('reads nothing for a plain member', async () => {
@@ -495,10 +496,9 @@ describe('Settings', () => {
     expect(reads).toBe(0);
   });
 
-  it('treats empty notifications as off and labels the working week', () => {
+  it('labels the working week and leave defaults', () => {
     const model = buildSettingsModel(SETTINGS);
     if (model.hr_only) throw new Error('expected settings');
-    expect(model.notifications.every((n) => !n.on)).toBe(true);
     expect(model.annual_leave_days).toBe('14.5');
     expect(model.medical_leave_days).toBe('14');
     expect(model.emergency_leave_days).toBe('3');

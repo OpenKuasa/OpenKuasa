@@ -634,13 +634,6 @@ export function workWeekLabel(days: string[]): string {
   return known.map((d) => DAY_LABEL[d]).join(', ');
 }
 
-const NOTIFICATIONS: { key: string; label: string; description: string }[] = [
-  { key: 'leave_requests', label: 'Leave & claim requests', description: 'Alert approvers the moment a request comes in.' },
-  { key: 'payslip_ready', label: 'Payslip ready', description: 'Tell staff when the monthly payslip is published.' },
-  { key: 'document_expiry', label: 'Document expiry', description: 'Flag expiring permits, passports and EA forms early.' },
-  { key: 'birthdays', label: 'Birthdays & anniversaries', description: 'A friendly nudge for team milestones.' },
-];
-
 const multiplier = (value: number) => `${value}x`;
 
 export type SettingsModel =
@@ -654,7 +647,6 @@ export type SettingsModel =
       medical_leave_days: string;
       emergency_leave_days: string;
       overtime: { label: string; value: string }[];
-      notifications: { key: string; label: string; description: string; on: boolean }[];
     };
 
 export function buildSettingsModel(settings: PeopleSettings): SettingsModel {
@@ -674,7 +666,6 @@ export function buildSettingsModel(settings: PeopleSettings): SettingsModel {
       { label: 'Rest day', value: multiplier(settings.overtime_rates.rest_day) },
       { label: 'Public holiday', value: multiplier(settings.overtime_rates.public_holiday) },
     ],
-    notifications: NOTIFICATIONS.map((n) => ({ ...n, on: settings.notifications[n.key] === true })),
   };
 }
 
