@@ -1,6 +1,12 @@
 import type { FocusMenu } from '@/lib/agents/focus/plan';
 import { formatRM } from '@/lib/crm/deal-stats';
 
+/** Kasturi's own spend defaults, lower than the generic ones. */
+export const CRM_DEFAULTS = { max_cost_cents: 50, daily_cap_cents: 200, weekly_cap_cents: 500 } as const;
+
+/** The longest focus the workspace may write. */
+export const CRM_MAX_FOCUS_CHARS = 500;
+
 /** The fixed menu of checks Kasturi's agent can run. The focus text can only pick from this. */
 export const CRM_FOCUS_MENU: FocusMenu = {
   product: 'crm',

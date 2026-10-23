@@ -1,7 +1,12 @@
+import type { ReactNode } from 'react';
+import Link from 'next/link';
 import {
   BarChart3,
+  CalendarClock,
   DatabaseZap,
   Gauge,
+  History,
+  Inbox,
   MessageSquare,
   NotebookPen,
   Plus,
@@ -24,7 +29,27 @@ import {
 } from '@/components/charts';
 import { LiveDot } from '@/components/ui/live-dot';
 import { Button } from '@/components/ui/button';
+import { PendingApprovals } from '@/components/agents/pending-approvals';
+import { RecentlyDecided } from '@/components/agents/recently-decided';
+import { AgentFocus } from '@/components/crm/agent-focus';
+import { AgentSchedule } from '@/components/crm/agent-schedule';
+import { CouldntLoad } from '@/components/crm/couldnt-load';
+import { listPendingProposals, listRecentlyDecided } from '@/lib/agents/proposals';
+import { workspaceSpendCents } from '@/lib/agents/spend';
+import { CRM_FOCUS, type AgentRunStatus } from '@/lib/agents/types';
+import { can } from '@/lib/auth/permissions';
+import { getViewer, hasSupabaseEnv } from '@/lib/auth/viewer';
+import { CRM_MAX_FOCUS_CHARS, CRM_STARTER_EXAMPLES } from '@/lib/crm/agent/checks';
+import { listSchedules } from '@/lib/reach/schedule-capabilities';
+import { createClient } from '@/lib/supabase/server';
 import { cn } from '@/lib/utils';
+import {
+  buildCrmAgentsView,
+  type CrmAgentConfigRow,
+  type CrmAgentRunRow,
+  type CrmAgentsSection,
+  type CrmAgentsView,
+} from './agents-view';
 
 /* ---- mock data (Rimba Ventures Sdn Bhd) --------------------------- */
 
@@ -150,7 +175,8 @@ const STRENGTHS_SERIES: Series[] = [
 
 /* ------------------------------------------------------------------ */
 
-export default function AgentsScreen() {
+/** The sample screen, for the no-database preview and the demo workspace. */
+export function AgentsSample() {
   return (
     <ScreenContainer>
       <PageHeader
@@ -318,6 +344,219 @@ export default function AgentsScreen() {
           );
         })}
       </BentoGrid>
+    </ScreenContainer>
+  );
+}
+
+/* ---- live screen ---------------------------------------------------- */
+
+const TITLE = 'AI Agents';
+const SUBTITLE = 'Watches your pipeline for what you ask, and suggests follow-ups and notes for you to approve.';
+
+const CONFIG_COLS =
+  'enabled,cadence,max_cost_cents,daily_cap_cents,weekly_cap_cents,focus_text,focus_plan,focus_cannot,focus_confirmed_at';
+
+const RUN_STATUS: Record<AgentRunStatus, string> = {
+  running: 'Running',
+  done: 'Done',
+  failed: 'Failed',
+  skipped: 'Skipped',
+};
+
+/** ISO timestamp `ms` before now (kept out of the component body for render purity). */
+function isoAgo(ms: number): string {
+  return new Date(Date.now() - ms).toISOString();
+}
+
+function formatWhen(iso: string): string {
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime())
+    ? '—'
+    : d.toLocaleString('en-MY', {
+        day: 'numeric',
+        month: 'short',
+        hour: 'numeric',
+        minute: '2-digit',
+        timeZone: 'Asia/Kuala_Lumpur',
+      });
+}
+
+type Loaded = { view: CrmAgentsView };
+
+async function loadView(orgId: string): Promise<Loaded | null> {
+  const supabase = await createClient();
+  // Fail open to "nothing spent" on the strip only; the run gate itself refuses instead.
+  const spentSince = (ms: number) =>
+    workspaceSpendCents(supabase, orgId, isoAgo(ms), CRM_FOCUS).catch(() => {
+      console.error('[crm/agents] workspace spend could not be read');
+      return 0;
+    });
+  try {
+    const [configRes, runsRes, pending, decided, schedules, key, daySpent, weekSpent] = await Promise.all([
+      supabase.from('agent_configs').select(CONFIG_COLS).eq('org_id', orgId).eq('agent_key', CRM_FOCUS).maybeSingle(),
+      supabase
+        .from('agent_runs')
+        .select('id,status,cost_cents,started_at')
+        .eq('org_id', orgId)
+        .eq('agent_key', CRM_FOCUS)
+        .in('trigger', ['schedule', 'manual'])
+        .order('started_at', { ascending: false })
+        .limit(10),
+      listPendingProposals(supabase, orgId, 'crm'),
+      listRecentlyDecided(supabase, orgId, 5, 'crm'),
+      listSchedules(supabase, orgId, CRM_FOCUS),
+      supabase.rpc('org_ai_key_status'),
+      spentSince(24 * 3600_000),
+      spentSince(7 * 24 * 3600_000),
+    ]);
+    // The focus columns arrive in a migration applied separately from a deploy.
+    if (configRes.error || runsRes.error) {
+      console.error('[crm/agents] could not load the agent', configRes.error?.code ?? runsRes.error?.code);
+      return null;
+    }
+    const runs = (runsRes.data ?? []) as CrmAgentRunRow[];
+
+    // Suggestions made per run: one small read of run ids. Left out if it fails.
+    let suggestionsByRun: Record<string, number> | null = {};
+    if (runs.length > 0) {
+      const { data, error } = await supabase
+        .from('agent_proposals')
+        .select('run_id')
+        .eq('org_id', orgId)
+        .in(
+          'run_id',
+          runs.map((r) => r.id),
+        );
+      if (error) suggestionsByRun = null;
+      else {
+        for (const row of (data ?? []) as { run_id: string | null }[]) {
+          if (row.run_id) suggestionsByRun[row.run_id] = (suggestionsByRun[row.run_id] ?? 0) + 1;
+        }
+      }
+    }
+
+    return {
+      view: buildCrmAgentsView({
+        config: (configRes.data as CrmAgentConfigRow | null) ?? null,
+        hasActiveSchedule: schedules.some((s) => s.status === 'active'),
+        pending,
+        decided,
+        runs,
+        suggestionsByRun,
+        spentTodayCents: daySpent,
+        spentWeekCents: weekSpent,
+        // Same reading as the AI Chatbot screen: a stored key shows as a row.
+        hasKey: Array.isArray(key.data) ? key.data.length > 0 : Boolean(key.data),
+      }),
+    };
+  } catch (error) {
+    console.error('[crm/agents] could not load the agent', (error as { code?: string } | null)?.code ?? 'unknown');
+    return null;
+  }
+}
+
+/**
+ * Kasturi's AI Agents screen: the focus the workspace wrote, what the agent suggests from
+ * it, when it runs and what it may spend. The sample shows when no database is configured
+ * and in the demo workspace.
+ */
+export default async function AgentsScreen() {
+  if (!hasSupabaseEnv()) return <AgentsSample />;
+  const viewer = await getViewer();
+  if (viewer.isDemo) return <AgentsSample />;
+
+  // Focus, schedule and limits decide what the workspace key spends: owner/admin only.
+  const canManage = can(viewer.role, 'manage-agents');
+  // Run now and Approve/Dismiss: anyone who edits the workspace's data.
+  const canEdit = can(viewer.role, 'edit-data');
+
+  const loaded = await loadView(viewer.orgId);
+  if (!loaded) return <CouldntLoad title={TITLE} subtitle={SUBTITLE} thing="agent" />;
+  const { view } = loaded;
+
+  const cards: Record<CrmAgentsSection, ReactNode> = {
+    waiting: (
+      <BentoCard key="waiting" title="Waiting for you" icon={Inbox} className="col-span-2 md:col-span-12">
+        <PendingApprovals
+          proposals={view.pending}
+          canEdit={canEdit}
+          heading="Suggestions"
+          emptyText="Nothing waiting"
+          rejectLabel="Dismiss"
+          views={view.suggestions}
+        />
+      </BentoCard>
+    ),
+    focus: (
+      <BentoCard
+        key="focus"
+        title="Focus"
+        subtitle="Tell the agent what to watch for, in your own words"
+        icon={Target}
+        className="col-span-2 md:col-span-12"
+      >
+        <AgentFocus
+          key={`${view.focus.state}:${view.focus.text}`}
+          focus={view.focus}
+          starters={CRM_STARTER_EXAMPLES}
+          maxChars={CRM_MAX_FOCUS_CHARS}
+          canManage={canManage}
+          hasKey={view.hasKey}
+        />
+      </BentoCard>
+    ),
+    schedule: (
+      <BentoCard key="schedule" title="Schedule and limits" icon={CalendarClock} className="col-span-2 md:col-span-12">
+        <AgentSchedule
+          settings={view.settings}
+          spend={view.spend}
+          canManage={canManage}
+          canRun={canEdit}
+          hasKey={view.hasKey}
+        />
+      </BentoCard>
+    ),
+    history: (
+      <BentoCard key="history" title="Recent history" icon={History} className="col-span-2 md:col-span-12">
+        <div className="space-y-4">
+          {view.history.length === 0 ? (
+            <p className="grid min-h-16 place-items-center text-center text-sm text-muted-foreground">
+              No runs yet.
+            </p>
+          ) : (
+            <ul className="divide-y rounded-md border">
+              {view.history.map((run) => (
+                <li key={run.id} className="flex flex-wrap items-center justify-between gap-2 p-3 text-sm">
+                  <span className="font-medium">{RUN_STATUS[run.status] ?? run.status}</span>
+                  <span className="tabular-nums text-muted-foreground">
+                    {formatWhen(run.startedAt)}
+                    {run.suggestions !== null &&
+                      ` · ${run.suggestions} suggestion${run.suggestions === 1 ? '' : 's'}`}
+                    {` · RM ${(run.costCents / 100).toFixed(2)}`}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+          <RecentlyDecided decided={view.decided} />
+        </div>
+      </BentoCard>
+    ),
+  };
+
+  return (
+    <ScreenContainer>
+      <PageHeader title={TITLE} subtitle={SUBTITLE} />
+      {!view.hasKey && (
+        <p className="mb-4 rounded-md border border-dashed p-3 text-sm text-muted-foreground">
+          The agent runs on your workspace&rsquo;s own AI key.{' '}
+          <Link href="/account/ai" className="font-medium text-primary underline-offset-4 hover:underline">
+            Add an OpenRouter key
+          </Link>{' '}
+          to use it.
+        </p>
+      )}
+      <BentoGrid>{view.sections.map((s) => cards[s])}</BentoGrid>
     </ScreenContainer>
   );
 }

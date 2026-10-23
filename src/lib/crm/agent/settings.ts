@@ -5,14 +5,10 @@ import { readBack, type FocusPlan } from '@/lib/agents/focus/plan';
 import { startRefusal, type StartRefusal } from '@/lib/agents/runner';
 import { CRM_FOCUS } from '@/lib/agents/types';
 import { readWorkspaceKey } from '@/lib/ai/workspace-key';
-import { CRM_FOCUS_MENU } from '@/lib/crm/agent/checks';
+import { CRM_DEFAULTS, CRM_FOCUS_MENU, CRM_MAX_FOCUS_CHARS as MAX_FOCUS_CHARS } from '@/lib/crm/agent/checks';
 import type { CapResult } from '@/lib/reach/capabilities';
 
-
-/** Kasturi's own spend defaults, lower than the generic ones. */
-export const CRM_DEFAULTS = { max_cost_cents: 50, daily_cap_cents: 200, weekly_cap_cents: 500 } as const;
-
-const MAX_FOCUS_CHARS = 500;
+export { CRM_DEFAULTS };
 const MAX_CHANGES_PER_DAY = 10;
 const KL_OFFSET_MS = 8 * 3_600_000;
 const DAY_MS = 86_400_000;
