@@ -169,27 +169,38 @@ export async function runChange(
   const toolCallId = confirming?.toolCallId ?? `mcp_${randomUUID()}`;
   // The card the person was shown, as Tuah's conversation would hold it, so the gate's `cardShown` finds it.
   if (confirming) store.recordNote(key, { toolCallId, toolName: name, input, note: confirming.note });
+  // Every way out that records no result ends the turn when a note was recorded, so the note never counts as a
+  // change still shown to the person.
+  const leave = (out: DispatchResult): DispatchResult => {
+    if (confirming) store.endTurn(key);
+    return out;
+  };
 
   const gate = ops.gates?.[name];
   const messages = store.messages(key);
-  const decided: Decision = typeof gate === 'function' ? await gate(input, { toolCallId, messages: withArgsAsSaid(messages, args) }) : 'user-approval';
-  if (typeof decided === 'object' && decided.type === 'denied') {
-    // The note recorded above never gets a result: ending the turn keeps it from counting as a change still shown.
-    if (confirming) store.endTurn(key);
-    return { ok: false, error: decided.reason };
+  let decided: Decision = 'user-approval';
+  if (typeof gate === 'function') {
+    try {
+      decided = await gate(input, { toolCallId, messages: withArgsAsSaid(messages, args) });
+    } catch {
+      // As with a tool's own error: only the operation is logged.
+      console.error(`[mcp] ${name} check failed`);
+      return leave({ ok: false, error: FAILED });
+    }
   }
+  if (typeof decided === 'object' && decided.type === 'denied') return leave({ ok: false, error: decided.reason });
   const note = typeof decided === 'object' ? decided.reason : undefined;
   // A note the person has not seen (none yet, or not the one their token was given for) goes back to them first.
   if (note && note !== confirming?.note) {
     const bound = typeof decided === 'object' ? decided.bound : undefined;
     const token = issueToken({ credentialId: caller.credentialId, name, argsJson, toolCallId, note, ...(bound ? { bound } : {}) });
-    return { ok: false, needsConfirm: true, note, confirm: token };
+    return leave({ ok: false, needsConfirm: true, note, confirm: token });
   }
   // What was bound when the note was shown, as `bindApprovals` keeps it on the proposal; else what the gate bound now.
   const bound = confirming ? confirming.bound : typeof decided === 'object' ? decided.bound : undefined;
 
   const ran = await execute(op, input, { toolCallId, messages, ...(bound ? { bound } : {}) });
-  if (!ran.ok) return ran;
+  if (!ran.ok) return leave(ran);
   store.recordCall(key, { toolCallId, toolName: name, input, output: ran.result });
   store.endTurn(key);
   const succeeded = (ran.result as { ok?: unknown } | null)?.ok;

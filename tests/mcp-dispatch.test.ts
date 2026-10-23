@@ -5,7 +5,7 @@ import { z } from 'zod';
 import { guardDeletions, notLookedUp, ONE_DELETION, type DeletionCheck, type DeletionGate } from '@/lib/ai/hire-deletions';
 import { guardInterviewChanges, LINK_NOT_GIVEN } from '@/lib/ai/hire-interview-gate';
 import { changeHeading } from '@/lib/chat/change-rows';
-import { runChange, runRead } from '@/lib/mcp/dispatch';
+import { CONFIRM_INVALID, FAILED, UNKNOWN_CHANGE, UNKNOWN_READ, runChange, runRead } from '@/lib/mcp/dispatch';
 import type { Operation, Operations } from '@/lib/mcp/operations';
 import { memoryTranscriptStore, type TranscriptStore } from '@/lib/mcp/transcript';
 import type { HeldCv } from '@/lib/ai/hire-tools';
@@ -172,26 +172,26 @@ describe('runChange', () => {
     const t1 = (await ask()).confirm;
     expect((await runChange(opsFor(f, gates), store, CALLER, 'deleteCandidate', { id: 'c1' }, t1)).ok).toBe(true);
     const reused = await runChange(opsFor(f, gates), store, CALLER, 'deleteCandidate', { id: 'c1' }, t1);
-    expect(reused).toMatchObject({ ok: false, error: expect.any(String) });
+    expect(reused).toEqual({ ok: false, error: CONFIRM_INVALID });
     expect(reused).not.toHaveProperty('needsConfirm');
     const ranOnce = writeCalls(f).length;
     expect(ranOnce).toBe(1);
 
     // Other arguments.
     const t2 = (await ask()).confirm;
-    expect(await runChange(opsFor(f, gates), store, CALLER, 'deleteCandidate', { id: 'c2' }, t2)).toMatchObject({ ok: false, error: expect.any(String) });
+    expect(await runChange(opsFor(f, gates), store, CALLER, 'deleteCandidate', { id: 'c2' }, t2)).toEqual({ ok: false, error: CONFIRM_INVALID });
     // Other credential.
     const t3 = (await ask()).confirm;
-    expect(await runChange(opsFor(f, gates), store, OTHER, 'deleteCandidate', { id: 'c1' }, t3)).toMatchObject({ ok: false, error: expect.any(String) });
+    expect(await runChange(opsFor(f, gates), store, OTHER, 'deleteCandidate', { id: 'c1' }, t3)).toEqual({ ok: false, error: CONFIRM_INVALID });
     // Other operation.
     const t5 = (await ask()).confirm;
-    expect(await runChange(opsFor(f, gates), store, CALLER, 'scheduleInterview', { application_id: APP, date: 'd', time: 't', kind: 'video' }, t5)).toMatchObject({ ok: false, error: expect.any(String) });
+    expect(await runChange(opsFor(f, gates), store, CALLER, 'scheduleInterview', { application_id: APP, date: 'd', time: 't', kind: 'video' }, t5)).toEqual({ ok: false, error: CONFIRM_INVALID });
     // Expired.
     const t6 = (await ask()).confirm;
     vi.advanceTimersByTime(10 * 60 * 1000 + 1);
-    expect(await runChange(opsFor(f, gates), store, CALLER, 'deleteCandidate', { id: 'c1' }, t6)).toMatchObject({ ok: false, error: expect.any(String) });
+    expect(await runChange(opsFor(f, gates), store, CALLER, 'deleteCandidate', { id: 'c1' }, t6)).toEqual({ ok: false, error: CONFIRM_INVALID });
     // An unknown token.
-    expect(await runChange(opsFor(f, gates), store, CALLER, 'deleteCandidate', { id: 'c1' }, 'made-up')).toMatchObject({ ok: false, error: expect.any(String) });
+    expect(await runChange(opsFor(f, gates), store, CALLER, 'deleteCandidate', { id: 'c1' }, 'made-up')).toEqual({ ok: false, error: CONFIRM_INVALID });
 
     expect(writeCalls(f)).toHaveLength(ranOnce);
   });
@@ -199,10 +199,10 @@ describe('runChange', () => {
   it('read names are refused by runChange and write names by runRead', async () => {
     const f = fakeTools();
     const store = memoryTranscriptStore();
-    expect(await runChange(opsFor(f), store, CALLER, 'listCandidates', {})).toMatchObject({ ok: false, error: expect.any(String) });
-    expect(await runRead(opsFor(f), store, CALLER, 'deleteCandidate', { id: 'c1' })).toMatchObject({ ok: false, error: expect.any(String) });
-    expect(await runRead(opsFor(f), store, CALLER, 'nope', {})).toMatchObject({ ok: false, error: expect.any(String) });
-    expect(await runChange(opsFor(f), store, CALLER, 'nope', {})).toMatchObject({ ok: false, error: expect.any(String) });
+    expect(await runChange(opsFor(f), store, CALLER, 'listCandidates', {})).toEqual({ ok: false, error: UNKNOWN_CHANGE });
+    expect(await runRead(opsFor(f), store, CALLER, 'deleteCandidate', { id: 'c1' })).toEqual({ ok: false, error: UNKNOWN_READ });
+    expect(await runRead(opsFor(f), store, CALLER, 'nope', {})).toEqual({ ok: false, error: UNKNOWN_READ });
+    expect(await runChange(opsFor(f), store, CALLER, 'nope', {})).toEqual({ ok: false, error: UNKNOWN_CHANGE });
     expect(f.calls).toHaveLength(0);
   });
 
@@ -268,7 +268,7 @@ describe('runChange', () => {
     const store = memoryTranscriptStore();
     const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
     const out = await runChange(opsFor(f), store, CALLER, 'throwing', {});
-    expect(out).toMatchObject({ ok: false, error: expect.any(String) });
+    expect(out).toEqual({ ok: false, error: FAILED });
     expect((out as { error: string }).error).not.toMatch(/secret_table|\/srv/);
     for (const call of spy.mock.calls) expect(JSON.stringify(call)).not.toMatch(/secret_table/);
     spy.mockRestore();
@@ -302,6 +302,82 @@ describe('runChange', () => {
     expect(next).not.toEqual({ ok: false, error: ONE_DELETION });
     expect(next).toMatchObject({ ok: false, needsConfirm: true, note: 'N' });
     expect(writeCalls(f)).toHaveLength(0);
+  });
+  it('a changed note whose new token is never sent does not hold back the next deletion', async () => {
+    const f = fakeTools();
+    const store = memoryTranscriptStore();
+    let note = 'N1';
+    const check: DeletionCheck = async () => ({ ok: true, note, namesakes: [] });
+    const gates = (base: Gates) => guardDeletions(base, check);
+    await runRead(opsFor(f, gates), store, CALLER, 'listCandidates', {});
+    const first = await runChange(opsFor(f, gates), store, CALLER, 'deleteCandidate', { id: 'c1' });
+    note = 'N2';
+    const second = await runChange(opsFor(f, gates), store, CALLER, 'deleteCandidate', { id: 'c1' }, (first as { confirm: string }).confirm);
+    expect(second).toMatchObject({ ok: false, needsConfirm: true, note: 'N2' });
+    // The new token is dropped; another deletion is asked for instead.
+    const next = await runChange(opsFor(f, gates), store, CALLER, 'deleteCandidate', { id: 'c2' });
+    expect(next).not.toEqual({ ok: false, error: ONE_DELETION });
+    expect(next).toMatchObject({ ok: false, needsConfirm: true, note: 'N2' });
+    expect(writeCalls(f)).toHaveLength(0);
+  });
+
+  it('a confirm whose change throws does not hold back the next deletion', async () => {
+    const f = fakeTools();
+    const store = memoryTranscriptStore();
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    let fail = true;
+    f.writes.deleteCandidate = tool({
+      description: 'deleteCandidate',
+      inputSchema: z.object({ id: z.string().min(1) }),
+      execute: async () => {
+        if (fail) throw new Error('boom at /srv/db.ts');
+        return { ok: true };
+      },
+    } as never) as Tool;
+    const check: DeletionCheck = async () => ({ ok: true, note: 'N', namesakes: [] });
+    const gates = (base: Gates) => guardDeletions(base, check);
+    await runRead(opsFor(f, gates), store, CALLER, 'listCandidates', {});
+    const first = await runChange(opsFor(f, gates), store, CALLER, 'deleteCandidate', { id: 'c1' });
+    const thrown = await runChange(opsFor(f, gates), store, CALLER, 'deleteCandidate', { id: 'c1' }, (first as { confirm: string }).confirm);
+    expect(thrown).toEqual({ ok: false, error: FAILED });
+    fail = false;
+    const next = await runChange(opsFor(f, gates), store, CALLER, 'deleteCandidate', { id: 'c2' });
+    expect(next).not.toEqual({ ok: false, error: ONE_DELETION });
+    expect(next).toMatchObject({ ok: false, needsConfirm: true });
+    spy.mockRestore();
+  });
+
+  it('a gate that throws returns the plain failure, and a confirm it stops ends the turn', async () => {
+    const f = fakeTools();
+    const store = memoryTranscriptStore();
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    let throwing = false;
+    const gates = (base: Gates) => {
+      const real = guardDeletions(base, async () => ({ ok: true, note: 'N', namesakes: [] }))!;
+      return {
+        ...real,
+        deleteCandidate: ((input, options) => {
+          if (throwing) throw new Error('db said: relation "hire_secret" at /srv/gate.ts');
+          return (real.deleteCandidate as DeletionGate)(input, options);
+        }) as DeletionGate,
+      };
+    };
+    await runRead(opsFor(f, gates), store, CALLER, 'listCandidates', {});
+    throwing = true;
+    const plain = await runChange(opsFor(f, gates), store, CALLER, 'deleteCandidate', { id: 'c1' });
+    expect(plain).toEqual({ ok: false, error: FAILED });
+    expect(JSON.stringify(plain)).not.toMatch(/hire_secret|\/srv/);
+    throwing = false;
+    const first = await runChange(opsFor(f, gates), store, CALLER, 'deleteCandidate', { id: 'c1' });
+    throwing = true;
+    const stopped = await runChange(opsFor(f, gates), store, CALLER, 'deleteCandidate', { id: 'c1' }, (first as { confirm: string }).confirm);
+    expect(stopped).toEqual({ ok: false, error: FAILED });
+    throwing = false;
+    const next = await runChange(opsFor(f, gates), store, CALLER, 'deleteCandidate', { id: 'c2' });
+    expect(next).not.toEqual({ ok: false, error: ONE_DELETION });
+    expect(writeCalls(f)).toHaveLength(0);
+    for (const call of spy.mock.calls) expect(JSON.stringify(call)).not.toMatch(/hire_secret/);
+    spy.mockRestore();
   });
 });
 
