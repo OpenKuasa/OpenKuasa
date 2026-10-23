@@ -146,6 +146,8 @@ describe('reviewReceipt and deleteInboxReceipt', () => {
     expect((await by('42501')).error).toBe(NOT_ALLOWED);
     expect((await by('22003')).error).toBe(TOO_LARGE);
     expect((await by('XX000')).error).toBe(WRITE_FAILED);
+    // A settings refusal answers in its own words (none of these writes meets one today).
+    expect((await by('FIN63')).error).toBe('This date is in a closed period: the books are locked.');
     log.mockRestore();
   });
 

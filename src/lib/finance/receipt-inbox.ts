@@ -36,6 +36,7 @@ import {
   TOO_LARGE,
   WRITE_FAILED,
   pgCode,
+  settingsRefusal,
 } from './result';
 
 export const RECEIPT_INBOX_MESSAGES = {
@@ -148,6 +149,8 @@ const REFUSALS: Record<string, string> = {
 };
 
 function inboxWriteFailed(fnName: string, error: unknown): { ok: false; error: string } {
+  const s = settingsRefusal(error);
+  if (s) return { ok: false, error: s };
   const refusal = REFUSALS[pgCode(error) ?? ''];
   if (refusal) return { ok: false, error: refusal };
   // The code only: the error object can carry a path or a file name.

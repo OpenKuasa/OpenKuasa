@@ -10,6 +10,7 @@ import {
   NOT_ALLOWED,
   NUMBER_BACK,
   PG_FORBIDDEN,
+  PREFIX_TAKEN,
   pgCode,
   writeFailed,
 } from './result';
@@ -29,6 +30,22 @@ export type SequenceDoc =
   | 'contra'
   | 'fx_revaluation'
   | 'supplier_credit_note';
+
+/** The months by name, January first: `MONTHS[month - 1]` for a month numbered 1–12. */
+export const MONTHS: readonly string[] = [
+  'January',
+  'February',
+  'March',
+  'April',
+  'May',
+  'June',
+  'July',
+  'August',
+  'September',
+  'October',
+  'November',
+  'December',
+];
 
 /** Every numbered document, its name, and the prefix it starts with. */
 export const SEQUENCE_DOCS: { doc: SequenceDoc; label: string; defaultPrefix: string }[] = [
@@ -57,7 +74,7 @@ export type SequenceRow = { doc: SequenceDoc; label: string; prefix: string; nex
 export const DEFAULT_FINANCE_SETTINGS: FinanceSettings = { yearEndMonth: 12, lockDate: null, updatedAt: null };
 
 /**
- * What a person reads when the database refuses a settings change (FIN63–FIN66). The sentences live in result.ts,
+ * What a person reads when the database refuses a settings change (FIN63–FIN67). The sentences live in result.ts,
  * beside `writeFailed`, which answers them for every finance write.
  */
 export const SETTINGS_MESSAGES = {
@@ -65,6 +82,7 @@ export const SETTINGS_MESSAGES = {
   futureLock: FUTURE_LOCK,
   numberBack: NUMBER_BACK,
   badPrefix: BAD_PREFIX,
+  prefixTaken: PREFIX_TAKEN,
 };
 
 /** Told to a member who tries to change the accounting settings. */

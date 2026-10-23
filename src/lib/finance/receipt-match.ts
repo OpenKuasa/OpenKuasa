@@ -47,6 +47,7 @@ import {
   TOO_LARGE,
   WRITE_FAILED,
   pgCode,
+  settingsRefusal,
 } from './result';
 import { displayDate } from './view-helpers';
 
@@ -162,6 +163,9 @@ const DETACH_REFUSALS: Record<string, string> = {
 };
 
 function matchFailed(fnName: string, error: unknown, refusals: Record<string, string>): { ok: false; error: string } {
+  // A settings refusal first: an owner's expense is approved as it is made, so a date in a locked period is FIN63.
+  const s = settingsRefusal(error);
+  if (s) return { ok: false, error: s };
   const refusal = refusals[pgCode(error) ?? ''];
   if (refusal) return { ok: false, error: refusal };
   // The code only: a constraint's message quotes the values it refused, and those are a vendor's name and an amount.

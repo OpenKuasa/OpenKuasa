@@ -63,7 +63,7 @@ export const HELD_STILL = 'This is waiting to be paid, so it can no longer be ch
 
 /**
  * The accounting settings' refusals (20261125140000_bendahara_accounting_settings.sql). FIN63 can meet any write
- * that posts, issues, pays or voids, so `writeFailed` answers all four for every finance write; the sentences are
+ * that posts, issues, pays or voids, so `writeFailed` answers all five for every finance write; the sentences are
  * here, beside it, and `SETTINGS_MESSAGES` (settings.ts) is built from them.
  */
 /** A ledger effect dated on or before the books lock date (`private.finance_period_lock`). */
@@ -74,6 +74,8 @@ export const FIN_FUTURE_LOCK = 'FIN64';
 export const FIN_NUMBER_BACK = 'FIN65';
 /** A numbering prefix that is not 1 to 10 letters, numbers, dashes or slashes. */
 export const FIN_BAD_PREFIX = 'FIN66';
+/** A numbering prefix another document of the workspace already uses (`finance_set_sequence`). */
+export const FIN_PREFIX_TAKEN = 'FIN67';
 
 export const LOCKED = (date: string) => `This date is in a closed period: the books are locked to ${date}.`;
 export const LOCKED_NO_DATE = 'This date is in a closed period: the books are locked.';
@@ -81,6 +83,7 @@ export const FUTURE_LOCK = "The books can't be locked to a date in the future.";
 export const NUMBER_BACK = (n: number) => `The next number can't go back: it must be ${n} or more.`;
 export const NUMBER_BACK_NO_NUMBER = "The next number can't go back.";
 export const BAD_PREFIX = 'A prefix is 1 to 10 letters, numbers, dashes or slashes.';
+export const PREFIX_TAKEN = 'Another document already uses this prefix.';
 
 export function pgCode(error: unknown): string | undefined {
   return (error as { code?: string } | null)?.code;
@@ -92,7 +95,7 @@ function errorText(error: unknown): string[] {
   return [e.message, e.details, e.hint].filter((t): t is string => typeof t === 'string');
 }
 
-/** The sentence for a settings refusal (FIN63–FIN66), or null for any other error. */
+/** The sentence for a settings refusal (FIN63–FIN67), or null for any other error. */
 export function settingsRefusal(error: unknown): string | null {
   switch (pgCode(error)) {
     case FIN_LOCKED: {
@@ -114,6 +117,8 @@ export function settingsRefusal(error: unknown): string | null {
     }
     case FIN_BAD_PREFIX:
       return BAD_PREFIX;
+    case FIN_PREFIX_TAKEN:
+      return PREFIX_TAKEN;
     default:
       return null;
   }
@@ -121,7 +126,7 @@ export function settingsRefusal(error: unknown): string | null {
 
 /**
  * Logs the database error for triage; the person only ever sees the general message. A settings refusal
- * (FIN63–FIN66) is not a failure: the person is told why, in its own sentence, and nothing is logged.
+ * (FIN63–FIN67) is not a failure: the person is told why, in its own sentence, and nothing is logged.
  */
 export function writeFailed(fnName: string, error: unknown): { ok: false; error: string } {
   const refusal = settingsRefusal(error);

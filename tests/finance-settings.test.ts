@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 /**
  * Bendahara's accounting settings, the data side: the two inputs, the reads and writes against a stubbed client,
- * the four refusals (FIN63–FIN66) as `writeFailed` answers them, the two actions and the company TIN.
+ * the five refusals (FIN63–FIN67) as `writeFailed` answers them, the two actions and the company TIN.
  */
 const ctl = vi.hoisted(() => ({
   viewer: { userId: 'u1', orgId: 'org1', role: 'owner', isDemo: false } as {
@@ -36,7 +36,7 @@ const {
   sequenceInput,
   setSequence,
 } = settings;
-const { NOT_ALLOWED, WRITE_FAILED, writeFailed } = await import('@/lib/finance/result');
+const { NOT_ALLOWED, WRITE_FAILED, settingsRefusal, writeFailed } = await import('@/lib/finance/result');
 const { saveFinanceSettingsAction, setSequenceAction } = await import('@/app/(app)/finance/actions');
 const { updateCompanyAction } = await import('@/app/account/actions');
 const { tinField, TIN_MESSAGE } = await import('@/lib/account/tin');
@@ -265,12 +265,24 @@ describe('writeFailed and the settings refusals', () => {
     });
   });
 
-  it('answers FIN64–FIN66 in their own words, without logging', () => {
+  it('answers FIN64–FIN67 in their own words, without logging', () => {
     const log = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     expect(writeFailed('x', { code: 'FIN64', message: '' }).error).toBe(SETTINGS_MESSAGES.futureLock);
     expect(writeFailed('x', { code: 'FIN65', message: 'it must be 12 or more' }).error).toBe(SETTINGS_MESSAGES.numberBack(12));
     expect(writeFailed('x', { code: 'FIN65', message: 'no number' }).error).toBe("The next number can't go back.");
     expect(writeFailed('x', { code: 'FIN66', message: '' }).error).toBe(SETTINGS_MESSAGES.badPrefix);
+    expect(writeFailed('x', { code: 'FIN67', message: '' }).error).toBe(SETTINGS_MESSAGES.prefixTaken);
+    expect(SETTINGS_MESSAGES.prefixTaken).toBe('Another document already uses this prefix.');
+    expect(settingsRefusal({ code: 'FIN67', message: 'Another document already uses this prefix.' })).toBe(
+      'Another document already uses this prefix.',
+    );
+    // The lock date as the database now writes it (no leading zero), and as it wrote it before.
+    expect(settingsRefusal({ code: 'FIN63', message: 'This date is in a closed period: the books are locked to 5 Dec 1999.' })).toBe(
+      SETTINGS_MESSAGES.locked('5 Dec 1999'),
+    );
+    expect(settingsRefusal({ code: 'FIN63', message: 'This date is in a closed period: the books are locked to 05 Dec 1999.' })).toBe(
+      SETTINGS_MESSAGES.locked('05 Dec 1999'),
+    );
     expect(log).not.toHaveBeenCalled();
     log.mockRestore();
   });

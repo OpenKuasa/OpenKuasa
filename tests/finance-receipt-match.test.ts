@@ -33,6 +33,7 @@ import {
   sameAmount,
 } from '@/lib/finance/receipt-match';
 import { NOT_ALLOWED, TOO_LARGE, WRITE_FAILED } from '@/lib/finance/result';
+import { SETTINGS_MESSAGES } from '@/lib/finance/settings';
 import { type FinanceCall, fakeFinance } from './setup/fake-finance';
 import { ringgitBill } from './helpers/bill-rows';
 
@@ -158,6 +159,21 @@ describe('the writes', () => {
     ['XX000', WRITE_FAILED],
   ])('an expense from a receipt refused with %s says so', async (code, sentence) => {
     expect(await receiptToExpense(refused(code), { receipt_id: RECEIPT, expense: expenseInput })).toEqual({ ok: false, error: sentence });
+  });
+
+  it('an owner’s expense from a receipt dated in a locked period (FIN63) says the books are locked, and to when', async () => {
+    const locked = fakeFinance({
+      data: null,
+      error: { code: 'FIN63', message: 'This date is in a closed period: the books are locked to 5 Dec 1999.' },
+    }).ctx;
+    expect(await receiptToExpense(locked, { receipt_id: RECEIPT, expense: expenseInput })).toEqual({
+      ok: false,
+      error: SETTINGS_MESSAGES.locked('5 Dec 1999'),
+    });
+    expect(await receiptToBill(refused('FIN63'), { receipt_id: RECEIPT, bill: billInput })).toEqual({
+      ok: false,
+      error: 'This date is in a closed period: the books are locked.',
+    });
   });
 
   it.each([
