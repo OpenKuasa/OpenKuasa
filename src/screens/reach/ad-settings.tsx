@@ -11,7 +11,6 @@ import { PageHeader } from '@/components/screen/page-header';
 import { BentoGrid, BentoCard } from '@/components/bento/bento';
 import { RadialGauge } from '@/components/charts';
 import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
 import { AdSettingsForm } from '@/components/reach/ad-settings-form';
 import { createClient } from '@/lib/supabase/server';
 import { getReachData } from '@/lib/reach/supabase';
@@ -114,10 +113,9 @@ export default async function AdSettingsScreen() {
                   <p className="font-medium">Meta Business</p>
                   <Badge variant="secondary">Not connected</Badge>
                 </div>
-                <p className="text-sm text-muted-foreground">Not connected</p>
+                <p className="text-sm text-muted-foreground">Connecting Meta isn’t available yet.</p>
               </div>
             </div>
-            <Button size="sm">Connect</Button>
           </div>
         </BentoCard>
 
