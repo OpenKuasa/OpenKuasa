@@ -32,11 +32,19 @@ export async function proxy(request: NextRequest) {
 export const config = {
   matcher: [
     /*
-     * Match all request paths except static assets and image files, so the
-     * Supabase session is refreshed and the content policy is set on page/data
-     * requests only. The fixed security headers go on every path, from
-     * next.config.ts.
+     * Match every request path except Next's own build assets and the exact
+     * files in public/ (plus the app icon), so the Supabase session is
+     * refreshed, an AI tool's sign-in session is dropped, and the content
+     * policy is set on everything a route can answer. The fixed security
+     * headers go on every path, from next.config.ts.
+     *
+     * Only exact names: a pattern such as "any .png" or "anything under
+     * /landing/" also skips paths a dynamic route answers (/invite/x.png,
+     * /hr/x.png via [product]/[item]), server actions included. A real public
+     * file answers 405 to anything but GET/HEAD, so no action runs on one.
+     * A new public image that is not listed here just goes through the proxy;
+     * tests/proxy.test.ts fails until it is added.
      */
-    '/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
+    '/((?!_next/static/|_next/image$|icon\\.svg$|(?:demo-logo\\.png|file\\.svg|globe\\.svg|next\\.svg|vercel\\.svg|window\\.svg)$|landing/(?:command|crm|cta-pamor|finance|hero-pamor|hire|keris|people|reach)\\.jpg$|theme/keris-pov\\.webp$).*)',
   ],
 };
