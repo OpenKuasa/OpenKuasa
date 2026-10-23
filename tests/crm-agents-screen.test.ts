@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildCrmAgentsView, type CrmAgentConfigRow, type CrmAgentsInput } from '@/screens/crm/agents-view';
+import { buildCrmAgentsView, suggestionView, type CrmAgentConfigRow, type CrmAgentsInput } from '@/screens/crm/agents-view';
 import type { AgentProposal } from '@/lib/agents/types';
 
 const DEAL = '11111111-1111-4111-8111-111111111111';
@@ -115,7 +115,7 @@ describe('buildCrmAgentsView', () => {
         pending: [proposal(), proposal({ id: 'p2', check_key: 'made_up' }), proposal({ id: 'p3', check_key: null })],
       }),
     );
-    expect(view.suggestions.p1.why).toBe('Open deals with no activity for N days');
+    expect(view.suggestions.p1.why).toBe('Look for open deals with no activity in 7+ days');
     expect(view.suggestions.p2.why).toBeNull();
     expect(view.suggestions.p3.why).toBeNull();
     expect(JSON.stringify(view.suggestions)).not.toContain('It has gone quiet.');
@@ -171,5 +171,15 @@ describe('buildCrmAgentsView', () => {
       input({ runs: [{ id: 'r1', status: 'done', cost_cents: 3, started_at: 'x' }], suggestionsByRun: null }),
     );
     expect(noCounts.history[0].suggestions).toBeNull();
+  });
+
+  it('words "why it came up" from the confirmed plan, the default, or nothing', () => {
+    const days10 = config({ focus_plan: { checks: [{ key: 'deal_quiet', params: { days: 10 } }] } });
+    const withPlan = buildCrmAgentsView(input({ config: days10, pending: [proposal()] }));
+    expect(withPlan.suggestions.p1.why).toBe('Look for open deals with no activity in 10+ days');
+    const noMatch = buildCrmAgentsView(input({ config: config({ focus_plan: { checks: [] } }), pending: [proposal()] }));
+    expect(noMatch.suggestions.p1.why).toBe('Look for open deals with no activity in 7+ days');
+    expect(suggestionView(proposal({ check_key: 'nope' })).why).toBeNull();
+    expect(suggestionView(proposal({ check_key: null })).why).toBeNull();
   });
 });

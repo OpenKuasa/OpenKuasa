@@ -1,4 +1,4 @@
-import { readBack, validatePlan } from '@/lib/agents/focus/plan';
+import { describeCheck, readBack, validatePlan, type FocusPlan } from '@/lib/agents/focus/plan';
 import type { AgentCadence, AgentProposal, AgentRunStatus } from '@/lib/agents/types';
 import { CRM_DEFAULTS as DEFAULTS, CRM_FOCUS_MENU } from '@/lib/crm/agent/checks';
 
@@ -78,7 +78,7 @@ function formatDay(day: string): string | null {
 }
 
 /** The record link and the effect line, from the proposal's stored input (never shown raw). */
-export function suggestionView(p: AgentProposal): CrmSuggestionView {
+export function suggestionView(p: AgentProposal, plan?: FocusPlan): CrmSuggestionView {
   const input = isRecord(p.input) ? p.input : {};
   const dealId = str(input.dealId);
   const contactId = str(input.contactId);
@@ -98,8 +98,10 @@ export function suggestionView(p: AgentProposal): CrmSuggestionView {
     const on = dealId ? 'the deal' : 'the contact';
     effect = body ? `Leaves this note on ${on}: “${body}”` : `Leaves a note on ${on}.`;
   }
-  // The check's own summary, never the model's rationale.
-  const why = CRM_FOCUS_MENU.checks.find((c) => c.key === p.check_key)?.summary ?? null;
+  // The confirmed plan's own line for this check (default numbers if the focus has since changed);
+  // never the model's rationale.
+  const planned = plan?.checks.find((c) => c.key === p.check_key);
+  const why = p.check_key ? describeCheck(CRM_FOCUS_MENU, p.check_key, planned?.params) : null;
   return { href, effect, why };
 }
 
@@ -119,7 +121,8 @@ export function buildCrmAgentsView(input: CrmAgentsInput): CrmAgentsView {
   const { config } = input;
   const focus = focusView(config);
   const suggestions: Record<string, CrmSuggestionView> = {};
-  for (const p of input.pending) suggestions[p.id] = suggestionView(p);
+  const { plan } = validatePlan(CRM_FOCUS_MENU, config?.focus_plan);
+  for (const p of input.pending) suggestions[p.id] = suggestionView(p, plan);
 
   return {
     sections: focus.state === 'none' ? ['focus'] : ['waiting', 'focus', 'schedule', 'history'],

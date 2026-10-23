@@ -65,3 +65,9 @@ export function readBack(menu: FocusMenu, plan: FocusPlan): string[] {
   }
   return lines;
 }
+
+/** The plain-language line for one check key, with the given params (clamped; defaults fill gaps). Null for an unknown key. */
+export function describeCheck(menu: FocusMenu, key: string, params?: unknown): string | null {
+  const spec = menu.checks.find((c) => c.key === key);
+  return spec ? spec.describe(cleanParams(spec, params)) : null;
+}
