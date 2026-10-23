@@ -19,6 +19,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { z } from 'zod';
 import { decryptApiKey, encryptApiKey } from '@/lib/ai/key-crypto';
+import { logFailure as sharedLogFailure, userClient } from '@/lib/mcp/shared';
 import { serviceClient } from '@/lib/supabase/service';
 
 const TABLE = 'mcp_api_keys';
@@ -68,15 +69,12 @@ const touched = new Map<string, number>();
 
 const ROW_COLUMNS = 'id, org_id, user_id, session_secret, revoked_at, last_used_at';
 
-/** A client of no one; with a token, a client of that token's person. One per use, so no session is shared. */
-function anonClient(accessToken?: string): SupabaseClient {
+/** A client of no one, for the auth calls that open or refresh a key's session. */
+function anonClient(): SupabaseClient {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
   if (!url || !anon) throw new Error('Supabase is not configured.');
-  return createClient(url, anon, {
-    auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
-    ...(accessToken ? { global: { headers: { Authorization: `Bearer ${accessToken}` } } } : {}),
-  });
+  return createClient(url, anon, { auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false } });
 }
 
 /** A new key: `okk_` and 40 characters drawn evenly from base62 by rejection sampling. */
@@ -92,16 +90,7 @@ export function generateApiKey(): string {
   return KEY_PREFIX + body;
 }
 
-/**
- * One line for a failure that is otherwise swallowed: the operation and the error's class or code only. Never the
- * message, which can carry a token or an email.
- */
-function logFailure(operation: string, error: unknown): void {
-  const withCode = error && typeof error === 'object' && 'code' in error ? (error as { code: unknown }).code : undefined;
-  const raw = typeof withCode === 'string' && withCode ? withCode : error instanceof Error ? error.name : typeof error;
-  const code = /^[A-Za-z0-9_.-]{1,40}$/.test(raw) ? raw : 'unknown';
-  console.error(`[mcp-keys] ${operation} failed: ${code}`);
-}
+const logFailure = (operation: string, error: unknown) => sharedLogFailure('mcp-keys', operation, error);
 
 const hashKey = (key: string) => createHash('sha256').update(key, 'utf8').digest('hex');
 const seal = (refreshToken: string, orgId: string) => encryptApiKey(refreshToken, orgId, process.env, PURPOSE);
@@ -124,7 +113,7 @@ async function endSession(accessToken: string): Promise<void> {
 }
 
 async function isMember(accessToken: string, orgId: string, userId: string): Promise<boolean> {
-  const { data, error } = await anonClient(accessToken)
+  const { data, error } = await userClient(accessToken)
     .from('org_members')
     .select('user_id')
     .eq('org_id', orgId)

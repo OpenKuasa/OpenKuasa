@@ -13,9 +13,10 @@
  */
 
 import 'server-only';
-import { createClient, type SupabaseClient } from '@supabase/supabase-js';
+import type { SupabaseClient } from '@supabase/supabase-js';
 import type { OrgRole } from '@/lib/auth/current-org';
 import { resolveApiKey } from '@/lib/mcp/keys';
+import { logFailure as sharedLogFailure, userClient } from '@/lib/mcp/shared';
 
 export type McpCaller = {
   supabase: SupabaseClient;
@@ -27,13 +28,13 @@ export type McpCaller = {
   clientName: string;
 };
 
-export type CallerResult = { ok: true; caller: McpCaller } | { ok: false; status: 401 | 403; message: string };
+export type CallerResult = { ok: true; caller: McpCaller } | { ok: false; status: 401 | 403 | 503; message: string };
 
 export const SIGN_IN = 'Sign in to OpenKuasa or use an API key.';
 export const CREDENTIAL_REFUSED =
   'That API key or sign-in is not valid any more. Sign in to OpenKuasa again, or make a new API key.';
 export const REMOVED = 'You are no longer a member of this workspace, so this connection cannot act in it.';
-export const NO_WORKSPACE = 'Open a workspace in OpenKuasa first, then connect again.';
+export const NO_WORKSPACE = 'Open a workspace in OpenKuasa, then try again.';
 export const FAILED = 'Your access could not be checked just now. Try again.';
 
 const OTHER_WORKSPACE = 'your other workspace';
@@ -43,16 +44,6 @@ const TOKEN_SHAPE = /^[A-Za-z0-9._~+/=-]{1,4096}$/;
 
 /** Process-wide: OAuth credential id → the workspace it was bound to at first use. Lost on restart, re-learned. */
 const bound = new Map<string, string>();
-
-function userClient(accessToken: string): SupabaseClient {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-  if (!url || !anon) throw new Error('Supabase is not configured.');
-  return createClient(url, anon, {
-    global: { headers: { Authorization: 'Bearer ' + accessToken } },
-    auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
-  });
-}
 
 function bearerOf(request: Request): string | null {
   const header = request.headers.get('authorization');
@@ -74,13 +65,7 @@ function claimsOf(token: string): Record<string, unknown> | null {
   }
 }
 
-/** The error's class or code only; never its message, which can carry a token. */
-function logFailure(operation: string, error: unknown): void {
-  const withCode = error && typeof error === 'object' && 'code' in error ? (error as { code: unknown }).code : undefined;
-  const raw = typeof withCode === 'string' && withCode ? withCode : error instanceof Error ? error.name : typeof error;
-  const code = /^[A-Za-z0-9_.-]{1,40}$/.test(raw) ? raw : 'unknown';
-  console.error(`[mcp-caller] ${operation} failed: ${code}`);
-}
+const logFailure = (operation: string, error: unknown) => sharedLogFailure('mcp-caller', operation, error);
 
 async function currentOrgOf(supabase: SupabaseClient, userId: string): Promise<{ ok: true; orgId: string | null } | { ok: false }> {
   const { data, error } = await supabase.from('profiles').select('current_org_id').eq('user_id', userId).maybeSingle();
@@ -136,7 +121,7 @@ export async function resolveCaller(request: Request, clientName: string): Promi
     const supabase = oauthClient ?? userClient(accessToken);
 
     const current = await currentOrgOf(supabase, userId);
-    if (!current.ok) return { ok: false, status: 401, message: FAILED };
+    if (!current.ok) return { ok: false, status: 503, message: FAILED };
 
     let orgId = credential.orgId;
     if (!orgId) {
@@ -152,7 +137,11 @@ export async function resolveCaller(request: Request, clientName: string): Promi
       .eq('user_id', userId)
       .maybeSingle();
     const role = (member as { role?: unknown } | null)?.role;
-    if (memberError || !ROLES.includes(role as OrgRole)) return { ok: false, status: 401, message: REMOVED };
+    if (memberError) {
+      logFailure('read role', memberError);
+      return { ok: false, status: 503, message: FAILED };
+    }
+    if (!ROLES.includes(role as OrgRole)) return { ok: false, status: 401, message: REMOVED };
 
     const orgName = await nameOf(supabase, orgId);
     // No workspace open: the database's own idea of the current workspace is empty too, so reads would come back
@@ -176,6 +165,6 @@ export async function resolveCaller(request: Request, clientName: string): Promi
     };
   } catch (error) {
     logFailure('resolve', error);
-    return { ok: false, status: 401, message: FAILED };
+    return { ok: false, status: 503, message: FAILED };
   }
 }

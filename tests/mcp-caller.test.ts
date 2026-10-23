@@ -14,6 +14,8 @@ const db = {
   orgs: new Map<string, string>(),
 };
 const memberKey = (org: string, user: string) => `${org}:${user}`;
+/** Tables whose reads fail, with an error that carries a token in its message. */
+const failing = new Set<string>();
 
 /** Access tokens the auth server accepts: token → user id. */
 const tokens = new Map<string, string>();
@@ -71,6 +73,7 @@ vi.mock('@supabase/supabase-js', () => ({
             return builder;
           },
           maybeSingle: async () => {
+            if (failing.has(name)) return { data: null, error: { code: 'PGRST301', message: `boom for ${bearer}` } };
             const hit = rowsFor(viewer, name).filter((r) => filters.every(([c, v]) => r[c] === v));
             return { data: hit[0] ?? null, error: null };
           },
@@ -105,6 +108,7 @@ beforeEach(async () => {
   db.members.clear();
   db.orgs.clear();
   tokens.clear();
+  failing.clear();
   getUserCalls.length = 0;
   created.length = 0;
   resolveApiKey.mockReset();
@@ -200,7 +204,7 @@ describe('resolveCaller', () => {
     expect(await resolveCaller(req(`Bearer ${oauthToken(ALICE, { client_id: 'cursor' })}`), 'Cursor')).toEqual({
       ok: false,
       status: 403,
-      message: 'Open a workspace in OpenKuasa first, then connect again.',
+      message: 'Open a workspace in OpenKuasa, then try again.',
     });
   });
 
@@ -240,6 +244,31 @@ describe('resolveCaller', () => {
     expect(await resolveCaller(req(`Bearer ${token}`), 'Claude')).toMatchObject({ ok: true, caller: { role: 'viewer' } });
     db.members.delete(memberKey(ORG_A, ALICE));
     expect(await resolveCaller(req(`Bearer ${token}`), 'Claude')).toMatchObject({ ok: false, status: 401 });
+  });
+
+  test('a failed read is a 503 to try again, not a removal, and logs nothing secret', async () => {
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const failed = { ok: false, status: 503, message: 'Your access could not be checked just now. Try again.' };
+      keyResolvesTo(ALICE, ORG_A, 'alice-at-1');
+      failing.add('org_members');
+      expect(await resolveCaller(req(`Bearer ${KEY}`), 'Claude')).toEqual(failed);
+      const token = oauthToken(ALICE);
+      expect(await resolveCaller(req(`Bearer ${token}`), 'Claude')).toEqual(failed);
+
+      failing.clear();
+      failing.add('profiles');
+      expect(await resolveCaller(req(`Bearer ${KEY}`), 'Claude')).toEqual(failed);
+
+      const lines = JSON.stringify(logged.mock.calls);
+      expect(lines).toContain('PGRST301');
+      expect(lines).not.toContain('alice-at-1');
+      expect(lines).not.toContain(token);
+      expect(lines).not.toContain(KEY);
+      expect(lines).not.toContain('boom');
+    } finally {
+      logged.mockRestore();
+    }
   });
 
   test('the client sends the caller\'s JWT, never the service key', async () => {
