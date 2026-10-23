@@ -8,7 +8,9 @@ import { Badge } from '@/components/ui/badge';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { saveFinanceSettingsAction, setSequenceAction } from '@/app/(app)/finance/actions';
-import { FinanceYearLockForm, SequenceRowForm } from '@/components/finance/settings-forms';
+import { FinanceYearLockForm, SequencesForm } from '@/components/finance/settings-forms';
+import { WorkspaceCard } from '@/components/settings/workspace-card';
+import { type WorkspaceOverview, loadWorkspaceOverview } from '@/lib/account/workspace-overview';
 import { type Company, getCompany } from '@/lib/account/data';
 import { can } from '@/lib/auth/permissions';
 import { getViewer, hasSupabaseEnv } from '@/lib/auth/viewer';
@@ -80,6 +82,7 @@ const COMING_SOON = [
 ];
 
 type Loaded = {
+  workspace: WorkspaceOverview | null;
   company: Part<Company>;
   settings: Part<FinanceSettings>;
   sequences: Part<SequenceRow[]>;
@@ -104,6 +107,7 @@ async function part<T>(read: () => Promise<T>, what: string): Promise<Part<T>> {
 async function load(): Promise<Loaded> {
   if (!hasSupabaseEnv()) {
     return {
+      workspace: await loadWorkspaceOverview(),
       company: { ok: true, value: SAMPLE_COMPANY },
       settings: { ok: true, value: DEFAULT_FINANCE_SETTINGS },
       sequences: { ok: true, value: SAMPLE_SEQUENCES },
@@ -116,13 +120,15 @@ async function load(): Promise<Loaded> {
   }
   const viewer = await getViewer();
   const ctx = { client: await createClient(), orgId: viewer.orgId };
-  const [company, settings, sequences, sst] = await Promise.all([
+  const [workspace, company, settings, sequences, sst] = await Promise.all([
+    loadWorkspaceOverview(),
     part(() => getCompany(), 'company details'),
     part(() => getFinanceSettings(ctx), 'accounting settings'),
     part(() => listSequences(ctx), 'document numbering'),
     part(() => getSstSettings(ctx), 'SST settings'),
   ]);
   return {
+    workspace,
     company,
     settings,
     sequences,
@@ -165,8 +171,8 @@ const addressOf = (c: Company) =>
 function CompanyCard({ company, canEditCompany }: { company: Part<Company>; canEditCompany: boolean }) {
   return (
     <BentoCard
-      title="Company"
-      subtitle="Legal details used on invoices and reports"
+      title="Legal details"
+      subtitle="Printed on invoices and reports"
       icon={Building2}
       className="col-span-2 md:col-span-6"
     >
@@ -174,14 +180,12 @@ function CompanyCard({ company, canEditCompany }: { company: Part<Company>; canE
         <div className="space-y-3">
           <Facts
             rows={[
-              { label: 'Legal name', value: company.value.name },
-              { label: 'SSM registration no.', value: company.value.registrationNo },
               { label: 'SST no.', value: company.value.sstNo },
               { label: 'TIN', value: company.value.tin ?? '' },
               { label: 'Address', value: addressOf(company.value) },
             ]}
           />
-          {canEditCompany ? <CardLink href="/account/company">Edit company details</CardLink> : null}
+          {canEditCompany ? <CardLink href="/account/company">Edit in Account</CardLink> : null}
         </div>
       ) : (
         <Failed />
@@ -258,16 +262,11 @@ function NumberingCard({ data }: { data: Loaded }) {
             <span>Next number</span>
             <span>Example</span>
           </div>
-          <div className="divide-y">
-            {sequences.value.map((row) => (
-              <SequenceRowForm
-                key={`${row.doc}|${row.prefix}|${row.nextNumber}`}
-                row={row}
-                save={data.canEdit ? setSequenceAction : undefined}
-                disabled={data.sample}
-              />
-            ))}
-          </div>
+          <SequencesForm
+            rows={sequences.value}
+            save={data.canEdit ? setSequenceAction : undefined}
+            disabled={data.sample}
+          />
           {!data.canEdit ? (
             <p className="pt-2 text-xs text-muted-foreground">Only an owner or admin can change the numbering.</p>
           ) : null}
@@ -336,9 +335,9 @@ function ComingSoonCard() {
   return (
     <BentoCard
       title="Integrations & notifications"
-      subtitle="Not available yet"
+      subtitle="Coming soon"
       icon={Bell}
-      className="col-span-2 md:col-span-12"
+      className="col-span-2 md:col-span-6"
     >
       <div className="divide-y">
         {COMING_SOON.map((label, i) => (
@@ -363,15 +362,16 @@ export default async function SettingsScreen() {
     <ScreenContainer>
       <PageHeader
         title="Accounting Settings"
-        subtitle="Company, financial year, numbering and tax preferences, Saudara."
+        subtitle="Financial year, numbering and tax preferences."
       />
       <BentoGrid>
+        <WorkspaceCard overview={data.workspace} />
         <CompanyCard company={data.company} canEditCompany={data.canEditCompany} />
-        <CurrencyCard />
         <YearLockCard data={data} />
         <NumberingCard data={data} />
         <SstCard sst={data.sst} />
         <BankCard />
+        <CurrencyCard />
         <ComingSoonCard />
       </BentoGrid>
     </ScreenContainer>

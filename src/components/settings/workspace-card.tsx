@@ -71,13 +71,13 @@ export function WorkspaceCard({ overview, className }: { overview: WorkspaceOver
             label={overview.companyName}
             value={overview.registrationNo ? `Reg. no ${overview.registrationNo}` : 'No registration number yet'}
             href="/account/company"
-            linkLabel="Edit company"
+            linkLabel={overview.canEdit === false ? 'View company' : 'Edit company'}
           />
           <SettingsRow
             label="Team"
             value={plural(overview.members, 'person has', 'people have') + ' access to this workspace'}
             href="/account/team"
-            linkLabel="Manage team"
+            linkLabel={overview.canEdit === false ? 'View team' : 'Manage team'}
           />
         </ul>
       ) : (
