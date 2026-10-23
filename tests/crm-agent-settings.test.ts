@@ -9,7 +9,6 @@ import { readWorkspaceKey } from '@/lib/ai/workspace-key';
 import { startRefusal } from '@/lib/agents/runner';
 
 const ORG = '11111111-1111-1111-1111-111111111111';
-const USER = '22222222-2222-2222-2222-222222222222';
 const NOW = new Date('2026-10-23T05:00:00Z');
 
 type Log = { table: string; op: string; payload?: unknown; filters: Array<[string, unknown]> };
@@ -33,6 +32,7 @@ function fake(opts: {
             eq(c: string, v: unknown) { entry.filters.push([c, v]); return chain; },
             select: () => chain,
             maybeSingle: async () => ({ data: opts.updateData ?? null, error: null }),
+            then: (res: (v: unknown) => unknown) => res({ error: null }),
           };
           return chain;
         },
@@ -40,7 +40,7 @@ function fake(opts: {
           log.push({ table, op: 'insert', payload, filters: [] });
           const res = { data: null, error: opts.insertError ?? null };
           const p = Promise.resolve(res) as Promise<typeof res> & { select: () => unknown };
-          p.select = () => ({ single: async () => ({ data: {}, error: opts.insertError ?? null }) });
+          p.select = () => ({ single: async () => ({ data: opts.insertError ? null : { id: 'run1' }, error: opts.insertError ?? null }) });
           return p;
         },
         select(_cols: string, o?: { count?: string }) {
@@ -78,7 +78,6 @@ function deps(over: Partial<Parameters<typeof saveFocus>[0]> = {}) {
       client: session.client,
       service: service.client,
       orgId: ORG,
-      userId: USER,
       interpret: okInterpret,
       now: NOW,
       ...over,
@@ -105,8 +104,32 @@ describe('saveFocus', () => {
     vi.mocked(startRefusal).mockResolvedValue('daily budget reached');
     const { d } = deps();
     const r = await saveFocus(d, 'watch deals');
-    expect(r.ok).toBe(false);
+    expect(r).toEqual({
+      ok: false,
+      error: 'The workspace daily spend cap has been reached. Try again tomorrow, or ask an owner or admin to raise it.',
+    });
     expect(vi.mocked(startRefusal)).toHaveBeenCalledWith(expect.anything(), ORG, 'crm-focus');
+  });
+
+  it('still saves while the agent is switched off (second save, no confirm)', async () => {
+    okKey();
+    vi.mocked(startRefusal).mockResolvedValue('disabled');
+    const session = fake({ updateData: { id: 'row' } });
+    const { d } = deps({ client: session.client });
+    expect((await saveFocus(d, 'watch deals')).ok).toBe(true);
+  });
+
+  it('does not call the model when the spend cannot be reserved', async () => {
+    okKey();
+    vi.mocked(startRefusal).mockResolvedValue(null);
+    const service = fake({ count: 0, insertError: { code: '42501' } });
+    const interpret = vi.fn();
+    const { d } = deps({ service: service.client, interpret: interpret as never });
+    expect(await saveFocus(d, 'watch deals')).toEqual({
+      ok: false,
+      error: 'The focus could not be saved just now. Please try again.',
+    });
+    expect(interpret).not.toHaveBeenCalled();
   });
 
   it('refuses the 11th change in a KL day', async () => {
@@ -140,8 +163,11 @@ describe('saveFocus', () => {
       agent_key: 'crm-focus',
       status: 'done',
       trigger: 'interpret',
-      cost_cents: 1,
+      cost_cents: 3,
     });
+    const settled = service.log.find((l) => l.op === 'update' && l.table === 'agent_runs')!;
+    expect(settled.payload).toEqual({ cost_cents: 1 });
+    expect(settled.filters).toContainEqual(['id', 'run1']);
     const write = session.log.filter((l) => l.op === 'update').pop()!;
     expect(write.payload).toMatchObject({
       focus_text: 'watch overdue follow-ups',
@@ -162,7 +188,10 @@ describe('saveFocus', () => {
     const r = await saveFocus(d, 'watch deals');
     expect(r).toEqual({ ok: false, error: 'The focus could not be read just now. Please try again.' });
     const run = service.log.find((l) => l.op === 'insert' && l.table === 'agent_runs')!;
-    expect(run.payload).toMatchObject({ status: 'failed', trigger: 'interpret', cost_cents: 3, error: 'interpret failed' });
+    expect(run.payload).toMatchObject({ status: 'done', trigger: 'interpret', cost_cents: 3 });
+    const failed = service.log.find((l) => l.op === 'update' && l.table === 'agent_runs')!;
+    expect(failed.payload).toEqual({ status: 'failed', error: 'interpret failed' });
+    expect(failed.filters).toContainEqual(['id', 'run1']);
   });
 });
 
@@ -218,7 +247,12 @@ describe('nextKlSeven', () => {
     expect(nextKlSeven(new Date('2026-10-22T22:59:00Z'), 'daily').toISOString()).toBe('2026-10-22T23:00:00.000Z');
   });
 
-  it('weekly', () => {
-    expect(nextKlSeven(new Date('2026-10-23T05:00:00Z'), 'weekly').toISOString()).toBe('2026-10-26T23:00:00.000Z');
+  it('weekly: next Monday 07:00 Kuala Lumpur', () => {
+    expect(nextKlSeven(new Date('2026-10-23T05:00:00Z'), 'weekly').toISOString()).toBe('2026-10-25T23:00:00.000Z');
+  });
+
+  it('weekly: already Monday before 07:00 KL gives the same day', () => {
+    // Monday 26 Oct 06:00 KL
+    expect(nextKlSeven(new Date('2026-10-25T22:00:00Z'), 'weekly').toISOString()).toBe('2026-10-25T23:00:00.000Z');
   });
 });

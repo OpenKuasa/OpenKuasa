@@ -6,11 +6,10 @@ import { crmAgent } from '@/lib/agents/crm-agent';
 import { setAgentCadence, setAgentCap, setAgentEnabled, setAgentCadenceInput, setAgentCapInput } from '@/lib/agents/config';
 import { runAgent } from '@/lib/agents/run-agent';
 import { reapStaleRuns, startRefusal } from '@/lib/agents/runner';
-import { RunInProgressError } from '@/lib/agents/types';
+import { CRM_FOCUS, RunInProgressError } from '@/lib/agents/types';
 import { can } from '@/lib/auth/permissions';
 import { getViewer } from '@/lib/auth/viewer';
 import {
-  CRM_AGENT_KEY,
   CRM_START_REFUSED,
   confirmFocus,
   ensureCrmAgentConfig,
@@ -49,7 +48,7 @@ export async function saveFocusAction(text: unknown): Promise<SaveFocusResult> {
   if (!ctx) return FORBIDDEN;
   if (typeof text !== 'string') return INVALID;
   const result = await saveFocus(
-    { client: ctx.client, service: serviceClient(), orgId: ctx.orgId, userId: ctx.userId },
+    { client: ctx.client, service: serviceClient(), orgId: ctx.orgId},
     text,
   );
   // Revalidate even on a refusal after the model call: the spend shows on the screen.
@@ -74,13 +73,13 @@ export async function setCrmCadenceAction(cadence: unknown): Promise<CapResult<n
 
   const ensured = await ensureCrmAgentConfig(ctx.client, ctx.orgId);
   if (!ensured.ok) return ensured;
-  const cad = await setAgentCadence(ctx, { agent_key: CRM_AGENT_KEY, cadence: value });
+  const cad = await setAgentCadence(ctx, { agent_key: CRM_FOCUS, cadence: value });
   if (!cad.ok) return cad;
-  const enabled = await setAgentEnabled(ctx, { agent_key: CRM_AGENT_KEY, enabled: value !== 'off' });
+  const enabled = await setAgentEnabled(ctx, { agent_key: CRM_FOCUS, enabled: value !== 'off' });
   if (!enabled.ok) return enabled;
   const synced = await syncCadenceSchedule(ctx, value, {
-    agentKey: CRM_AGENT_KEY,
-    firstRunAt: (n) => nextKlSeven(n, value === 'weekly' ? 'weekly' : 'daily'),
+    agentKey: CRM_FOCUS,
+    firstRunAt: value === 'off' ? undefined : (n) => nextKlSeven(n, value),
   });
   if (!synced.ok) return synced;
   revalidatePath(AGENTS_PATH);
@@ -95,10 +94,10 @@ export async function setCrmCapsAction(input: unknown): Promise<CapResult<null>>
 
   const ensured = await ensureCrmAgentConfig(ctx.client, ctx.orgId);
   if (!ensured.ok) return ensured;
-  const cap = await setAgentCap(ctx, { agent_key: CRM_AGENT_KEY, max_cost_cents: parsed.data.max_cost_cents });
+  const cap = await setAgentCap(ctx, { agent_key: CRM_FOCUS, max_cost_cents: parsed.data.max_cost_cents });
   if (!cap.ok) return cap;
   const caps = await setWorkspaceCaps(ctx, {
-    agent_key: CRM_AGENT_KEY,
+    agent_key: CRM_FOCUS,
     daily_cap_cents: parsed.data.daily_cap_cents,
     weekly_cap_cents: parsed.data.weekly_cap_cents,
   });
@@ -119,7 +118,7 @@ export async function runCrmAgentNowAction(): Promise<{ ok: true; runId: string 
   const service = serviceClient();
   try {
     await reapStaleRuns(service, orgId);
-    const refusal = await startRefusal(service, orgId, CRM_AGENT_KEY);
+    const refusal = await startRefusal(service, orgId, CRM_FOCUS);
     if (refusal) return { ok: false, error: CRM_START_REFUSED[refusal] };
     if (!(await hasConfirmedFocus(service, orgId))) {
       return { ok: false, error: 'Save and confirm a focus first.' };

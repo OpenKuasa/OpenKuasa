@@ -3,11 +3,11 @@ import { TEXT_ESTIMATE_CENTS } from '@/lib/agents/costs';
 import { interpretFocus } from '@/lib/agents/focus/interpret';
 import { readBack, type FocusPlan } from '@/lib/agents/focus/plan';
 import { startRefusal, type StartRefusal } from '@/lib/agents/runner';
+import { CRM_FOCUS } from '@/lib/agents/types';
 import { readWorkspaceKey } from '@/lib/ai/workspace-key';
 import { CRM_FOCUS_MENU } from '@/lib/crm/agent/checks';
 import type { CapResult } from '@/lib/reach/capabilities';
 
-export const CRM_AGENT_KEY = 'crm-focus';
 
 /** Kasturi's own spend defaults, lower than the generic ones. */
 export const CRM_DEFAULTS = { max_cost_cents: 50, daily_cap_cents: 200, weekly_cap_cents: 500 } as const;
@@ -38,7 +38,7 @@ export async function ensureCrmAgentConfig(client: SupabaseClient, orgId: string
     .from('agent_configs')
     .update({ updated_at: new Date().toISOString() })
     .eq('org_id', orgId)
-    .eq('agent_key', CRM_AGENT_KEY)
+    .eq('agent_key', CRM_FOCUS)
     .select('id')
     .maybeSingle();
   if (upd.error) {
@@ -48,7 +48,7 @@ export async function ensureCrmAgentConfig(client: SupabaseClient, orgId: string
   if (upd.data) return { ok: true, data: null };
   const ins = await client
     .from('agent_configs')
-    .insert({ org_id: orgId, agent_key: CRM_AGENT_KEY, ...CRM_DEFAULTS });
+    .insert({ org_id: orgId, agent_key: CRM_FOCUS, ...CRM_DEFAULTS });
   if (ins.error && ins.error.code !== '23505') {
     console.error('[crm-agent-settings] ensure insert failed:', ins.error.code);
     return { ok: false, error: COULD_NOT_SAVE };
@@ -68,7 +68,7 @@ export async function writeCrmConfig(
     .from('agent_configs')
     .update({ ...patch, updated_at: new Date().toISOString() })
     .eq('org_id', orgId)
-    .eq('agent_key', CRM_AGENT_KEY)
+    .eq('agent_key', CRM_FOCUS)
     .select('id')
     .maybeSingle();
   if (upd.error || !upd.data) {
@@ -84,7 +84,7 @@ export async function hasConfirmedFocus(client: SupabaseClient, orgId: string): 
     .from('agent_configs')
     .select('focus_confirmed_at')
     .eq('org_id', orgId)
-    .eq('agent_key', CRM_AGENT_KEY)
+    .eq('agent_key', CRM_FOCUS)
     .maybeSingle();
   return Boolean(data && (data as { focus_confirmed_at: string | null }).focus_confirmed_at);
 }
@@ -93,7 +93,6 @@ export type SaveFocusDeps = {
   client: SupabaseClient;
   service: SupabaseClient;
   orgId: string;
-  userId: string;
   interpret?: typeof interpretFocus;
   now?: Date;
 };
@@ -114,7 +113,7 @@ function klDayStart(now: Date): Date {
  * Reads the workspace's own words into a plan from the fixed menu, records the model
  * call as an `interpret` run (so its cost counts against the caps), and stores the plan
  * UNconfirmed: an owner or admin must confirm it before the agent acts on it.
- * `service` MUST be the service-role client; `orgId` and `userId` come from the viewer.
+ * `service` MUST be the service-role client; `orgId` comes from the viewer.
  */
 export async function saveFocus(deps: SaveFocusDeps, text: string): Promise<SaveFocusResult> {
   const { client, service, orgId } = deps;
@@ -130,8 +129,10 @@ export async function saveFocus(deps: SaveFocusDeps, text: string): Promise<Save
   if (key.status !== 'ok') return fail('Add your AI key in Settings to use the agent.');
 
   try {
-    const refusal = await startRefusal(service, orgId, CRM_AGENT_KEY);
-    if (refusal) return fail(CRM_START_REFUSED[refusal]);
+    const refusal = await startRefusal(service, orgId, CRM_FOCUS);
+    // Only the budget part of the gate: a switched-off agent can still have its focus edited
+    // (confirming switches it on).
+    if (refusal && refusal !== 'disabled') return fail(CRM_START_REFUSED[refusal]);
   } catch {
     return fail('The focus could not be read just now. Please try again.');
   }
@@ -140,7 +141,7 @@ export async function saveFocus(deps: SaveFocusDeps, text: string): Promise<Save
     .from('agent_runs')
     .select('id', { count: 'exact', head: true })
     .eq('org_id', orgId)
-    .eq('agent_key', CRM_AGENT_KEY)
+    .eq('agent_key', CRM_FOCUS)
     .eq('trigger', 'interpret')
     .gte('started_at', klDayStart(now).toISOString());
   if (countError) return fail('The focus could not be read just now. Please try again.');
@@ -148,20 +149,39 @@ export async function saveFocus(deps: SaveFocusDeps, text: string): Promise<Save
     return fail(`You have changed the focus ${MAX_CHANGES_PER_DAY} times today. Try again tomorrow.`);
   }
 
+  // Reserve the spend BEFORE the model call so a failed record can never bypass the daily
+  // limit. 'done' (not 'running'): a running row would take the workspace's single run slot.
+  const reserved = await service
+    .from('agent_runs')
+    .insert({
+      org_id: orgId,
+      agent_key: CRM_FOCUS,
+      status: 'done',
+      trigger: 'interpret',
+      cost_cents: TEXT_ESTIMATE_CENTS,
+      finished_at: now.toISOString(),
+    })
+    .select('id')
+    .single();
+  const runId = (reserved.data as { id: string } | null)?.id;
+  if (reserved.error || !runId) {
+    console.error('[crm-agent-settings] interpret run not reserved:', reserved.error?.code);
+    return fail('The focus could not be saved just now. Please try again.');
+  }
+  const settle = async (patch: Record<string, unknown>) => {
+    const { error } = await service.from('agent_runs').update(patch).eq('org_id', orgId).eq('id', runId);
+    if (error) console.error('[crm-agent-settings] interpret run not settled:', error.code);
+  };
+
   let result: Awaited<ReturnType<typeof interpretFocus>>;
   try {
     result = await interpret(key.apiKey, CRM_FOCUS_MENU, focus);
   } catch {
-    // The spend may have happened even though we got nothing back: never lose it.
-    await recordInterpretRun(service, orgId, { status: 'failed', cost_cents: TEXT_ESTIMATE_CENTS, error: 'interpret failed' });
+    // The estimate stays on the row: the spend may have happened.
+    await settle({ status: 'failed', error: 'interpret failed' });
     return fail('The focus could not be read just now. Please try again.');
   }
-
-  await recordInterpretRun(service, orgId, {
-    status: 'done',
-    cost_cents: Math.round(result.cost_cents ?? TEXT_ESTIMATE_CENTS),
-    error: null,
-  });
+  if (result.cost_cents != null) await settle({ cost_cents: Math.round(result.cost_cents) });
 
   const saved = await writeCrmConfig(client, orgId, {
     focus_text: focus,
@@ -171,21 +191,6 @@ export async function saveFocus(deps: SaveFocusDeps, text: string): Promise<Save
   });
   if (!saved.ok) return saved;
   return { ok: true, readBack: readBack(CRM_FOCUS_MENU, result.plan), cannot: result.cannot };
-}
-
-async function recordInterpretRun(
-  service: SupabaseClient,
-  orgId: string,
-  row: { status: 'done' | 'failed'; cost_cents: number; error: string | null },
-): Promise<void> {
-  const { error } = await service.from('agent_runs').insert({
-    org_id: orgId,
-    agent_key: CRM_AGENT_KEY,
-    trigger: 'interpret',
-    finished_at: new Date().toISOString(),
-    ...row,
-  });
-  if (error) console.error('[crm-agent-settings] interpret run not recorded:', error.code);
 }
 
 /** Confirms the saved plan (owner/admin) and switches the agent on. Refuses an empty plan. */
@@ -198,7 +203,7 @@ export async function confirmFocus(
     .from('agent_configs')
     .select('focus_plan')
     .eq('org_id', orgId)
-    .eq('agent_key', CRM_AGENT_KEY)
+    .eq('agent_key', CRM_FOCUS)
     .maybeSingle();
   const plan = (data as { focus_plan: FocusPlan | null } | null)?.focus_plan;
   if (!plan || !Array.isArray(plan.checks) || plan.checks.length === 0) {
@@ -209,7 +214,7 @@ export async function confirmFocus(
 
 /**
  * The next 07:00 in Kuala Lumpur (UTC+8, no daylight saving) strictly after `now`.
- * Weekly: the first such 07:00 that falls on a Tuesday in KL (Monday 23:00 UTC).
+ * Weekly: the first such 07:00 that falls on a Monday in KL (Sunday 23:00 UTC).
  */
 export function nextKlSeven(now: Date, cadence: 'daily' | 'weekly'): Date {
   const SEVEN = 7 * 3_600_000;
@@ -217,8 +222,8 @@ export function nextKlSeven(now: Date, cadence: 'daily' | 'weekly'): Date {
   let t = Math.floor(local / DAY_MS) * DAY_MS + SEVEN;
   if (t <= local) t += DAY_MS;
   if (cadence === 'weekly') {
-    // getUTCDay on the shifted instant is the KL weekday; 2 = Tuesday.
-    while (new Date(t).getUTCDay() !== 2) t += DAY_MS;
+    // getUTCDay on the shifted instant is the KL weekday; 1 = Monday.
+    while (new Date(t).getUTCDay() !== 1) t += DAY_MS;
   }
   return new Date(t - KL_OFFSET_MS);
 }
