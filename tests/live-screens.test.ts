@@ -11,8 +11,8 @@ describe('live screens', () => {
     }
   });
 
-  it('marks a screen that is not connected as sample', () => {
-    expect(isSampleScreen('/finance/e-invoice')).toBe(true);
+  it('gives the e-Invoice "Coming soon" page no sample-data banner', () => {
+    expect(isSampleScreen('/finance/e-invoice')).toBe(false);
   });
 
   it('leaves connected screens and Tuah alone', () => {

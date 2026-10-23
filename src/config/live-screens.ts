@@ -123,6 +123,8 @@ export const LIVE_SCREENS: ReadonlySet<string> = new Set([
   'finance/audit-trail',
   // Financial year, books lock, numbering, and the company details from Account → Company (2026-10-23).
   'finance/settings',
+  // A "Coming soon" page with no sample data, so no sample-data banner (2026-10-23).
+  'finance/e-invoice',
 ]);
 
 /** Whether the app path is a screen that is not connected to live data yet. */
