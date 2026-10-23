@@ -6,7 +6,7 @@
  * ringgit, so only ringgit bills are offered.
  */
 import type { Slice } from '@/components/charts';
-import { amountText, sen } from './allocation-form';
+import { amountText, round2, sen } from './allocation-form';
 import type { BillListRow } from './bills';
 import { BASE_CURRENCY } from './currencies';
 import { toCsv } from './csv';
@@ -26,8 +26,6 @@ import { WRITE_FAILED } from './result';
 import { type Stat, count, lastMonths, monthOf, sum, thousands } from './view-helpers';
 
 const M = SUPPLIER_CREDIT_MESSAGES;
-
-const round2 = (n: number) => Math.round(n * 100) / 100;
 
 /** A posted bill: what the database lets a credit note go against, or credit go on. */
 const posted = (b: BillListRow) => b.display_status === 'pending' || b.display_status === 'overdue' || b.display_status === 'paid';
