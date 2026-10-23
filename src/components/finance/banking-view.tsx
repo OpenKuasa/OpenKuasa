@@ -191,7 +191,7 @@ export function BankingView({
     <ScreenContainer className="pb-24 sm:pb-24">
       <PageHeader
         title="Banking"
-        subtitle="Accounts, balances and reconciliation, Saudara."
+        subtitle="Accounts, balances and reconciliation."
         actions={
           writer ? (
             <>

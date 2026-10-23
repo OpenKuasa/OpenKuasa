@@ -336,7 +336,7 @@ export function BillsView({
     <ScreenContainer className="pb-24 sm:pb-24">
       <PageHeader
         title="Supplier Bills"
-        subtitle="Bills payable to your suppliers, Saudara."
+        subtitle="Bills payable to your suppliers."
         actions={
           writer ? (
             <Button

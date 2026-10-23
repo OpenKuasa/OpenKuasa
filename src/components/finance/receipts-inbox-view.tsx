@@ -250,7 +250,7 @@ export function ReceiptsInboxView({
 
   return (
     <ScreenContainer className="pb-24 sm:pb-24">
-      <PageHeader title="Receipts Inbox" subtitle="Receipts waiting to be reviewed and matched, Saudara." />
+      <PageHeader title="Receipts Inbox" subtitle="Receipts waiting to be reviewed and matched." />
 
       <BentoGrid>
         {writer && linkOf && reviewed ? (

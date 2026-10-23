@@ -165,7 +165,7 @@ export default function LandingPageScreen() {
             BETA
           </span>
         }
-        subtitle="Build and manage AI-generated landing pages, Saudara."
+        subtitle="Build and manage AI-generated landing pages."
         actions={
           <Button size="sm">
             <Plus className="size-4" />

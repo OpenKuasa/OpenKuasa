@@ -155,7 +155,7 @@ export default function AgentsScreen() {
     <ScreenContainer>
       <PageHeader
         title="AI Agents"
-        subtitle="Your always-on finance crew, Saudara."
+        subtitle="Your always-on finance crew."
         actions={
           <Button size="sm">
             <Plus className="size-4" />

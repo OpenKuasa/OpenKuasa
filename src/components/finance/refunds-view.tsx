@@ -229,7 +229,7 @@ export function RefundsView({
     <ScreenContainer className="pb-24 sm:pb-24">
       <PageHeader
         title="Refunds"
-        subtitle="Money paid back to customers who are in credit, Saudara."
+        subtitle="Money paid back to customers who are in credit."
         actions={
           writer ? (
             <Button

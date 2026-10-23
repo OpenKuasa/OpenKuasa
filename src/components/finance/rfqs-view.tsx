@@ -422,7 +422,7 @@ export function RfqsView({
     <ScreenContainer className="pb-24 sm:pb-24">
       <PageHeader
         title="RFQs"
-        subtitle="Requests for quotation sent to your suppliers, and their prices, Saudara."
+        subtitle="Requests for quotation sent to your suppliers, and their prices."
         actions={
           writer ? (
             <Button

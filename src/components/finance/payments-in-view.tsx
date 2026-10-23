@@ -150,7 +150,7 @@ export function PaymentsInView({
     <ScreenContainer className="pb-24 sm:pb-24">
       <PageHeader
         title="Payments In"
-        subtitle="Payments received from your customers, Saudara."
+        subtitle="Payments received from your customers."
         actions={
           writer ? (
             <Button

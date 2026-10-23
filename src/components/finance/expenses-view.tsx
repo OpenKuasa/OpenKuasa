@@ -342,7 +342,7 @@ export function ExpensesView({
     <ScreenContainer className="pb-24 sm:pb-24">
       <PageHeader
         title="Expenses"
-        subtitle="Business expenses and spending, Saudara."
+        subtitle="Business expenses and spending."
         actions={
           newButton ? (
             <>

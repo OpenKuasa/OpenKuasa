@@ -451,7 +451,7 @@ export function PaymentVouchersView({
     <ScreenContainer className="pb-24 sm:pb-24">
       <PageHeader
         title="Payment Vouchers"
-        subtitle="Money paid out to suppliers, customers and expenses, Saudara."
+        subtitle="Money paid out to suppliers, customers and expenses."
         actions={
           <div className="flex flex-wrap items-center gap-2">
             <Select

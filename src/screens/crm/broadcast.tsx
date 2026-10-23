@@ -176,7 +176,7 @@ export default function BroadcastScreen() {
     <ScreenContainer>
       <PageHeader
         title="Broadcast"
-        subtitle="WhatsApp, email & SMS campaigns to your contacts, Saudara."
+        subtitle="WhatsApp, email & SMS campaigns to your contacts."
         actions={
           <Button size="sm">
             <Plus className="size-4" />

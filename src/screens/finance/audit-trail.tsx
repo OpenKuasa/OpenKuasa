@@ -119,7 +119,7 @@ export default async function AuditTrailScreen({
 
   return (
     <ScreenContainer>
-      <PageHeader title="Audit Trail" subtitle="Every change to the books, logged for you, Saudara." />
+      <PageHeader title="Audit Trail" subtitle="Every change to the books, logged for you." />
 
       {data === null ? (
         <BentoGrid>

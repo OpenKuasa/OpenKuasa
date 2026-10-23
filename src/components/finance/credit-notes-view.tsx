@@ -266,7 +266,7 @@ export function CreditNotesView({
     <ScreenContainer className="pb-24 sm:pb-24">
       <PageHeader
         title="Credit Notes"
-        subtitle="Credits issued against customer invoices, Saudara."
+        subtitle="Credits issued against customer invoices."
         actions={
           writer ? (
             <Button

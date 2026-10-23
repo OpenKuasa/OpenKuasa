@@ -139,7 +139,7 @@ export default function AutomationsScreen() {
     <ScreenContainer>
       <PageHeader
         title="Automations"
-        subtitle="Trigger-based workflows that close deals while you sleep, Saudara."
+        subtitle="Trigger-based workflows that close deals while you sleep."
         actions={
           <Button size="sm">
             <Plus className="size-4" />

@@ -69,7 +69,7 @@ export default async function DashboardScreen() {
     <ScreenContainer>
       <PageHeader
         title="Dashboard"
-        subtitle="Your recruiting performance, Saudara."
+        subtitle="Your recruiting performance."
         actions={
           <>
             <Select defaultValue="all" disabled>

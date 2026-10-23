@@ -164,7 +164,7 @@ export default function EInvoiceScreen() {
     <ScreenContainer>
       <PageHeader
         title="e-Invoice LHDN"
-        subtitle="MyInvois submission, validation & compliance, Saudara."
+        subtitle="MyInvois submission, validation & compliance."
         badge={
           <Badge variant="secondary" className="gap-1.5">
             <LiveDot active />

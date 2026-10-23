@@ -366,7 +366,7 @@ export default function ContactsScreen({
       <PageHeader
         className="mb-3"
         title="Contacts"
-        subtitle="All your leads and customers in one place, Saudara."
+        subtitle="All your leads and customers in one place."
         actions={
           <>
             <ColumnsMenu hidden={hidden} onToggle={toggleColumn} />

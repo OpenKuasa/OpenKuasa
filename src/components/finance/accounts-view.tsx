@@ -123,7 +123,7 @@ export function AccountsView({
     <ScreenContainer className="pb-24 sm:pb-24">
       <PageHeader
         title="Chart of Accounts"
-        subtitle="Your double-entry account structure, Saudara."
+        subtitle="Your double-entry account structure."
         actions={
           writer ? (
             <Button

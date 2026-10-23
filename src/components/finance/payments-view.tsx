@@ -254,7 +254,7 @@ export function PaymentsView({
     <ScreenContainer className="pb-24 sm:pb-24">
       <PageHeader
         title="Payments Out"
-        subtitle="Payments made to suppliers, Saudara."
+        subtitle="Payments made to suppliers."
         actions={
           writer ? (
             <Button

@@ -287,7 +287,7 @@ export function CashReceiptsView({
     <ScreenContainer className="pb-24 sm:pb-24">
       <PageHeader
         title="Cash Receipts"
-        subtitle="Money received into cash and bank, Saudara."
+        subtitle="Money received into cash and bank."
         actions={
           <div className="flex flex-wrap items-center gap-2">
             <Select

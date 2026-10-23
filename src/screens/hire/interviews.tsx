@@ -129,7 +129,7 @@ export default async function InterviewsScreen() {
     <ScreenContainer>
       <PageHeader
         title="Interviews"
-        subtitle="Your upcoming and recent interviews, Saudara."
+        subtitle="Your upcoming and recent interviews."
         // Only for someone who may edit, and only when the list of applications to pick from was read.
         actions={canEdit && model ? <InterviewHeaderButtons /> : null}
       />

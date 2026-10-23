@@ -73,7 +73,7 @@ export default async function ApplicationsScreen() {
     <ScreenContainer>
       <PageHeader
         title="Applications"
-        subtitle="All incoming applications across your open roles, Saudara."
+        subtitle="All incoming applications across your open roles."
       />
       {/* The screen's one interview dialog, closed until a panel's button opens it. Only for someone who may edit. */}
       {canEdit ? <InterviewDialogHost {...serverClock()} /> : null}

@@ -481,7 +481,7 @@ export function PurchaseOrdersView({ rows, writer }: { rows: PurchaseOrderListRo
     <ScreenContainer className="pb-24 sm:pb-24">
       <PageHeader
         title="Purchase Orders"
-        subtitle="Orders to your suppliers, from approval to delivery and billing, Saudara."
+        subtitle="Orders to your suppliers, from approval to delivery and billing."
         actions={
           writer ? (
             <Button

@@ -349,7 +349,7 @@ export default async function CrmDealsPage({
     return (
       <CouldntLoad
         title="Deals"
-        subtitle="Your sales pipeline — move deals toward close, Saudara."
+        subtitle="Your sales pipeline — move deals toward close."
         thing="deals"
       />
     );

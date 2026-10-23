@@ -435,7 +435,7 @@ export function InvoicesView({
     <ScreenContainer className="pb-24 sm:pb-24">
       <PageHeader
         title="Invoices"
-        subtitle="Sales invoices and their e-Invois status, Saudara."
+        subtitle="Sales invoices and their e-Invois status."
         actions={
           writer ? (
             <Button

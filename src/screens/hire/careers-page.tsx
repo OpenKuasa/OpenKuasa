@@ -119,7 +119,7 @@ export default async function CareersPageScreen() {
     <ScreenContainer>
       <PageHeader
         title="Careers Page"
-        subtitle="Your public job board, Saudara."
+        subtitle="Your public job board."
         actions={
           // Not shown when the settings could not be read: a switch must never show a state it does not know.
           settings ? (

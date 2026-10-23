@@ -53,7 +53,7 @@ export default async function JobsScreen() {
     <ScreenContainer>
       <PageHeader
         title="Jobs"
-        subtitle="Your open positions, Saudara."
+        subtitle="Your open positions."
       />
 
       <BentoGrid>

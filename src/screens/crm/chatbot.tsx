@@ -151,7 +151,7 @@ export default function ChatbotScreen() {
     <ScreenContainer>
       <PageHeader
         title="AI Chatbot"
-        subtitle="Sari — your 24/7 AI responder across WhatsApp & web, Saudara."
+        subtitle="Sari — your 24/7 AI responder across WhatsApp & web."
         actions={
           <>
             <Button variant="outline" size="sm">

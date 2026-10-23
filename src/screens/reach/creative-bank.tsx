@@ -110,7 +110,7 @@ export default async function CreativeBankScreen() {
       <PageHeader
         className="mb-4"
         title="Creative Bank"
-        subtitle="Your library of ad creatives and copy, Saudara."
+        subtitle="Your library of ad creatives and copy."
         actions={
           <>
             <Button variant="outline" size="sm">

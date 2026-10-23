@@ -134,7 +134,7 @@ export default function BillingsScreen() {
     <ScreenContainer>
       <PageHeader
         title="Billings"
-        subtitle="Invoices, revenue and collections, Saudara."
+        subtitle="Invoices, revenue and collections."
         actions={
           <>
             <Select defaultValue="30d">

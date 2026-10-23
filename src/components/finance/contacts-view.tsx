@@ -96,7 +96,7 @@ export function ContactsView({ view, actions }: { view: ContactsViewData; action
     <ScreenContainer className="pb-24 sm:pb-24">
       <PageHeader
         title="Customers & Suppliers"
-        subtitle="Your contacts for billing & procurement, Saudara."
+        subtitle="Your contacts for billing & procurement."
         actions={
           actions ? (
             <Button size="sm" onClick={openAdd} aria-expanded={adding}>

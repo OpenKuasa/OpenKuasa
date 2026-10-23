@@ -130,7 +130,7 @@ export default async function CandidatesScreen() {
     <ScreenContainer>
       <PageHeader
         title="Candidates"
-        subtitle="Your hiring pipeline by stage, Saudara."
+        subtitle="Your hiring pipeline by stage."
         actions={
           <>
             <Button variant="outline" size="sm" disabled title="Coming soon">

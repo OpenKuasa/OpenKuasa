@@ -220,7 +220,7 @@ export default async function CrmContactsPage({
     return (
       <CouldntLoad
         title="Contacts"
-        subtitle="All your leads and customers in one place, Saudara."
+        subtitle="All your leads and customers in one place."
         thing="contacts"
       />
     );

@@ -364,7 +364,7 @@ export function JournalsView({
     <ScreenContainer className="pb-24 sm:pb-24">
       <PageHeader
         title="Journals"
-        subtitle="General ledger entries, Saudara."
+        subtitle="General ledger entries."
         actions={
           writer ? (
             <Button

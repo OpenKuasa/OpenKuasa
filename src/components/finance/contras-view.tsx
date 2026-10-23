@@ -222,8 +222,8 @@ export function ContrasView({
         title="Contra Entries"
         subtitle={
           memberNote
-            ? `What contacts owe you set against what you owe them, Saudara. ${CONTRA_MEMBER_NOTE}`
-            : 'What contacts owe you set against what you owe them, Saudara.'
+            ? `What contacts owe you set against what you owe them. ${CONTRA_MEMBER_NOTE}`
+            : 'What contacts owe you set against what you owe them.'
         }
         actions={
           writer ? (

@@ -251,7 +251,7 @@ export default function DealsScreen({
     <ScreenContainer>
       <PageHeader
         title="Deals"
-        subtitle="Your sales pipeline — move deals toward close, Saudara."
+        subtitle="Your sales pipeline — move deals toward close."
         actions={
           <>
             <Button

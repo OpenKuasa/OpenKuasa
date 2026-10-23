@@ -124,7 +124,7 @@ export default async function TalentPoolScreen({
       <PageHeader
         className="mb-3"
         title="Talent Pool"
-        subtitle="Saved candidates for future roles, Saudara."
+        subtitle="Saved candidates for future roles."
         actions={canEdit ? <AddToPool /> : null}
       />
 

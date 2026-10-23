@@ -372,7 +372,7 @@ export function QuotationsView({
     <ScreenContainer className="pb-24 sm:pb-24">
       <PageHeader
         title="Quotations"
-        subtitle="Quotes you have given your customers, and their answers, Saudara."
+        subtitle="Quotes you have given your customers, and their answers."
         actions={
           writer ? (
             <Button
