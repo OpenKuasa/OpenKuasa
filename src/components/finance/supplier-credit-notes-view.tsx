@@ -20,7 +20,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { localIsoDate } from '@/lib/finance/bill-math';
 import type { BillListRow } from '@/lib/finance/bills';
 import { csvFileName } from '@/lib/finance/csv';
-import { rm } from '@/lib/finance/format';
+import { rm, typedNumber } from '@/lib/finance/format';
 import type { FinResult } from '@/lib/finance/result';
 import {
   SUPPLIER_CREDIT_STATUS_LABELS,
@@ -244,7 +244,8 @@ export function SupplierCreditNotesView({
             confirm.fail(problem);
             return;
           }
-          confirm.run(() => actions.apply({ credit_note_id: note.id, bill_id: applyBill, amount: Number(applyAmount) }), close);
+          // applyCreditError has checked it reads as a number; send what that check read.
+          confirm.run(() => actions.apply({ credit_note_id: note.id, bill_id: applyBill, amount: typedNumber(applyAmount) ?? 0 }), close);
         };
         return (
           <ConfirmRow
