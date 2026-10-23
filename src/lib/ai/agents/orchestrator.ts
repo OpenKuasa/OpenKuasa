@@ -13,7 +13,7 @@ import { getModel, pickModelId } from '@/lib/ai/provider';
 import { inUsersLanguage } from '@/lib/ai/reply-language';
 import type { CrmAccess } from '@/lib/ai/crm-tools';
 import { prepareCvStep } from '@/lib/ai/hire-tools';
-import { guardDeletions } from '@/lib/ai/hire-deletions';
+import { guardDeletions, type DeletionGate } from '@/lib/ai/hire-deletions';
 import { guardFinanceWrites } from '@/lib/ai/finance-id-gate';
 import { guardRosterWrites } from '@/lib/ai/roster-id-gate';
 import { guardInterviewChanges } from '@/lib/ai/hire-interview-gate';
@@ -59,29 +59,40 @@ export const WRITE_TOOL_NAMES = REACH_WRITE_TOOL_NAMES;
 export type { ApprovalBinding, FinanceAccess, HireAccess, PeopleAccess, ReachAccess };
 
 /**
- * One agent's tools from its products, with every change tool bound to the record the server keeps of what it
- * proposed (see `bindApprovals`). The deletion, talent pool and interview rules are put on first, so a change they
- * refuse is never recorded.
+ * The approval gates a set of products' change tools run under, in the order Tuah puts them on. Shared by the chat
+ * agents (`boundToolkit`) and the MCP operations, so both are guarded by the same chain.
  */
-function boundToolkit(products: ProductToolkit[], messages: ModelMessage[], approvals: ApprovalBinding | undefined) {
-  const kit = combineToolkits(products);
+export function guardChain(
+  products: ProductToolkit[],
+  base: Record<string, 'user-approval'> | undefined,
+): Record<string, 'user-approval' | DeletionGate> | undefined {
   // The first deletion of a turn, the first talent pool change and the first interview change go to the user as a
   // card; any other of its kind is denied before a card exists, and so is one for an id nobody looked up. Deletions
   // first, then the pool, then interviews, as before. Finance writes are gated last: `guardFinanceWrites` only
   // touches finance tool names, so it is orthogonal to the hire guards and denies a finance write on an id no read
   // returned this conversation (issue #225), before a card. Roster, hours, shift type and swap changes likewise:
   // every id they carry must have come from a lookup of its kind.
-  const toolApproval = guardRosterWrites(
+  return guardRosterWrites(
     guardFinanceWrites(
       guardInterviewChanges(
         guardPoolChanges(
-          guardDeletions(kit.toolApproval, products.find((p) => p.checkDeletion)?.checkDeletion),
+          guardDeletions(base, products.find((p) => p.checkDeletion)?.checkDeletion),
           products.find((p) => p.checkPoolChange)?.checkPoolChange,
         ),
         products.find((p) => p.checkInterviewChange)?.checkInterviewChange,
       ),
     ),
   );
+}
+
+/**
+ * One agent's tools from its products, with every change tool bound to the record the server keeps of what it
+ * proposed (see `bindApprovals`). The deletion, talent pool and interview rules are put on first, so a change they
+ * refuse is never recorded.
+ */
+function boundToolkit(products: ProductToolkit[], messages: ModelMessage[], approvals: ApprovalBinding | undefined) {
+  const kit = combineToolkits(products);
+  const toolApproval = guardChain(products, kit.toolApproval);
   return bindApprovals({ tools: kit.tools, toolApproval }, products, approvals ?? requestOnlyBinding(messages));
 }
 
