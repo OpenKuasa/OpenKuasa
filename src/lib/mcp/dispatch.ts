@@ -41,7 +41,7 @@ export const CONFIRM_INVALID =
 export const FAILED =
   'The operation could not be completed because of a problem on the server. Check the workspace before trying it again.';
 
-type Pending = { credentialId: string; name: string; argsJson: string; toolCallId: string; note: string; bound?: Bound; expires: number };
+type Pending = { credentialId: string; userId: string; name: string; argsJson: string; toolCallId: string; note: string; bound?: Bound; expires: number };
 
 /** Process-wide: token → the change it confirms. */
 const pending = new Map<string, Pending>();
@@ -105,12 +105,12 @@ function issueToken(entry: Omit<Pending, 'expires'>): string {
 }
 
 /** Takes the token (once, whatever the outcome) and returns its change when it is this one. */
-function takeToken(token: string, credentialId: string, name: string, argsJson: string): Pending | null {
+function takeToken(token: string, credentialId: string, userId: string, name: string, argsJson: string): Pending | null {
   const held = pending.get(token);
   if (!held) return null;
   pending.delete(token);
   if (held.expires <= Date.now()) return null;
-  if (held.credentialId !== credentialId || held.name !== name || held.argsJson !== argsJson) return null;
+  if (held.credentialId !== credentialId || held.userId !== userId || held.name !== name || held.argsJson !== argsJson) return null;
   return held;
 }
 
@@ -164,7 +164,7 @@ export async function runChange(
   const argsJson = canonicalJson(args);
 
   // A token is checked first and used up whatever happens next. A bad one never turns into a new token.
-  const confirming = confirm === undefined ? null : takeToken(confirm, caller.credentialId, name, argsJson);
+  const confirming = confirm === undefined ? null : takeToken(confirm, caller.credentialId, caller.userId, name, argsJson);
   if (confirm !== undefined && !confirming) return { ok: false, error: CONFIRM_INVALID };
   const toolCallId = confirming?.toolCallId ?? `mcp_${randomUUID()}`;
   // The card the person was shown, as Tuah's conversation would hold it, so the gate's `cardShown` finds it.
@@ -193,7 +193,7 @@ export async function runChange(
   // A note the person has not seen (none yet, or not the one their token was given for) goes back to them first.
   if (note && note !== confirming?.note) {
     const bound = typeof decided === 'object' ? decided.bound : undefined;
-    const token = issueToken({ credentialId: caller.credentialId, name, argsJson, toolCallId, note, ...(bound ? { bound } : {}) });
+    const token = issueToken({ credentialId: caller.credentialId, userId: caller.userId, name, argsJson, toolCallId, note, ...(bound ? { bound } : {}) });
     return leave({ ok: false, needsConfirm: true, note, confirm: token });
   }
   // What was bound when the note was shown, as `bindApprovals` keeps it on the proposal; else what the gate bound now.

@@ -84,4 +84,16 @@ describe('the MCP transcript', () => {
     expect(store.messages(K)[0].content).toBe('[next request]');
     expect((store.messages(K)[1].content as { toolName: string }[])[0].toolName).toBe('listRfqs');
   });
+
+  it('sweeps other idle keys when any key is used', () => {
+    let at = 0;
+    const store = memoryTranscriptStore({ now: () => at });
+    store.recordCall('A', { toolCallId: 't1', toolName: 'listRfqs', input: {}, output: {} });
+    expect(store.size()).toBe(1);
+    at = 3_600_000 + 61_000;
+    store.recordCall('B', { toolCallId: 't2', toolName: 'listRfqs', input: {}, output: {} });
+    expect(store.size()).toBe(1);
+    expect(store.messages('A')).toEqual([]);
+    expect(store.messages('B')).toHaveLength(2);
+  });
 });

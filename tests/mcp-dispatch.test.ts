@@ -14,6 +14,7 @@ const APP = '44444444-4444-4444-8444-444444444481';
 const LINK = 'https://meet.example/x';
 const CALLER = { credentialId: 'cred1', userId: 'user1' };
 const OTHER = { credentialId: 'cred2', userId: 'user1' };
+const OTHER_PERSON = { credentialId: 'cred1', userId: 'user2' };
 
 type Gates = Record<string, 'user-approval' | DeletionGate>;
 
@@ -183,6 +184,9 @@ describe('runChange', () => {
     // Other credential.
     const t3 = (await ask()).confirm;
     expect(await runChange(opsFor(f, gates), store, OTHER, 'deleteCandidate', { id: 'c1' }, t3)).toEqual({ ok: false, error: CONFIRM_INVALID });
+    // Same credential, another person.
+    const t4 = (await ask()).confirm;
+    expect(await runChange(opsFor(f, gates), store, OTHER_PERSON, 'deleteCandidate', { id: 'c1' }, t4)).toEqual({ ok: false, error: CONFIRM_INVALID });
     // Other operation.
     const t5 = (await ask()).confirm;
     expect(await runChange(opsFor(f, gates), store, CALLER, 'scheduleInterview', { application_id: APP, date: 'd', time: 't', kind: 'video' }, t5)).toEqual({ ok: false, error: CONFIRM_INVALID });
@@ -194,6 +198,17 @@ describe('runChange', () => {
     expect(await runChange(opsFor(f, gates), store, CALLER, 'deleteCandidate', { id: 'c1' }, 'made-up')).toEqual({ ok: false, error: CONFIRM_INVALID });
 
     expect(writeCalls(f)).toHaveLength(ranOnce);
+  });
+
+  it('an empty reason is no note: it runs without a confirm', async () => {
+    // Mirrors cardShown, which treats only a truthy string as a note, so the two never disagree.
+    const f = fakeTools();
+    const store = memoryTranscriptStore();
+    const gates = (base: Gates) => ({ ...base, deleteCandidate: (() => ({ type: 'user-approval', reason: '' })) as DeletionGate });
+    const out = await runChange(opsFor(f, gates), store, CALLER, 'deleteCandidate', { id: 'c1' });
+    expect(out.ok).toBe(true);
+    expect(out).not.toHaveProperty('needsConfirm');
+    expect(writeCalls(f)).toHaveLength(1);
   });
 
   it('read names are refused by runChange and write names by runRead', async () => {

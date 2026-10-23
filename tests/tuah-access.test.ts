@@ -20,6 +20,7 @@ vi.mock('@/lib/ai/crm-tools', () => ({
 vi.mock('@/lib/auth/viewer', () => ({ hasSupabaseEnv: () => true }));
 
 import { buildTuahAccess } from '@/lib/ai/tuah-access';
+import { can } from '@/lib/auth/permissions';
 
 const supabase = {} as SupabaseClient;
 const base = { supabase, userId: 'u1', origin: null, withCvReader: false, receipt: null };
@@ -55,5 +56,26 @@ describe('buildTuahAccess', () => {
     ctl.viewerFails = true;
     const a = await buildTuahAccess({ ...base, org: { orgId: 'o1', role: 'member' } });
     expect(a.people).toBeNull();
+  });
+
+  it('no CV reader unless asked for', async () => {
+    const a = await buildTuahAccess({ ...base, org: { orgId: 'o1', role: 'member' }, withCvReader: false });
+    expect(a.hire.files).toBeUndefined();
+    expect(a.hire.cvShelf).toBeUndefined();
+  });
+
+  it('only owners and admins may manage agents', async () => {
+    const member = await buildTuahAccess({ ...base, org: { orgId: 'o1', role: 'member' } });
+    const owner = await buildTuahAccess({ ...base, org: { orgId: 'o1', role: 'owner' } });
+    expect(can('member', 'manage-agents')).toBe(false);
+    expect(can('owner', 'manage-agents')).toBe(true);
+    expect(member.reach.write?.canManageAgents).toBe(false);
+    expect(owner.reach.write?.canManageAgents).toBe(true);
+  });
+
+  it('an HR viewer gets people write access for this user', async () => {
+    const a = await buildTuahAccess({ ...base, org: { orgId: 'o1', role: 'member' } });
+    expect(a.people?.write).toBeDefined();
+    expect(a.people?.write?.userId).toBe('u1');
   });
 });

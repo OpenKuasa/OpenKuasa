@@ -37,15 +37,28 @@ const copyOf = (message: ModelMessage): ModelMessage =>
     ? ({ ...message, content: (message.content as object[]).map((part) => ({ ...part })) } as ModelMessage)
     : { ...message };
 
-export function memoryTranscriptStore(opts: { ttlMs?: number; maxCalls?: number; now?: () => number } = {}): TranscriptStore {
+const SWEEP_EVERY_MS = 60_000;
+
+export function memoryTranscriptStore(
+  opts: { ttlMs?: number; maxCalls?: number; now?: () => number } = {},
+): TranscriptStore & { size(): number } {
   const ttlMs = opts.ttlMs ?? 3_600_000;
   const maxCalls = opts.maxCalls ?? 200;
   const now = opts.now ?? Date.now;
   const entries = new Map<TranscriptKey, Entry>();
+  let lastSweep = now();
+
+  /** Drops every idle entry, at most once a minute, so abandoned keys do not pile up. */
+  const sweep = (at: number) => {
+    if (at - lastSweep < SWEEP_EVERY_MS) return;
+    lastSweep = at;
+    for (const [key, held] of entries) if (at - held.touchedAt > ttlMs) entries.delete(key);
+  };
 
   /** The live entry for a key, created when asked to; an expired one is dropped first. */
   const entryFor = (key: TranscriptKey, create: boolean): Entry | undefined => {
     const at = now();
+    sweep(at);
     const found = entries.get(key);
     if (found && at - found.touchedAt > ttlMs) entries.delete(key);
     else if (found) {
@@ -105,6 +118,7 @@ export function memoryTranscriptStore(opts: { ttlMs?: number; maxCalls?: number;
     clear(key) {
       entries.delete(key);
     },
+    size: () => entries.size,
   };
 }
 
