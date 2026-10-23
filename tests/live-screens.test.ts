@@ -12,7 +12,7 @@ describe('live screens', () => {
   });
 
   it('marks a screen that is not connected as sample', () => {
-    expect(isSampleScreen('/crm/plugins')).toBe(true);
+    expect(isSampleScreen('/finance/e-invoice')).toBe(true);
   });
 
   it('leaves connected screens and Tuah alone', () => {
