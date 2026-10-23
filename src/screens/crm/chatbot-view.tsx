@@ -622,7 +622,13 @@ export function ChatbotView({
 
         <BentoCard
           title="Behaviour"
-          subtitle={saved ? 'How the bot greets and responds' : 'These are the starting settings. Save to make them yours.'}
+          subtitle={
+            !actions?.saveSettings
+              ? 'How the bot greets and responds. Only an owner or admin can change it.'
+              : saved
+                ? 'How the bot greets and responds'
+                : 'These are the starting settings. Save to make them yours.'
+          }
           icon={Bot}
           className="col-span-2 md:col-span-7"
         >
