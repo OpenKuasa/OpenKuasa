@@ -24,7 +24,8 @@ export type CrmAgentRaw = {
     lastActivityAt: string | null;
     hasOpenFollowUp: boolean;
   }[];
-  overdue: { id: string; title: string; contactId: string; dueAt: string }[];
+  /** `contactName` is embedded from the contact row, so it is there even for contacts not loaded above. */
+  overdue: { id: string; title: string; contactId: string; contactName: string | null; dueAt: string }[];
 };
 
 /** Like the Overview: at most this many open deals and contacts, newest first. */
@@ -98,6 +99,8 @@ async function readActivity(
           .eq('org_id', orgId)
           .in(column, group)
           .order('created_at', { ascending: true })
+          // Tiebreaker: rows sharing a created_at must not shift between pages.
+          .order('id', { ascending: true })
           .range(from, to),
       ),
       readAll((from, to) =>
@@ -107,6 +110,7 @@ async function readActivity(
           .eq('org_id', orgId)
           .in(column, group)
           .order('created_at', { ascending: true })
+          .order('id', { ascending: true })
           .range(from, to),
       ),
     ]);
@@ -158,7 +162,7 @@ export async function buildCrmAgentContext(
   const overdueRows = rowsOf(
     await service
       .from('crm_activities')
-      .select('id,title,contact_id,due_at')
+      .select('id,title,contact_id,due_at,crm_contacts(first_name,last_name)')
       .eq('org_id', orgId)
       .eq('type', 'task')
       .is('completed_at', null)
@@ -202,12 +206,16 @@ export async function buildCrmAgentContext(
         hasOpenFollowUp: seen?.openTask ?? false,
       };
     }),
-    overdue: overdueRows.map((o) => ({
-      id: String(o.id),
-      title: String(o.title ?? ''),
-      contactId: String(o.contact_id),
-      dueAt: String(o.due_at),
-    })),
+    overdue: overdueRows.map((o) => {
+      const person = o.crm_contacts as { first_name?: unknown; last_name?: unknown } | null;
+      return {
+        id: String(o.id),
+        title: String(o.title ?? ''),
+        contactId: String(o.contact_id),
+        contactName: person ? personName(person.first_name, person.last_name) || null : null,
+        dueAt: String(o.due_at),
+      };
+    }),
   };
 
   // Counts only: no names, no ids, never the focus text.

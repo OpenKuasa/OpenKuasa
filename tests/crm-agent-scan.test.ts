@@ -102,8 +102,8 @@ describe('scanCrm', () => {
   it('follow_up_overdue notes the contact', () => {
     const plan = { checks: [{ key: 'follow_up_overdue', params: {} }] };
     const overdue = [
-      { id: 'f1', title: 'Send quote', contactId: 'c1', dueAt: '2026-10-20T00:00:00.000Z' },
-      { id: 'f2', title: 'Later', contactId: 'c1', dueAt: '2026-10-24T00:00:00.000Z' },
+      { id: 'f1', title: 'Send quote', contactId: 'c1', contactName: null, dueAt: '2026-10-20T00:00:00.000Z' },
+      { id: 'f2', title: 'Later', contactId: 'c1', contactName: null, dueAt: '2026-10-24T00:00:00.000Z' },
     ];
     const out = scanCrm(raw({ plan, overdue, contacts: [contact()] }), NOW);
     expect(out).toHaveLength(1);
@@ -113,6 +113,15 @@ describe('scanCrm', () => {
       title: 'Note on Siti Aminah — overdue follow-up',
       checkKey: 'follow_up_overdue',
     });
+  });
+
+  it('follow_up_overdue names a contact outside the loaded ones from the embedded name', () => {
+    const plan = { checks: [{ key: 'follow_up_overdue', params: {} }] };
+    const overdue = [
+      { id: 'f1', title: 'Send quote', contactId: 'far', contactName: 'Ali Bakar', dueAt: '2026-10-20T00:00:00.000Z' },
+    ];
+    const out = scanCrm(raw({ plan, overdue, contacts: [contact()] }), NOW);
+    expect(out[0].title).toBe('Note on Ali Bakar — overdue follow-up');
   });
 
   it('contact_idle includes a contact that already has an open follow-up', () => {
@@ -164,13 +173,20 @@ describe('scanCrm', () => {
 
 type Tables = Record<string, { data: unknown[] | null; error?: unknown }>;
 
-/** A chainable stand-in for the Supabase query builder; filters are ignored. */
-function fakeClient(tables: Tables) {
+type Call = { table: string; method: string; args: unknown[] };
+
+/** A chainable stand-in for the Supabase query builder; filters are ignored, calls are logged. */
+function fakeClient(tables: Tables, calls: Call[][] = []) {
   const make = (table: string) => {
     const result = tables[table] ?? { data: [] };
     const chain: Record<string, unknown> = {};
+    const log: Call[] = [];
+    calls.push(log);
     for (const m of ['select', 'eq', 'in', 'is', 'not', 'lt', 'order', 'limit', 'range']) {
-      chain[m] = () => chain;
+      chain[m] = (...args: unknown[]) => {
+        log.push({ table, method: m, args });
+        return chain;
+      };
     }
     chain.maybeSingle = async () => ({
       data: result.data?.[0] ?? null,
@@ -230,6 +246,43 @@ describe('buildCrmAgentContext', () => {
     const { context, raw: r } = await buildCrmAgentContext(fakeClient(tables), 'org', NOW);
     expect(r.plan).toBeNull();
     expect(context).not.toContain('What the owner asked');
+  });
+
+  it('pages activity and note reads in a stable order (created_at, then id)', async () => {
+    const calls: Call[][] = [];
+    await buildCrmAgentContext(fakeClient(base, calls), 'org', NOW);
+    const paged = calls.filter((log) => log.some((c) => c.method === 'range'));
+    expect(paged.length).toBeGreaterThanOrEqual(4);
+    for (const log of paged) {
+      const orders = log.filter((c) => c.method === 'order').map((c) => c.args[0]);
+      expect(orders, log[0].table).toEqual(['created_at', 'id']);
+    }
+  });
+
+  it('embeds the overdue follow-up contact name', async () => {
+    const calls: Call[][] = [];
+    const tables = {
+      ...base,
+      crm_activities: {
+        data: [
+          {
+            id: 'f1',
+            title: 'Send quote',
+            contact_id: 'far',
+            deal_id: null,
+            type: 'task',
+            due_at: '2026-10-20T00:00:00.000Z',
+            created_at: daysAgo(5),
+            completed_at: null,
+            crm_contacts: { first_name: 'Ali', last_name: 'Bakar' },
+          },
+        ],
+      },
+    };
+    const { raw: r } = await buildCrmAgentContext(fakeClient(tables, calls), 'org', NOW);
+    const overdueRead = calls.find((log) => log.some((c) => c.method === 'lt'))!;
+    expect(String(overdueRead.find((c) => c.method === 'select')!.args[0])).toContain('crm_contacts(first_name,last_name)');
+    expect(r.overdue[0]).toMatchObject({ id: 'f1', contactId: 'far', contactName: 'Ali Bakar' });
   });
 
   it('throws when any read fails', async () => {

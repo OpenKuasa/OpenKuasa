@@ -107,7 +107,7 @@ export function scanCrm(raw: CrmAgentRaw, now: Date): Candidate[] {
             contactId: followUp.contactId,
             body: `Follow-up "${followUp.title}" overdue since ${since}.`,
           },
-          title: `Note on ${names.get(followUp.contactId) ?? 'a contact'} — overdue follow-up`,
+          title: `Note on ${followUp.contactName ?? names.get(followUp.contactId) ?? 'a contact'} — overdue follow-up`,
           detail: null,
           checkKey: check.key,
         });
