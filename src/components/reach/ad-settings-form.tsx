@@ -65,167 +65,230 @@ function inputToCap(value: string): number | null {
   return Number.isFinite(n) && n >= 0 ? Math.round(n * 100) : null;
 }
 
-export function AdSettingsForm({
-  settings,
-  canEdit,
-}: {
-  settings: AdSettings | null;
-  canEdit: boolean;
-}) {
+type AdSettingsPatch = Parameters<typeof updateAdSettingsAction>[0];
+
+/** One card's Save: pending, the last error, and whether the last save went through. */
+function useCardSave(canEdit: boolean) {
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
+  return {
+    pending,
+    disabled: !canEdit || pending,
+    touched: () => setSaved(false),
+    submit: (patch: () => AdSettingsPatch) => (e: React.FormEvent) => {
+      e.preventDefault();
+      if (!canEdit) return;
+      setSaved(false);
+      start(async () => {
+        try {
+          const res = await updateAdSettingsAction(patch());
+          setError(res.ok ? null : (res.error ?? 'Something went wrong.'));
+          setSaved(res.ok);
+        } catch {
+          setError('Something went wrong. Please try again.');
+        }
+      });
+    },
+    footer: canEdit ? (
+      <div className="flex flex-wrap items-center gap-3 pt-3">
+        <Button type="submit" size="sm" disabled={pending}>
+          {pending ? 'Saving…' : 'Save'}
+        </Button>
+        {error ? (
+          <p role="alert" className="text-sm text-destructive">
+            {error}
+          </p>
+        ) : saved && !pending ? (
+          <p role="status" className="text-sm text-muted-foreground">
+            Saved.
+          </p>
+        ) : null}
+      </div>
+    ) : null,
+  };
+}
+
+function Toggles({
+  rows,
+  values,
+  set,
+  disabled,
+}: {
+  rows: ToggleRow[];
+  values: Record<string, boolean>;
+  set: (next: Record<string, boolean>) => void;
+  disabled: boolean;
+}) {
+  return rows.map((row) => (
+    <div key={row.id} className="flex items-start justify-between gap-4 py-2">
+      <div className="space-y-0.5">
+        <Label htmlFor={`setting-${row.id}`} className="font-medium">
+          {row.label}
+        </Label>
+        {row.description ? <p className="text-sm text-muted-foreground">{row.description}</p> : null}
+      </div>
+      <Switch
+        id={`setting-${row.id}`}
+        checked={values[row.id] ?? false}
+        disabled={disabled}
+        onCheckedChange={(checked) => set({ ...values, [row.id]: checked })}
+      />
+    </div>
+  ));
+}
+
+function BudgetCard({ settings, canEdit }: { settings: AdSettings | null; canEdit: boolean }) {
+  const save = useCardSave(canEdit);
   const [daily, setDaily] = useState(capToInput(settings?.daily_cap_cents));
   const [monthly, setMonthly] = useState(capToInput(settings?.monthly_cap_cents));
   const [currency, setCurrency] = useState(settings?.currency ?? 'MYR');
-  const [automation, setAutomation] = useState(() =>
-    seedToggles(AUTOMATION, settings?.automation),
-  );
-  const [notifications, setNotifications] = useState(() =>
-    seedToggles(NOTIFICATIONS, settings?.notifications),
-  );
-
-  const disabled = !canEdit || pending;
   const currencies = CURRENCIES.some((c) => c.value === currency)
     ? CURRENCIES
     : [...CURRENCIES, { value: currency, label: currency }];
 
-  function onSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    if (!canEdit) return;
-    setSaved(false);
-    start(async () => {
-      try {
-        const res = await updateAdSettingsAction({
+  return (
+    <BentoCard
+      title="Budget & spend"
+      subtitle="Caps apply across all active campaigns"
+      icon={Wallet}
+      className="col-span-2 md:col-span-6"
+    >
+      <form
+        className="space-y-4"
+        onSubmit={save.submit(() => ({
           daily_cap_cents: inputToCap(daily),
           monthly_cap_cents: inputToCap(monthly),
           currency,
-          automation,
-          notifications,
-        });
-        setError(res.ok ? null : (res.error ?? 'Something went wrong.'));
-        setSaved(res.ok);
-      } catch {
-        setError('Something went wrong. Please try again.');
-      }
-    });
-  }
-
-  function renderToggles(
-    rows: ToggleRow[],
-    values: Record<string, boolean>,
-    set: (next: Record<string, boolean>) => void,
-  ) {
-    return rows.map((row) => (
-      <div key={row.id} className="flex items-start justify-between gap-4 py-2">
-        <div className="space-y-0.5">
-          <Label htmlFor={`setting-${row.id}`} className="font-medium">
-            {row.label}
-          </Label>
-          {row.description ? (
-            <p className="text-sm text-muted-foreground">{row.description}</p>
-          ) : null}
-        </div>
-        <Switch
-          id={`setting-${row.id}`}
-          checked={values[row.id] ?? false}
-          disabled={disabled}
-          onCheckedChange={(checked) => set({ ...values, [row.id]: checked })}
-        />
-      </div>
-    ));
-  }
-
-  return (
-    <form className="contents" onSubmit={onSubmit}>
-      <BentoCard
-        title="Budget & spend"
-        subtitle="Caps apply across all active campaigns"
-        icon={Wallet}
-        className="col-span-2 md:col-span-6"
+        }))}
       >
-        <div className="space-y-4">
-          <div className="grid gap-4 sm:grid-cols-2">
-            <div className="space-y-2">
-              <Label htmlFor="daily-cap">Daily budget cap (RM)</Label>
-              <Input
-                id="daily-cap"
-                type="number"
-                min="0"
-                step="0.01"
-                placeholder="No cap"
-                value={daily}
-                onChange={(e) => setDaily(e.target.value)}
-                disabled={disabled}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="monthly-cap">Monthly cap (RM)</Label>
-              <Input
-                id="monthly-cap"
-                type="number"
-                min="0"
-                step="0.01"
-                placeholder="No cap"
-                value={monthly}
-                onChange={(e) => setMonthly(e.target.value)}
-                disabled={disabled}
-              />
-            </div>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <div className="space-y-2">
+            <Label htmlFor="daily-cap">Daily budget cap (RM)</Label>
+            <Input
+              id="daily-cap"
+              type="number"
+              min="0"
+              step="0.01"
+              placeholder="No cap"
+              value={daily}
+              onChange={(e) => {
+                save.touched();
+                setDaily(e.target.value);
+              }}
+              disabled={save.disabled}
+            />
           </div>
           <div className="space-y-2">
-            <Label htmlFor="currency">Currency</Label>
-            <Select value={currency} onValueChange={setCurrency} disabled={disabled}>
-              <SelectTrigger id="currency" className="w-full sm:w-64">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {currencies.map((c) => (
-                  <SelectItem key={c.value} value={c.value}>
-                    {c.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <Label htmlFor="monthly-cap">Monthly cap (RM)</Label>
+            <Input
+              id="monthly-cap"
+              type="number"
+              min="0"
+              step="0.01"
+              placeholder="No cap"
+              value={monthly}
+              onChange={(e) => {
+                save.touched();
+                setMonthly(e.target.value);
+              }}
+              disabled={save.disabled}
+            />
           </div>
         </div>
-      </BentoCard>
+        <div className="space-y-2">
+          <Label htmlFor="currency">Currency</Label>
+          <Select
+            value={currency}
+            onValueChange={(value) => {
+              save.touched();
+              setCurrency(value);
+            }}
+            disabled={save.disabled}
+          >
+            <SelectTrigger id="currency" className="w-full sm:w-64">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {currencies.map((c) => (
+                <SelectItem key={c.value} value={c.value}>
+                  {c.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        {save.footer}
+      </form>
+    </BentoCard>
+  );
+}
 
-      <BentoCard
+/** A card of switches with its own Save. The whole set is sent: the stored value is replaced, not merged. */
+function TogglesCard({
+  title,
+  subtitle,
+  icon,
+  rows,
+  saved,
+  field,
+  canEdit,
+  className,
+}: {
+  title: string;
+  subtitle: string;
+  icon: typeof Bell;
+  rows: ToggleRow[];
+  saved: Record<string, boolean> | undefined;
+  field: 'automation' | 'notifications';
+  canEdit: boolean;
+  className: string;
+}) {
+  const save = useCardSave(canEdit);
+  const [values, setValues] = useState(() => seedToggles(rows, saved));
+  return (
+    <BentoCard title={title} subtitle={subtitle} icon={icon} className={className}>
+      <form onSubmit={save.submit(() => ({ [field]: values }))}>
+        <Toggles
+          rows={rows}
+          values={values}
+          set={(next) => {
+            save.touched();
+            setValues(next);
+          }}
+          disabled={save.disabled}
+        />
+        {save.footer}
+      </form>
+    </BentoCard>
+  );
+}
+
+/** Budget, Automation and Notifications: three cards, each saving only its own part. */
+export function AdSettingsForm({ settings, canEdit }: { settings: AdSettings | null; canEdit: boolean }) {
+  return (
+    <>
+      <BudgetCard settings={settings} canEdit={canEdit} />
+      <TogglesCard
         title="Automation"
         subtitle="Let Jebat optimise while you sleep"
         icon={Zap}
+        rows={AUTOMATION}
+        saved={settings?.automation}
+        field="automation"
+        canEdit={canEdit}
         className="col-span-2 md:col-span-6"
-      >
-        {renderToggles(AUTOMATION, automation, setAutomation)}
-      </BentoCard>
-
-      <BentoCard
+      />
+      <TogglesCard
         title="Notifications"
         subtitle="Stay in the loop on spend & performance"
         icon={Bell}
-        className="col-span-2 md:col-span-6"
-      >
-        {renderToggles(NOTIFICATIONS, notifications, setNotifications)}
-      </BentoCard>
-
-      {canEdit && (
-        <div className="col-span-2 flex items-center justify-end gap-3 md:col-span-12">
-          {error && (
-            <p role="alert" className="text-sm text-destructive">
-              {error}
-            </p>
-          )}
-          {saved && !error && !pending && (
-            <p role="status" className="text-sm text-muted-foreground">
-              Saved
-            </p>
-          )}
-          <Button type="submit" disabled={pending}>
-            Save changes
-          </Button>
-        </div>
-      )}
-    </form>
+        rows={NOTIFICATIONS}
+        saved={settings?.notifications}
+        field="notifications"
+        canEdit={canEdit}
+        className="col-span-2 md:col-span-12"
+      />
+    </>
   );
 }

@@ -12,6 +12,8 @@ import { BentoGrid, BentoCard } from '@/components/bento/bento';
 import { RadialGauge } from '@/components/charts';
 import { Badge } from '@/components/ui/badge';
 import { AdSettingsForm } from '@/components/reach/ad-settings-form';
+import { WorkspaceCard } from '@/components/settings/workspace-card';
+import { loadWorkspaceOverview } from '@/lib/account/workspace-overview';
 import { createClient } from '@/lib/supabase/server';
 import { getReachData } from '@/lib/reach/supabase';
 import { getViewer } from '@/lib/auth/viewer';
@@ -82,7 +84,7 @@ function StatusIcon({ status }: { status: Status }) {
 
 export default async function AdSettingsScreen() {
   const supabase = await createClient();
-  const [data, viewer] = await Promise.all([getReachData(supabase), getViewer()]);
+  const [data, viewer, workspace] = await Promise.all([getReachData(supabase), getViewer(), loadWorkspaceOverview()]);
   const settings = await data.getAdSettings();
   const canEdit = !viewer.isDemo && can(viewer.role, 'edit-data');
   const issues = CHECKS.filter((c) => c.status === 'Action needed').length;
@@ -92,10 +94,12 @@ export default async function AdSettingsScreen() {
       <PageHeader
         className="mb-4"
         title="Ad Settings"
-        subtitle="Configure your ad account, budgets, and automation."
+        subtitle="Your ad account, budgets and automation."
       />
 
       <BentoGrid>
+        <WorkspaceCard overview={workspace} />
+
         {/* Connected account */}
         <BentoCard
           title="Connected account"
@@ -113,7 +117,7 @@ export default async function AdSettingsScreen() {
                   <p className="font-medium">Meta Business</p>
                   <Badge variant="secondary">Not connected</Badge>
                 </div>
-                <p className="text-sm text-muted-foreground">Connecting Meta isn’t available yet.</p>
+                <p className="text-sm text-muted-foreground">Connecting Meta is coming soon.</p>
               </div>
             </div>
           </div>
@@ -168,7 +172,7 @@ export default async function AdSettingsScreen() {
             </div>
           ) : (
             <p className="grid min-h-24 place-items-center text-center text-sm text-muted-foreground">
-              Not available yet
+              Coming soon
             </p>
           )}
         </BentoCard>
