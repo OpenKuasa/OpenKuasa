@@ -11,6 +11,8 @@ const SERVICE_KEY = 'service-role-secret';
 const db = {
   profiles: new Map<string, string | null>(),
   members: new Map<string, string>(),
+  /** When each membership began: `${org}:${user}` → a sortable created_at. */
+  joined: new Map<string, string>(),
   orgs: new Map<string, string>(),
 };
 const memberKey = (org: string, user: string) => `${org}:${user}`;
@@ -39,7 +41,7 @@ function rowsFor(viewer: string | null, name: string): Record<string, unknown>[]
   }
   if (name === 'org_members') {
     return [...db.members]
-      .map(([k, role]) => ({ org_id: k.split(':')[0], user_id: k.split(':')[1], role }))
+      .map(([k, role]) => ({ org_id: k.split(':')[0], user_id: k.split(':')[1], role, created_at: db.joined.get(k) ?? '' }))
       .filter((r) => r.user_id === viewer);
   }
   if (name === 'orgs') {
@@ -66,15 +68,31 @@ vi.mock('@supabase/supabase-js', () => ({
       },
       from: (name: string) => {
         const filters: [string, unknown][] = [];
+        let orderBy: { col: string; ascending: boolean } | null = null;
+        let limit: number | null = null;
         const builder = {
           select: () => builder,
           eq: (col: string, val: unknown) => {
             filters.push([col, val]);
             return builder;
           },
+          order: (col: string, opts?: { ascending?: boolean }) => {
+            orderBy = { col, ascending: opts?.ascending ?? true };
+            return builder;
+          },
+          limit: (n: number) => {
+            limit = n;
+            return builder;
+          },
           maybeSingle: async () => {
             if (failing.has(name)) return { data: null, error: { code: 'PGRST301', message: `boom for ${bearer}` } };
-            const hit = rowsFor(viewer, name).filter((r) => filters.every(([c, v]) => r[c] === v));
+            let hit = rowsFor(viewer, name).filter((r) => filters.every(([c, v]) => r[c] === v));
+            if (orderBy) {
+              const { col, ascending } = orderBy;
+              hit = [...hit].sort((x, y) => String(x[col]).localeCompare(String(y[col])) * (ascending ? 1 : -1));
+            }
+            if (limit !== null) hit = hit.slice(0, limit);
+            if (hit.length > 1) return { data: null, error: { code: 'PGRST116', message: 'more than one row' } };
             return { data: hit[0] ?? null, error: null };
           },
         };
@@ -106,6 +124,7 @@ beforeEach(async () => {
   vi.stubEnv('SUPABASE_SERVICE_ROLE_KEY', SERVICE_KEY);
   db.profiles.clear();
   db.members.clear();
+  db.joined.clear();
   db.orgs.clear();
   tokens.clear();
   failing.clear();
@@ -114,11 +133,16 @@ beforeEach(async () => {
   resolveApiKey.mockReset();
   db.orgs.set(ORG_A, 'Rimba Ventures');
   db.orgs.set(ORG_B, 'Kopi Co');
-  db.members.set(memberKey(ORG_A, ALICE), 'member');
-  db.members.set(memberKey(ORG_B, ALICE), 'admin');
+  join(ORG_A, ALICE, 'member', '2026-01-01');
+  join(ORG_B, ALICE, 'admin', '2026-02-01');
   db.profiles.set(ALICE, ORG_A);
   ({ resolveCaller } = await import('@/lib/mcp/caller'));
 });
+
+function join(org: string, user: string, role: string, at: string) {
+  db.members.set(memberKey(org, user), role);
+  db.joined.set(memberKey(org, user), at);
+}
 
 function keyResolvesTo(userId: string, orgId: string, accessToken: string) {
   tokens.set(accessToken, userId);
@@ -175,36 +199,73 @@ describe('resolveCaller', () => {
   test('a workspace whose name cannot be read is "your other workspace"', async () => {
     keyResolvesTo(ALICE, ORG_A, 'alice-at-1');
     const ORG_C = '33333333-3333-4333-8333-333333333333';
+    // A member of C, but C's name is not readable.
+    join(ORG_C, ALICE, 'member', '2026-03-01');
     db.profiles.set(ALICE, ORG_C);
     const out = await resolveCaller(req(`Bearer ${KEY}`), 'Claude');
     expect(out).toEqual({ ok: false, status: 403, message: 'Switch back to Rimba Ventures in OpenKuasa, or connect again for your other workspace.' });
   });
 
-  test('no current workspace refuses every credential', async () => {
+  test('nothing recorded: the earliest membership is the current workspace, as in the app', async () => {
+    // Recorded workspace empty, and A is Alice's earliest membership: the A key works.
     keyResolvesTo(ALICE, ORG_A, 'alice-at-1');
     db.profiles.set(ALICE, null);
+    expect(await resolveCaller(req(`Bearer ${KEY}`), 'Claude')).toMatchObject({
+      ok: true,
+      caller: { userId: ALICE, orgId: ORG_A, orgName: 'Rimba Ventures', role: 'member' },
+    });
+
+    // No profile row at all reads the same way.
+    db.profiles.delete(ALICE);
+    expect(await resolveCaller(req(`Bearer ${KEY}`), 'Claude')).toMatchObject({ ok: true, caller: { orgId: ORG_A } });
+
+    // A recorded workspace Alice has left falls back to the earliest one too.
+    db.profiles.set(ALICE, '33333333-3333-4333-8333-333333333333');
+    expect(await resolveCaller(req(`Bearer ${KEY}`), 'Claude')).toMatchObject({ ok: true, caller: { orgId: ORG_A } });
+
+    // OAuth first use with nothing recorded binds to the earliest membership.
+    db.profiles.set(ALICE, null);
+    const token = oauthToken(ALICE);
+    expect(await resolveCaller(req(`Bearer ${token}`), 'Claude')).toMatchObject({ ok: true, caller: { orgId: ORG_A } });
+  });
+
+  test('nothing recorded and the earliest membership is another workspace: switch back, naming both', async () => {
+    db.members.clear();
+    db.joined.clear();
+    join(ORG_B, ALICE, 'admin', '2026-01-01');
+    join(ORG_A, ALICE, 'member', '2026-02-01');
+    db.profiles.set(ALICE, null);
+    keyResolvesTo(ALICE, ORG_A, 'alice-at-1');
     expect(await resolveCaller(req(`Bearer ${KEY}`), 'Claude')).toEqual({
       ok: false,
       status: 403,
-      message: 'Open OpenKuasa and switch to Rimba Ventures, then try again.',
+      message: 'Switch back to Rimba Ventures in OpenKuasa, or connect again for Kopi Co.',
     });
 
-    // Bound to A at first use, then the person has no workspace open.
-    db.profiles.set(ALICE, ORG_A);
+    // OAuth first use binds to that earliest workspace, B.
     const token = oauthToken(ALICE);
-    expect((await resolveCaller(req(`Bearer ${token}`), 'Claude')).ok).toBe(true);
-    db.profiles.set(ALICE, null);
-    expect(await resolveCaller(req(`Bearer ${token}`), 'Claude')).toEqual({
-      ok: false,
-      status: 403,
-      message: 'Open OpenKuasa and switch to Rimba Ventures, then try again.',
-    });
+    expect(await resolveCaller(req(`Bearer ${token}`), 'Claude')).toMatchObject({ ok: true, caller: { orgId: ORG_B, orgName: 'Kopi Co' } });
+  });
 
-    // First use with no workspace open: nothing to bind to.
+  test('OAuth first use with no membership anywhere has nothing to bind to', async () => {
+    db.members.clear();
+    db.joined.clear();
+    db.profiles.set(ALICE, null);
     expect(await resolveCaller(req(`Bearer ${oauthToken(ALICE, { client_id: 'cursor' })}`), 'Cursor')).toEqual({
       ok: false,
       status: 403,
       message: 'Open a workspace in OpenKuasa, then try again.',
+    });
+  });
+
+  test('a key whose person has no membership left is removed, not asked to switch', async () => {
+    keyResolvesTo(ALICE, ORG_A, 'alice-at-1');
+    db.members.clear();
+    db.joined.clear();
+    expect(await resolveCaller(req(`Bearer ${KEY}`), 'Claude')).toEqual({
+      ok: false,
+      status: 401,
+      message: 'You are no longer a member of this workspace, so this connection cannot act in it.',
     });
   });
 
@@ -258,7 +319,8 @@ describe('resolveCaller', () => {
 
       failing.clear();
       failing.add('profiles');
-      expect(await resolveCaller(req(`Bearer ${KEY}`), 'Claude')).toEqual(failed);
+      // The shared rule reads past an unreadable recorded workspace to the earliest membership, as the app does.
+      expect(await resolveCaller(req(`Bearer ${KEY}`), 'Claude')).toMatchObject({ ok: true, caller: { orgId: ORG_A } });
 
       const lines = JSON.stringify(logged.mock.calls);
       expect(lines).toContain('PGRST301');

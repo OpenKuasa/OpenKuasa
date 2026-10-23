@@ -1,6 +1,6 @@
-import { expect, test, vi } from 'vitest';
+import { describe, expect, test, vi } from 'vitest';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { getCurrentOrg, requireOrg } from '@/lib/auth/current-org';
+import { currentOrgFor, getCurrentOrg, requireOrg } from '@/lib/auth/current-org';
 
 vi.mock('next/navigation', () => ({
   redirect: vi.fn((path: string) => { throw new Error(`REDIRECT:${path}`); }),
@@ -77,4 +77,36 @@ test('requireOrg redirects to /onboarding when org-less', async () => {
 test('requireOrg returns the org for a member', async () => {
   const rows = [{ user_id: 'u1', org_id: 'o1', role: 'admin' }];
   expect(await requireOrg(fakeClient({ id: 'u1' }, null, rows))).toEqual({ orgId: 'o1', role: 'admin' });
+});
+
+describe('currentOrgFor', () => {
+  const rows = [
+    { user_id: 'u1', org_id: 'o1', role: 'owner' },
+    { user_id: 'u1', org_id: 'o2', role: 'viewer' },
+  ];
+
+  test('the recorded workspace, while the person still belongs to it', async () => {
+    expect(await currentOrgFor(fakeClient(null, 'o2', rows), 'u1')).toEqual({ orgId: 'o2', role: 'viewer' });
+  });
+
+  test('the earliest membership when the recorded workspace was left', async () => {
+    expect(await currentOrgFor(fakeClient(null, 'o9', rows), 'u1')).toEqual({ orgId: 'o1', role: 'owner' });
+  });
+
+  test('the earliest membership when nothing is recorded', async () => {
+    expect(await currentOrgFor(fakeClient(null, null, rows), 'u1')).toEqual({ orgId: 'o1', role: 'owner' });
+  });
+
+  test('null with no membership at all', async () => {
+    expect(await currentOrgFor(fakeClient(null, null, []), 'u1')).toBeNull();
+  });
+
+  test('throws on the earliest-membership read error', async () => {
+    const boom = new Error('db down');
+    await expect(currentOrgFor(fakeClient(null, null, [], { queryError: boom }), 'u1')).rejects.toBe(boom);
+  });
+
+  test('getCurrentOrg still returns null when signed out, without a lookup', async () => {
+    expect(await getCurrentOrg(fakeClient(null, 'o1', rows))).toBeNull();
+  });
 });
