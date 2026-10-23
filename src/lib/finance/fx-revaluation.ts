@@ -45,7 +45,7 @@ const FIN_CHANGED = 'FIN55';
 const FIN_NOTHING = 'FIN56';
 const FIN_RATE = 'FIN38';
 const FIN_NOT_BNM = 'FIN39';
-const FIN_LOCKED = 'FIN01';
+const FIN_POSTED_FIXED = 'FIN01';
 
 /** Fixed names: Intl's short months vary by ICU version ("Sep" or "Sept"), and a sentence must not. */
 const SHORT_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -328,7 +328,7 @@ export function fxRevaluationRefusal(error: unknown, reading = false): string | 
       return M.notBnmRate;
     case FIN_SIGN_OFF:
       return M.needsSignOff;
-    case FIN_LOCKED:
+    case FIN_POSTED_FIXED:
       return M.locked;
     case PG_FORBIDDEN:
       return reading ? M.noAccess : NOT_ALLOWED;
