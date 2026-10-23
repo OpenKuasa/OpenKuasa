@@ -356,8 +356,11 @@ describe('Tuah and the specialists it asks are sent exactly what they were', () 
   ])('Tuah on its own, %s: its instructions are its prompt and the last message is what was typed', async (_case, messages) => {
     await runTuah(messages, reach).consumeStream();
     const prompt = lastPrompt();
-    expect(prompt.filter((m) => m.role === 'system')).toHaveLength(1);
+    // Its prompt, then today's date as a second system message (never cached).
+    const systems = prompt.filter((m) => m.role === 'system');
+    expect(systems).toHaveLength(2);
     expect(systemOf(prompt)).toBe(tuahSystem(undefined));
+    expect(String(systems[1].content)).toMatch(/^TODAY\n- It is /);
     const last = prompt[prompt.length - 1];
     expect(last.role).toBe('user');
     expect(textsOf(last)).toEqual([messages[messages.length - 1].content]);
@@ -400,5 +403,21 @@ describe('Tuah and the specialists it asks are sent exactly what they were', () 
       'The conversation so far:\nUser: Berapa orang pekerja dalam syarikat ini?\n\nTask from Tuah: Count the employees in this company and report the number.',
     ]);
     for (const prompt of seen.prompts) expect(JSON.stringify(prompt)).not.toContain('App note');
+  });
+  it('Tuah and the specialist it asks are both told today\'s date, after their cached prompt', async () => {
+    seen.callTool = { name: 'askLekiu', input: { task: 'Set the roster for this week.' }, by: 'You are Tuah' };
+    const result = asTeam([user('Set Siti on morning shift this week.')]);
+    await result.consumeStream();
+    const today = /^TODAY\n- It is \w+day, \d{4}-\d{2}-\d{2}, \d{2}:\d{2} in Malaysia/;
+    const systems = (prompt: PromptMessage[]) => prompt.filter((m) => m.role === 'system').map((m) => String(m.content));
+    const tuahCalls = seen.prompts.filter((prompt) => systemOf(prompt).startsWith('You are Tuah'));
+    const specialistCalls = seen.prompts.filter((prompt) => !systemOf(prompt).startsWith('You are Tuah'));
+    expect(tuahCalls.length).toBeGreaterThan(0);
+    expect(specialistCalls).toHaveLength(1);
+    for (const prompt of [...tuahCalls, ...specialistCalls]) {
+      const [fixed, dated] = systems(prompt);
+      expect(fixed).not.toContain('TODAY\n- It is');
+      expect(dated).toMatch(today);
+    }
   });
 });
