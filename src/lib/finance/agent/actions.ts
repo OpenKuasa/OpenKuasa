@@ -23,7 +23,7 @@ export const financeAgentNoteInput = z
   .object({
     entityType: z.enum(FINANCE_NOTE_ENTITY_TYPES),
     entityId: z.string().uuid().nullable(),
-    entityLabel: z.string().min(1).max(200),
+    entityLabel: z.string().min(1).max(120),
     // Never trimmed: the note is written from the stored proposal exactly as it was approved.
     body: z
       .string()
