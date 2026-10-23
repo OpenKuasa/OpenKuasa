@@ -378,6 +378,53 @@ describe('runSchedules', () => {
     expect(last.eqs).toContainEqual(['org_id', ORG]);
   });
 
+  describe('keeps the schedule on its own time of day', () => {
+    afterEach(() => vi.useRealTimers());
+    const DAY = 86_400;
+    // 07:00 in Kuala Lumpur is 23:00 UTC the day before.
+    const SLOT = '2026-10-22T23:00:00.000Z';
+
+    it('a claim at 07:04:59 for a 07:00 daily slot moves to the next day 07:00', async () => {
+      vi.useFakeTimers({ toFake: ['Date'] });
+      vi.setSystemTime(new Date('2026-10-22T23:04:59.000Z'));
+      const { client, writes } = fakeClient([sched({ interval_seconds: DAY, next_run_at: SLOT })]);
+      await runSchedules(client);
+      const claim = schedUpdates(writes).find((w) => 'next_run_at' in w.patch)!;
+      expect(claim.patch.next_run_at).toBe('2026-10-23T23:00:00.000Z');
+    });
+
+    it('a schedule several intervals behind jumps to the next future slot, with no backlog', async () => {
+      vi.useFakeTimers({ toFake: ['Date'] });
+      vi.setSystemTime(new Date('2026-10-26T01:30:00.000Z'));
+      const { client, writes } = fakeClient([sched({ interval_seconds: DAY, next_run_at: SLOT })]);
+      const out = await runSchedules(client);
+      expect(runAgent).toHaveBeenCalledTimes(1);
+      expect(out.ran).toBe(1);
+      const claim = schedUpdates(writes).find((w) => 'next_run_at' in w.patch)!;
+      expect(claim.patch.next_run_at).toBe('2026-10-26T23:00:00.000Z');
+    });
+
+    it('a slot exactly due now moves one interval on', async () => {
+      vi.useFakeTimers({ toFake: ['Date'] });
+      vi.setSystemTime(new Date(SLOT));
+      const { client, writes } = fakeClient([sched({ interval_seconds: DAY, next_run_at: SLOT })]);
+      await runSchedules(client);
+      const claim = schedUpdates(writes).find((w) => 'next_run_at' in w.patch)!;
+      expect(claim.patch.next_run_at).toBe('2026-10-23T23:00:00.000Z');
+    });
+
+    it('still hands the slot back on a run in progress, matching the claimed time', async () => {
+      vi.useFakeTimers({ toFake: ['Date'] });
+      vi.setSystemTime(new Date('2026-10-22T23:04:59.000Z'));
+      vi.mocked(runAgent).mockRejectedValueOnce(new RunInProgressError());
+      const { client, writes } = fakeClient([sched({ interval_seconds: DAY, next_run_at: SLOT })]);
+      await runSchedules(client);
+      const last = schedUpdates(writes).at(-1)!;
+      expect(last.patch).toMatchObject({ next_run_at: SLOT });
+      expect(last.eqs).toContainEqual(['next_run_at', '2026-10-23T23:00:00.000Z']);
+    });
+  });
+
   it('keeps looping when one schedule throws', async () => {
     vi.mocked(runAgent).mockRejectedValueOnce(new Error('boom sk-or-secret'));
     const { client } = fakeClient([sched({ id: 's1' }), sched({ id: 's2', org_id: 'org-2' })]);

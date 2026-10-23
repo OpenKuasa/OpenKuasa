@@ -83,6 +83,20 @@ export async function startRefusal(
   return overBudget(client, orgId, agentKey, cfg);
 }
 
+/**
+ * The schedule's next slot: its own `next_run_at` advanced by whole intervals until it is
+ * after `nowMs`. Keeps the time of day (a 07:00 slot claimed at 07:04 stays 07:00) and
+ * skips missed slots without a backlog. Falls back to now + interval on a bad row.
+ */
+export function nextSlotAfter(nextRunAt: string, intervalSeconds: number, nowMs: number): string {
+  const step = intervalSeconds * 1000;
+  const start = Date.parse(nextRunAt);
+  if (!Number.isFinite(start) || !(step > 0)) return new Date(nowMs + Math.max(0, step)).toISOString();
+  if (start > nowMs) return new Date(start).toISOString();
+  const k = Math.floor((nowMs - start) / step) + 1;
+  return new Date(start + k * step).toISOString();
+}
+
 type DueSchedule = {
   id: string;
   org_id: string;
@@ -181,7 +195,7 @@ export async function runSchedules(
         continue;
       }
 
-      const nextIso = new Date(Date.now() + s.interval_seconds * 1000).toISOString();
+      const nextIso = nextSlotAfter(s.next_run_at, s.interval_seconds, Date.now());
       const { data: claimed } = await client
         .from('agent_schedules')
         .update({ next_run_at: nextIso, paused_reason: null, updated_at: nowIso })
