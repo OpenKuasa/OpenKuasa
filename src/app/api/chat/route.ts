@@ -17,22 +17,16 @@
 import { readUIMessageStream, type UIMessage } from 'ai';
 import { errorCodeOf, modelErrorCode } from '@/lib/ai/call-log';
 import { prepareChat } from '@/lib/ai/chat-request';
-import { ensureCrmPipeline, loadRequireLostReason } from '@/lib/ai/crm-tools';
-import { runTuah, type HireAccess, type PeopleAccess } from '@/lib/ai/agents/orchestrator';
-import { peopleWriteFor, receiptFromMessages } from '@/lib/ai/people-tools';
+import { runTuah } from '@/lib/ai/agents/orchestrator';
+import { receiptFromMessages } from '@/lib/ai/people-tools';
+import { buildTuahAccess } from '@/lib/ai/tuah-access';
 import { getCurrentOrg } from '@/lib/auth/current-org';
-import { can } from '@/lib/auth/permissions';
 import { hasSupabaseEnv } from '@/lib/auth/viewer';
 import { chatApprovals, recordedProposals } from '@/lib/chat/approvals';
 import { answersWithTeam, namesIn, proposalsIn, transcriptOf } from '@/lib/chat/delegation';
 import { touchedPeople, withoutPeopleTurns } from '@/lib/chat/hr-privacy';
 import { saveAnswer, saveQuestion } from '@/lib/chat/store';
-import { createCvReader } from '@/lib/hire/cv-read';
-import { getHireData } from '@/lib/hire/supabase';
-import { createSupabasePeopleData } from '@/lib/people/supabase';
-import { getPeopleViewer } from '@/lib/people/viewer';
 import { originFromHeaders } from '@/lib/reach/form-submissions';
-import { getReachData } from '@/lib/reach/supabase';
 
 export const dynamic = 'force-dynamic';
 // Hint for serverless hosts; a no-op on a persistent server.
@@ -46,68 +40,17 @@ export async function POST(request: Request) {
   const { supabase, threadId, lastMessage } = chat;
 
   const org = hasSupabaseEnv() ? await getCurrentOrg(supabase) : null;
-  const data = await getReachData(supabase);
-  // Only a non-viewer member gets change tools (and each still needs approval).
-  // Scheduling the agent commits the workspace to spend, so that one is owner/admin only.
-  const write =
-    org && org.role !== 'viewer'
-      ? {
-          ctx: { client: supabase, orgId: org.orgId },
-          canWrite: true,
-          canManageAgents: can(org.role, 'manage-agents'),
-        }
-      : undefined;
   // Tuah answers with its team unless the chat asked for the single agent.
   // A turn resuming after an approval stays with whichever one started it.
   const withTeam = answersWithTeam(chat.team, lastMessage);
-  const hireData = await getHireData(supabase);
-  // Lekir's change tools need the same write access as Jebat's.
-  const hireBase = {
-    data: hireData,
-    write,
+  const { reach, crm, hire, people, finance } = await buildTuahAccess({
+    supabase,
+    org,
+    userId: chat.userId,
     origin: originFromHeaders((name) => request.headers.get(name)),
-  };
-  // Only Lekir, asked as a specialist, reads a CV: the single agent is given no way to.
-  // The file is read with the member's own client, never the service role, and waits on a
-  // shelf that belongs to this request alone until Lekir's model is shown it.
-  const hire: HireAccess = withTeam
-    ? { ...hireBase, files: createCvReader(hasSupabaseEnv() ? supabase : null, hireData), cvShelf: [] }
-    : hireBase;
-  const crm = org
-    ? {
-        client: supabase,
-        orgId: org.orgId,
-        userId: chat.userId,
-        canWrite: org.role !== 'viewer',
-        // The workspace's lost-reason rule, so Tuah asks for a reason before offering to mark a deal lost.
-        requireLostReason: org.role !== 'viewer' ? await loadRequireLostReason(supabase, org.orgId) : false,
-      }
-    : null;
-
-  // A new workspace gets its starting pipeline here, as on the Deals screen: the lookups themselves never write.
-  if (crm?.canWrite) await ensureCrmPipeline(supabase, crm.orgId);
-
-  // HR is workspace-only, like the CRM: no workspace, no HR this turn (never the
-  // sample data, and never a crash — a failed viewer load just drops HR).
-  // Rows are the caller's own session's, so the database decides who sees what.
-  // `peopleWriteFor` makes the one write-access decision both chat routes share, so a manager
-  // gets their team's decide tools here just as on the screens and in Ask-Lekiu.
-  let people: PeopleAccess | null = null;
-  if (org) {
-    try {
-      const viewer = await getPeopleViewer(supabase, org);
-      const data = createSupabasePeopleData(supabase, org.orgId);
-      const receipt = receiptFromMessages(chat.uiMessages);
-      const write = peopleWriteFor(viewer, { client: supabase, orgId: org.orgId }, receipt, chat.userId);
-      people = { data, viewer, write };
-    } catch (error) {
-      console.error('[tuah] HR unavailable this turn:', errorCodeOf(error));
-      people = null;
-    }
-  }
-
-  // Finance is workspace-only, like the CRM: a non-viewer member gets the change tools (each still approved).
-  const finance = org ? { client: supabase, orgId: org.orgId, canWrite: org.role !== 'viewer' } : null;
+    withCvReader: withTeam,
+    receipt: receiptFromMessages(chat.uiMessages),
+  });
 
   // An approval is answered from the server's record of the change, never from what the browser sent back.
   const approvals = await chatApprovals(chat, org?.orgId ?? null);
@@ -134,7 +77,7 @@ export async function POST(request: Request) {
   // time rather than by the request, and the stream is drained here.
   const result = runTuah(
     chat.messages,
-    { data, write },
+    reach,
     AbortSignal.timeout(ANSWER_TIMEOUT_MS),
     chat.apiKey,
     chat.screen,
