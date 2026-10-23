@@ -21,7 +21,8 @@ vi.mock('@/components/ui/select', () => {
 
 /** Every id has two notes, the newest saying "LATEST <id>". */
 const notesFor = (ids: string[]): NoteCounts => Object.fromEntries(ids.map((id) => [id, { count: 2, latest: `LATEST ${id}` }]));
-const MARKER = '2 notes from the agent';
+/** Any marker's screen-reader text. */
+const NONE = /\d+ agent notes?:/;
 
 const bills = [
   ringgitBill({
@@ -77,14 +78,17 @@ describe('the agent note marker on list rows', () => {
   for (const s of screens) {
     it(`${s.name}: shows the count with the newest note as its tooltip`, () => {
       const html = s.render(notesFor(s.ids));
-      expect(html).toContain(`aria-label="${MARKER}"`);
+      // Read out as text (an aria-label on a plain span is not announced); the visible count stays.
+      expect(html).toMatch(/<span class="sr-only">2 agent notes: LATEST [^<]+<\/span>/);
+      expect(html).toContain('<span aria-hidden="true">2</span>');
+      expect(html).not.toMatch(/<span[^>]*aria-label="[^"]*agent/);
       expect(html).toMatch(/title="LATEST [^"]+"/);
     });
 
     it(`${s.name}: shows nothing without counts (no database, or the read failed)`, () => {
       const html = s.render(undefined);
-      expect(html).not.toContain('from the agent');
-      expect(s.render({})).not.toContain('from the agent');
+      expect(html).not.toMatch(NONE);
+      expect(s.render({})).not.toMatch(NONE);
     });
   }
 
@@ -92,7 +96,7 @@ describe('the agent note marker on list rows', () => {
     const html = renderToStaticMarkup(
       <BillsView rows={bills} view={billsView(bills, [], '2026-10-09')} held={{}} agentNotes={{ b1: { count: 1, latest: 'Due soon' } }} />,
     );
-    expect(html).toContain('aria-label="1 note from the agent"');
+    expect(html).toContain('<span class="sr-only">1 agent note: Due soon</span>');
     expect(html).toContain('title="Due soon"');
   });
 });
@@ -140,13 +144,13 @@ describe('the Quotations screen and the agent notes', () => {
     state.counts = async (ids) => ({ [ids[0]]: { count: 3, latest: 'Expires in 3 days' } });
     const html = renderToStaticMarkup(await QuotationsScreen());
     expect(state.seen).toEqual([{ type: 'finance_quotation', ids: SAMPLE_QUOTATIONS.map((q) => q.id) }]);
-    expect(html).toContain('3 notes from the agent');
+    expect(html).toContain('3 agent notes: Expires in 3 days');
   });
 
   it('still renders, with no marker, when the counts could not be read', async () => {
     state.counts = async () => null;
     const html = renderToStaticMarkup(await QuotationsScreen());
     expect(html).toContain(SAMPLE_QUOTATIONS[0].quotation_no ?? '');
-    expect(html).not.toContain('from the agent');
+    expect(html).not.toMatch(NONE);
   });
 });
