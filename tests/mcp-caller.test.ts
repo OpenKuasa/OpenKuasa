@@ -176,6 +176,34 @@ describe('resolveCaller', () => {
     expect(out).toEqual({ ok: false, status: 403, message: 'Switch back to Rimba Ventures in OpenKuasa, or connect again for your other workspace.' });
   });
 
+  test('no current workspace refuses every credential', async () => {
+    keyResolvesTo(ALICE, ORG_A, 'alice-at-1');
+    db.profiles.set(ALICE, null);
+    expect(await resolveCaller(req(`Bearer ${KEY}`), 'Claude')).toEqual({
+      ok: false,
+      status: 403,
+      message: 'Open OpenKuasa and switch to Rimba Ventures, then try again.',
+    });
+
+    // Bound to A at first use, then the person has no workspace open.
+    db.profiles.set(ALICE, ORG_A);
+    const token = oauthToken(ALICE);
+    expect((await resolveCaller(req(`Bearer ${token}`), 'Claude')).ok).toBe(true);
+    db.profiles.set(ALICE, null);
+    expect(await resolveCaller(req(`Bearer ${token}`), 'Claude')).toEqual({
+      ok: false,
+      status: 403,
+      message: 'Open OpenKuasa and switch to Rimba Ventures, then try again.',
+    });
+
+    // First use with no workspace open: nothing to bind to.
+    expect(await resolveCaller(req(`Bearer ${oauthToken(ALICE, { client_id: 'cursor' })}`), 'Cursor')).toEqual({
+      ok: false,
+      status: 403,
+      message: 'Open a workspace in OpenKuasa first, then connect again.',
+    });
+  });
+
   test('no or bad bearer gives 401', async () => {
     const expected = { ok: false, status: 401, message: 'Sign in to OpenKuasa or use an API key.' };
     expect(await resolveCaller(req(), 'Claude')).toEqual(expected);

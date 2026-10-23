@@ -155,8 +155,12 @@ export async function resolveCaller(request: Request, clientName: string): Promi
     if (memberError || !ROLES.includes(role as OrgRole)) return { ok: false, status: 401, message: REMOVED };
 
     const orgName = await nameOf(supabase, orgId);
-    // No workspace open means nothing was switched; the app falls back to a membership on its own.
-    if (current.orgId && current.orgId !== orgId) {
+    // No workspace open: the database's own idea of the current workspace is empty too, so reads would come back
+    // part working and part silently empty. Refused until the person opens the credential's workspace.
+    if (!current.orgId) {
+      return { ok: false, status: 403, message: `Open OpenKuasa and switch to ${orgName ?? 'your workspace'}, then try again.` };
+    }
+    if (current.orgId !== orgId) {
       const other = await nameOf(supabase, current.orgId);
       return {
         ok: false,
