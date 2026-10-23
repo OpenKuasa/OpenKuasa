@@ -67,7 +67,7 @@ export const ACCOUNT_SECTIONS: AccountNavSection[] = [
     items: [
       { label: 'Connected apps', href: '/account/connected-apps', icon: LayoutGrid },
       { label: 'AI key', href: '/account/ai', icon: Sparkles },
-      { label: 'Developers', href: '/account/developers', icon: Code2, needs: 'manage-developers' },
+      { label: 'Developers', href: '/account/developers', icon: Code2 },
     ],
   },
 ];

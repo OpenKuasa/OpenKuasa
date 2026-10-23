@@ -1,273 +1,145 @@
-'use client';
+import { headers } from 'next/headers';
+import type { SupabaseClient } from '@supabase/supabase-js';
+import { Zap } from 'lucide-react';
+import { BentoCard, BentoGrid } from '@/components/bento/bento';
+import { ApiKeysCard, WorkspaceKeysCard, type KeyListing } from '@/components/account/api-keys-card';
+import { ConnectedAppsCard, type ConnectedApp } from '@/components/account/connected-apps-card';
+import { McpSetupCard } from '@/components/account/mcp-setup-card';
+import { originFromHeaders } from '@/lib/account/invites';
+import { getMfaStatus } from '@/lib/auth/mfa';
+import { can } from '@/lib/auth/permissions';
+import { getViewer, hasSupabaseEnv, type Viewer } from '@/lib/auth/viewer';
+import { logFailure } from '@/lib/mcp/shared';
+import { createClient } from '@/lib/supabase/server';
 
-import { ExternalLink, Plus } from 'lucide-react';
-import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table';
-import {
-  Tabs,
-  TabsContent,
-  TabsList,
-  TabsTrigger,
-} from '@/components/ui/tabs';
-import { cn } from '@/lib/utils';
+type KeyRow = { id: string; user_id: string; name: string; created_at: string; last_used_at: string | null };
+type ProfileRow = { user_id: string; full_name: string | null; email: string | null };
+type BindingRow = { client_id: string; org_id: string };
 
-type KeyStatus = 'Active' | 'Revoked';
-type HookStatus = 'Active' | 'Disabled';
+const log = (operation: string, error: unknown) => logFailure('developers', operation, error);
 
-type ApiKey = {
-  name: string;
-  token: string;
-  created: string;
-  lastUsed: string;
-  status: KeyStatus;
-};
+/** The workspace's live keys the person may see (their own; every one for owners and admins: RLS decides). */
+async function loadKeys(supabase: SupabaseClient, viewer: Viewer): Promise<KeyListing[] | null> {
+  const { data, error } = await supabase
+    .from('mcp_api_keys_public')
+    .select('id, user_id, name, created_at, last_used_at')
+    .eq('org_id', viewer.orgId)
+    .is('revoked_at', null)
+    .order('created_at', { ascending: false });
+  if (error) {
+    log('read keys', error);
+    return null;
+  }
+  const rows = (data ?? []) as KeyRow[];
+  const others = [...new Set(rows.map((r) => r.user_id).filter((id) => id !== viewer.userId))];
+  const names = new Map<string, string>();
+  if (others.length > 0) {
+    // RLS shows a person's profile only to the people they share a workspace with.
+    const { data: profiles } = await supabase.from('profiles').select('user_id, full_name, email').in('user_id', others);
+    for (const p of (profiles ?? []) as ProfileRow[]) {
+      const name = p.full_name?.trim() || p.email?.split('@')[0];
+      if (name) names.set(p.user_id, name);
+    }
+  }
+  return rows.map((r) => ({
+    id: r.id,
+    name: r.name,
+    owner: r.user_id === viewer.userId ? viewer.name : (names.get(r.user_id) ?? 'A former member'),
+    isYours: r.user_id === viewer.userId,
+    createdAt: r.created_at,
+    lastUsedAt: r.last_used_at,
+  }));
+}
 
-type Webhook = {
-  url: string;
-  events: string;
-  status: HookStatus;
-  lastDelivery: string;
-};
+/** The person's sign-in connections and the workspace each acts in. Null when the auth server could not say. */
+async function loadApps(supabase: SupabaseClient, viewer: Viewer): Promise<ConnectedApp[] | null> {
+  let grants;
+  try {
+    const { data, error } = await supabase.auth.oauth.listGrants();
+    if (error || !data) {
+      log('list grants', error);
+      return null;
+    }
+    grants = data;
+  } catch (error) {
+    log('list grants', error);
+    return null;
+  }
+  if (grants.length === 0) return [];
 
-const API_KEYS: ApiKey[] = [
-  {
-    name: 'Production',
-    token: 'sk_live_••••••••3f9a',
-    created: '12 Jan 2026',
-    lastUsed: '2m ago',
-    status: 'Active',
-  },
-  {
-    name: 'Zapier sync',
-    token: 'sk_live_••••••••a71c',
-    created: '03 Mar 2026',
-    lastUsed: '1h ago',
-    status: 'Active',
-  },
-  {
-    name: 'Mobile app',
-    token: 'sk_live_••••••••9d20',
-    created: '28 Jun 2026',
-    lastUsed: 'Yesterday',
-    status: 'Active',
-  },
-  {
-    name: 'Legacy (read-only)',
-    token: 'sk_test_••••••••4e88',
-    created: '17 Aug 2025',
-    lastUsed: '—',
-    status: 'Revoked',
-  },
-];
+  const { data: bindings } = await supabase
+    .from('mcp_oauth_bindings')
+    .select('client_id, org_id')
+    .eq('user_id', viewer.userId);
+  const boundTo = new Map(((bindings ?? []) as BindingRow[]).map((b) => [b.client_id, b.org_id]));
+  const orgIds = [...new Set(boundTo.values())];
+  const orgNames = new Map<string, string>();
+  if (orgIds.length > 0) {
+    const { data: orgs } = await supabase.from('orgs').select('id, name').in('id', orgIds);
+    for (const o of (orgs ?? []) as { id: string; name: string }[]) orgNames.set(o.id, o.name);
+  }
 
-const WEBHOOKS: Webhook[] = [
-  {
-    url: 'https://rimba.example.com/hooks/orders',
-    events: 'invoice.paid, payment.failed',
-    status: 'Active',
-    lastDelivery: '2m ago',
-  },
-  {
-    url: 'https://rimba.example.com/hooks/leads',
-    events: 'lead.created, deal.won',
-    status: 'Active',
-    lastDelivery: '15m ago',
-  },
-  {
-    url: 'https://ops.rimba.example.com/webhook',
-    events: 'invoice.overdue, member.invited',
-    status: 'Disabled',
-    lastDelivery: '—',
-  },
-];
+  return grants.map((grant) => {
+    const orgId = boundTo.get(grant.client.id);
+    return {
+      clientId: grant.client.id,
+      name: grant.client.name?.trim() || 'An AI tool',
+      grantedAt: grant.granted_at,
+      workspace: orgId ? (orgNames.get(orgId) ?? 'a workspace you left') : null,
+    };
+  });
+}
 
-const EVENT_TYPES = [
-  'lead.created',
-  'deal.won',
-  'invoice.paid',
-  'invoice.overdue',
-  'payment.failed',
-  'member.invited',
-];
+/**
+ * Account → Developers, open to every member: their own API keys, the workspace's keys for owners and admins,
+ * the AI tools they connected by sign-in, and how to set each tool up. The demo shows the page read-only.
+ */
+export default async function DevelopersPage() {
+  const viewer = await getViewer();
+  const live = hasSupabaseEnv() && !viewer.isDemo;
+  const serverUrl = `${originFromHeaders(await headers()).replace(/\/+$/, '')}/api/mcp`;
+  const seesWorkspace = live && can(viewer.role, 'manage-developers');
 
-const KEY_STATUS_STYLES: Record<KeyStatus, string> = {
-  Active: 'bg-emerald-500/15 text-emerald-600',
-  Revoked: 'bg-muted text-muted-foreground',
-};
+  let keys: KeyListing[] | null = [];
+  let apps: ConnectedApp[] | null = [];
+  let needsCode = false;
+  if (live) {
+    const supabase = await createClient();
+    [keys, apps, needsCode] = await Promise.all([
+      loadKeys(supabase, viewer),
+      loadApps(supabase, viewer),
+      // A person with an authenticator gives its code when making a key; `getViewer` already made this session aal2.
+      getMfaStatus(supabase).then((status) => status.factors.length > 0),
+    ]);
+  }
 
-const HOOK_STATUS_STYLES: Record<HookStatus, string> = {
-  Active: 'bg-emerald-500/15 text-emerald-600',
-  Disabled: 'bg-muted text-muted-foreground',
-};
-
-export default function DevelopersPage() {
   return (
     <div className="mx-auto w-full max-w-5xl px-6 py-8">
-      <div className="mb-6 flex items-start justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight">Developers</h1>
-          <p className="text-sm text-muted-foreground">
-            API keys and webhooks for your integrations.
-          </p>
-        </div>
-        <Button variant="ghost" size="sm">
-          <ExternalLink className="size-4" />
-          API docs
-        </Button>
+      <div className="mb-6">
+        <h1 className="text-2xl font-bold tracking-tight">Developers</h1>
+        <p className="text-sm text-muted-foreground">
+          Connect AI tools such as Claude, Cursor and Codex to {viewer.orgName}.
+        </p>
       </div>
 
-      <Tabs defaultValue="keys">
-        <TabsList>
-          <TabsTrigger value="keys">API keys</TabsTrigger>
-          <TabsTrigger value="webhooks">Webhooks</TabsTrigger>
-        </TabsList>
-
-        <TabsContent value="keys" className="mt-2 space-y-4">
-          <div className="flex items-start justify-between gap-4">
-            <p className="text-sm text-muted-foreground">
-              Keep your secret keys safe — treat them like passwords. Never
-              commit them to source control or expose them in client-side code.
-            </p>
-            <Button size="sm">
-              <Plus className="size-4" />
-              Create key
-            </Button>
-          </div>
-
-          <div className="overflow-hidden rounded-xl border bg-card shadow-sm">
-            <div className="overflow-x-auto">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Name</TableHead>
-                    <TableHead>Key</TableHead>
-                    <TableHead>Created</TableHead>
-                    <TableHead>Last used</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead className="text-right">Actions</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {API_KEYS.map((k) => (
-                    <TableRow key={k.name}>
-                      <TableCell className="font-medium">{k.name}</TableCell>
-                      <TableCell className="font-mono text-xs text-muted-foreground">
-                        {k.token}
-                      </TableCell>
-                      <TableCell className="whitespace-nowrap text-muted-foreground">
-                        {k.created}
-                      </TableCell>
-                      <TableCell className="whitespace-nowrap text-muted-foreground">
-                        {k.lastUsed}
-                      </TableCell>
-                      <TableCell>
-                        <span
-                          className={cn(
-                            'inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium',
-                            KEY_STATUS_STYLES[k.status],
-                          )}
-                        >
-                          {k.status}
-                        </span>
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          disabled={k.status === 'Revoked'}
-                        >
-                          Revoke
-                        </Button>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </div>
-          </div>
-        </TabsContent>
-
-        <TabsContent value="webhooks" className="mt-2 space-y-4">
-          <div className="flex items-start justify-between gap-4">
-            <p className="text-sm text-muted-foreground">
-              Endpoints receive an HTTP POST callback whenever a subscribed
-              event fires in your workspace.
-            </p>
-            <Button size="sm">
-              <Plus className="size-4" />
-              Add endpoint
-            </Button>
-          </div>
-
-          <div className="overflow-hidden rounded-xl border bg-card shadow-sm">
-            <div className="overflow-x-auto">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>URL</TableHead>
-                    <TableHead>Events</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead>Last delivery</TableHead>
-                    <TableHead className="text-right">Actions</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {WEBHOOKS.map((w) => (
-                    <TableRow key={w.url}>
-                      <TableCell className="font-mono text-xs">
-                        {w.url}
-                      </TableCell>
-                      <TableCell className="font-mono text-xs text-muted-foreground">
-                        {w.events}
-                      </TableCell>
-                      <TableCell>
-                        <span
-                          className={cn(
-                            'inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium',
-                            HOOK_STATUS_STYLES[w.status],
-                          )}
-                        >
-                          {w.status}
-                        </span>
-                      </TableCell>
-                      <TableCell className="whitespace-nowrap text-muted-foreground">
-                        {w.lastDelivery}
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <Button variant="ghost" size="sm">
-                          Edit
-                        </Button>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </div>
-          </div>
-
-          <Card>
-            <CardHeader>
-              <CardTitle>Available events</CardTitle>
-            </CardHeader>
-            <CardContent className="flex flex-wrap gap-2">
-              {EVENT_TYPES.map((e) => (
-                <Badge key={e} variant="secondary" className="font-mono">
-                  {e}
-                </Badge>
-              ))}
-            </CardContent>
-          </Card>
-        </TabsContent>
-      </Tabs>
+      <BentoGrid>
+        <ApiKeysCard
+          keys={keys === null ? null : keys.filter((key) => key.isYours)}
+          needsCode={needsCode}
+          readOnly={!live}
+        />
+        {seesWorkspace ? <WorkspaceKeysCard keys={keys} /> : null}
+        <ConnectedAppsCard apps={apps} readOnly={!live} />
+        <McpSetupCard serverUrl={serverUrl} />
+        <BentoCard
+          title="Webhooks"
+          subtitle="Send workspace events to your own systems"
+          icon={Zap}
+          className="col-span-2 md:col-span-12"
+        >
+          <p className="text-sm text-muted-foreground">Coming soon.</p>
+        </BentoCard>
+      </BentoGrid>
     </div>
   );
 }

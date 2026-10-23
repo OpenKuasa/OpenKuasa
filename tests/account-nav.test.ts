@@ -27,9 +27,10 @@ describe('account screens in jump-to search', () => {
     expect(searchHrefs('owner')).toEqual(all);
   });
 
-  it('offers a member no billing screen and not Developers', () => {
+  it('offers a member no billing screen, and Developers for their own API keys', () => {
     const hrefs = searchHrefs('member');
-    for (const href of [...BILLING, '/account/developers']) expect(hrefs, href).not.toContain(href);
+    for (const href of BILLING) expect(hrefs, href).not.toContain(href);
+    expect(hrefs).toContain('/account/developers');
     expect(hrefs).toContain('/account/activity');
     expect(hrefs).toContain('/account/connected-apps');
   });

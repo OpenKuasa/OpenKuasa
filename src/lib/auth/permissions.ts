@@ -36,7 +36,9 @@ export const PERMISSIONS: {
   // Kept in step with public.crm_begin_broadcast_send in the database, which is what enforces it.
   { capability: 'send-broadcasts', label: 'Send broadcasts by email', allow: ['owner', 'admin'] },
   { capability: 'manage-agents', label: 'Manage AI agents & their spend', allow: ['owner', 'admin'] },
-  { capability: 'manage-developers', label: 'Manage API keys & webhooks', allow: ['owner'] },
+  // Kept in step with private.is_org_admin in the mcp_api_keys policies, which is what enforces it. Every member
+  // makes and revokes their own keys.
+  { capability: 'manage-developers', label: "See & revoke everyone's API keys", allow: ['owner', 'admin'] },
   { capability: 'delete-workspace', label: 'Delete workspace', allow: ['owner'] },
 ];
 

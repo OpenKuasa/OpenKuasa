@@ -8,9 +8,10 @@ test('billing and company edits are owner/admin only', () => {
   expect(can('viewer', 'manage-company')).toBe(false);
 });
 
-test('developer settings and workspace deletion are owner only', () => {
+test('every key in the workspace is for owners and admins; deleting the workspace is owner only', () => {
   expect(can('owner', 'manage-developers')).toBe(true);
-  expect(can('admin', 'manage-developers')).toBe(false);
+  expect(can('admin', 'manage-developers')).toBe(true);
+  expect(can('member', 'manage-developers')).toBe(false);
   expect(can('admin', 'delete-workspace')).toBe(false);
 });
 
