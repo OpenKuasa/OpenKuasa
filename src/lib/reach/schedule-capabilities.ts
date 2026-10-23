@@ -55,12 +55,14 @@ export const reachSetWorkspaceCapsInput = setWorkspaceCapsInput.extend({
 const COLS =
   'id,org_id,agent_key,created_by,nl_text,interval_seconds,next_run_at,last_run_at,end_at,max_runs,runs_used,max_total_cents,spent_cents,status,paused_reason,created_at,updated_at';
 
-export async function listSchedules(client: SupabaseClient, orgId: string): Promise<AgentSchedule[]> {
-  const { data } = await client
-    .from('agent_schedules')
-    .select(COLS)
-    .eq('org_id', orgId)
-    .order('created_at', { ascending: false });
+export async function listSchedules(
+  client: SupabaseClient,
+  orgId: string,
+  agentKey?: string,
+): Promise<AgentSchedule[]> {
+  let query = client.from('agent_schedules').select(COLS).eq('org_id', orgId);
+  if (agentKey) query = query.eq('agent_key', agentKey);
+  const { data } = await query.order('created_at', { ascending: false });
   return (data ?? []) as unknown as AgentSchedule[];
 }
 
@@ -96,14 +98,16 @@ async function patch(
   ctx: ReachWriteContext,
   id: string,
   fields: Record<string, unknown>,
+  agentKey?: string,
 ): Promise<CapResult<AgentSchedule>> {
-  const { data, error } = await ctx.client
+  let query = ctx.client
     .from('agent_schedules')
     .update({ ...fields, updated_at: new Date().toISOString() })
     .eq('id', id)
-    .eq('org_id', ctx.orgId)
-    .select(COLS)
-    .maybeSingle();
+    .eq('org_id', ctx.orgId);
+  // Reach passes Jebat's key so an id-only call can never touch another agent's schedule.
+  if (agentKey) query = query.eq('agent_key', agentKey);
+  const { data, error } = await query.select(COLS).maybeSingle();
   if (error || !data) {
     console.error('[schedules] update failed:', error?.code);
     return FAILED;
@@ -114,31 +118,35 @@ async function patch(
 export async function updateSchedule(
   ctx: ReachWriteContext,
   input: z.infer<typeof updateScheduleInput>,
+  agentKey?: string,
 ): Promise<CapResult<AgentSchedule>> {
   const { id, ...rest } = updateScheduleInput.parse(input);
-  return patch(ctx, id, rest);
+  return patch(ctx, id, rest, agentKey);
 }
 
 export async function pauseSchedule(
   ctx: ReachWriteContext,
   input: z.infer<typeof pauseScheduleInput>,
+  agentKey?: string,
 ): Promise<CapResult<AgentSchedule>> {
-  return patch(ctx, pauseScheduleInput.parse(input).id, { status: 'paused' });
+  return patch(ctx, pauseScheduleInput.parse(input).id, { status: 'paused' }, agentKey);
 }
 
 export async function resumeSchedule(
   ctx: ReachWriteContext,
   input: z.infer<typeof resumeScheduleInput>,
+  agentKey?: string,
 ): Promise<CapResult<AgentSchedule>> {
   // paused_reason is not in the authenticated UPDATE grant; the runner clears it.
-  return patch(ctx, resumeScheduleInput.parse(input).id, { status: 'active' });
+  return patch(ctx, resumeScheduleInput.parse(input).id, { status: 'active' }, agentKey);
 }
 
 export async function cancelSchedule(
   ctx: ReachWriteContext,
   input: z.infer<typeof cancelScheduleInput>,
+  agentKey?: string,
 ): Promise<CapResult<AgentSchedule>> {
-  return patch(ctx, cancelScheduleInput.parse(input).id, { status: 'completed' });
+  return patch(ctx, cancelScheduleInput.parse(input).id, { status: 'completed' }, agentKey);
 }
 
 export async function setWorkspaceCaps(

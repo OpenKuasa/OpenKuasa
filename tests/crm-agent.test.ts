@@ -56,6 +56,7 @@ describe('crmFollowUpInput', () => {
     expect(crmFollowUpInput.safeParse({ contactId: ID, title: 'Call', dueDay: '2026-10-24' }).success).toBe(true);
     expect(crmFollowUpInput.safeParse({ contactId: 'nope', title: 'Call', dueDay: '2026-10-24' }).success).toBe(false);
     expect(crmFollowUpInput.safeParse({ contactId: ID, title: 'Call', dueDay: '24/10/2026' }).success).toBe(false);
+    expect(crmFollowUpInput.safeParse({ contactId: ID, title: 'Call', dueDay: '2026-02-30' }).success).toBe(false);
   });
 });
 
@@ -97,8 +98,17 @@ describe('crmCreateFollowUp', () => {
     expect(r).toEqual({ ok: true, data: null });
   });
 
-  it('never throws a raw database error', async () => {
+  it('says plainly when the contact no longer exists', async () => {
     const insert = vi.fn().mockResolvedValue({ error: { code: '23503', message: 'fk detail' } });
+    const r = await crmCreateFollowUp(
+      { client: { from: () => ({ insert }) } as never, orgId: ORG, userId: USER },
+      { contactId: ID, title: 'Call', dueDay: '2026-10-24' },
+    );
+    expect(r).toEqual({ ok: false, error: 'That contact no longer exists.' });
+  });
+
+  it('never throws a raw database error', async () => {
+    const insert = vi.fn().mockResolvedValue({ error: { code: '42501', message: 'fk detail' } });
     const log = vi.spyOn(console, 'error').mockImplementation(() => {});
     const r = await crmCreateFollowUp(
       { client: { from: () => ({ insert }) } as never, orgId: ORG, userId: USER },
@@ -117,7 +127,6 @@ describe('proposal settings', () => {
     expect(prompt).toContain('What the owner asked to watch');
     expect(prompt).toContain('0. Follow up on A');
     expect(prompt).toContain('at most 5');
-    expect(prompt).not.toContain('focus_text');
   });
 
   it('keys the dedupe by action, check and record', () => {

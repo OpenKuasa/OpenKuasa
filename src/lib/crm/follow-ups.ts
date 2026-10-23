@@ -43,7 +43,7 @@ function readString(formData: FormData, key: string) {
 }
 
 /** `YYYY-MM-DD` -> ISO string at midnight UTC; rejects dates that do not exist. */
-function parseDueDate(value: string) {
+export function parseDueDate(value: string) {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
   if (!match) throw new CrmContactFormError('Enter a valid due date.');
 

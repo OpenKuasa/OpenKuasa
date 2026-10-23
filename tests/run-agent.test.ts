@@ -124,6 +124,20 @@ describe('runAgent drives any definition', () => {
     expect(runs[0]).not.toHaveProperty('digest_md');
   });
 
+  it('stores "run failed" (not "digest failed") when a definition without a digest throws', async () => {
+    const { service, runs } = fakeService();
+    const noDigest: AgentDefinition = {
+      ...qa,
+      digest: undefined,
+      buildContext: async () => {
+        throw new Error('boom');
+      },
+    };
+    const res = await runAgent(service, ORG, 'manual', noDigest);
+    expect(res.status).toBe('failed');
+    expect(runs[0].error).toBe('run failed');
+  });
+
   it('fails with "no AI key" before any paid call when the workspace has no key', async () => {
     const { service, runs } = fakeService(null);
     const res = await runAgent(service, ORG, 'manual', qa);

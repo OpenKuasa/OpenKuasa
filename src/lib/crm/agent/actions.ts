@@ -1,17 +1,26 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { z } from 'zod';
-import { createFollowUp, type CrmFollowUpInsert } from '@/lib/crm/follow-ups';
+import { CrmContactFormError } from '@/lib/crm/contacts';
+import { createFollowUp, parseDueDate, type CrmFollowUpInsert } from '@/lib/crm/follow-ups';
 import type { CapResult } from '@/lib/reach/capabilities';
 
 /** The owner-session context the apply path runs Kasturi's agent actions under. */
 export type CrmAgentWriteContext = { client: SupabaseClient; orgId: string; userId: string };
 
-const DAY = /^\d{4}-\d{2}-\d{2}$/;
+/** True for a `YYYY-MM-DD` that exists (rejects 2026-02-30), using the follow-up form's own parser. */
+function isRealDay(value: string): boolean {
+  try {
+    parseDueDate(value);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 export const crmFollowUpInput = z.object({
   contactId: z.string().uuid(),
   title: z.string().trim().min(1).max(200),
-  dueDay: z.string().regex(DAY).refine((v) => !Number.isNaN(Date.parse(`${v}T00:00:00Z`)), 'Invalid day'),
+  dueDay: z.string().refine(isRealDay, 'Invalid day'),
 });
 
 export const crmAgentNoteInput = z
@@ -41,8 +50,8 @@ export async function crmCreateFollowUp(
     await createFollowUp(ctx.client, payload);
     return { ok: true, data: null };
   } catch (error) {
-    const code = (error as { code?: string } | null)?.code;
-    console.error('[crm-agent] follow-up failed:', code);
+    if (error instanceof CrmContactFormError) return { ok: false, error: error.message };
+    console.error('[crm-agent] follow-up failed:', (error as { code?: string } | null)?.code ?? 'unknown');
     return { ok: false, error: 'That follow-up could not be added.' };
   }
 }

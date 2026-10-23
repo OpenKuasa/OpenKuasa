@@ -354,16 +354,16 @@ export async function createScheduleAction(input: unknown) {
   return runSchedule(reachCreateScheduleInput, input, createSchedule);
 }
 export async function updateScheduleAction(input: unknown) {
-  return runSchedule(updateScheduleInput, input, updateSchedule);
+  return runSchedule(updateScheduleInput, input, (ctx, p) => updateSchedule(ctx, p, WEEKLY_STUDIO));
 }
 export async function pauseScheduleAction(input: unknown) {
-  return runSchedule(pauseScheduleInput, input, pauseSchedule);
+  return runSchedule(pauseScheduleInput, input, (ctx, p) => pauseSchedule(ctx, p, WEEKLY_STUDIO));
 }
 export async function resumeScheduleAction(input: unknown) {
-  return runSchedule(resumeScheduleInput, input, resumeSchedule);
+  return runSchedule(resumeScheduleInput, input, (ctx, p) => resumeSchedule(ctx, p, WEEKLY_STUDIO));
 }
 export async function cancelScheduleAction(input: unknown) {
-  return runSchedule(cancelScheduleInput, input, cancelSchedule);
+  return runSchedule(cancelScheduleInput, input, (ctx, p) => cancelSchedule(ctx, p, WEEKLY_STUDIO));
 }
 export async function setWorkspaceCapsAction(input: unknown) {
   return runSchedule(reachSetWorkspaceCapsInput, input, setWorkspaceCaps);

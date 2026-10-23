@@ -1,3 +1,4 @@
+import { CRM_FOCUS } from '@/lib/agents/types';
 import { entry, type AgentDefinition } from '@/lib/agents/definition';
 import {
   crmAgentNoteInput,
@@ -14,7 +15,7 @@ import { scanCrm } from '@/lib/crm/agent/scan';
  * research, no media: the model only selects from the scan's numbered candidates.
  */
 export const crmAgent: AgentDefinition = {
-  agentKey: 'crm-focus',
+  agentKey: CRM_FOCUS,
   product: 'crm',
   buildContext: (service, orgId) => buildCrmAgentContext(service, orgId),
   scan: (raw, now) => scanCrm(raw as CrmAgentRaw, now),

@@ -295,3 +295,17 @@ describe('syncCadenceSchedule', () => {
     expect(r.ok).toBe(false);
   });
 });
+
+describe('agent scoping', () => {
+  it('lists only the requested agent\'s schedules', async () => {
+    const { client, calls } = fakeClient([ok([])]);
+    await listSchedules(client, ORG, 'weekly-studio');
+    expect(calls[0].eq).toContainEqual(['agent_key', 'weekly-studio']);
+  });
+  it('a reach pause scopes the update by agent_key, so a crm-focus id updates nothing', async () => {
+    const { client, calls } = fakeClient([ok(null)]);
+    const r = await pauseSchedule({ client, orgId: ORG }, { id: ID }, 'weekly-studio');
+    expect(calls[0].eq).toContainEqual(['agent_key', 'weekly-studio']);
+    expect(r.ok).toBe(false);
+  });
+});

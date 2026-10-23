@@ -1,4 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { CRM_FOCUS } from '@/lib/agents/types';
 import { readBack, validatePlan, type FocusPlan } from '@/lib/agents/focus/plan';
 import { CRM_FOCUS_MENU } from '@/lib/crm/agent/checks';
 import { klDay } from '@/lib/crm/deal-stats';
@@ -32,7 +33,6 @@ const RECORD_LIMIT = 500;
 const ID_CHUNK = 100;
 /** PostgREST returns at most this many rows per request. */
 const PAGE = 1000;
-const CRM_AGENT_KEY = 'crm-focus';
 
 type Rows = { data: unknown[] | null; error: unknown };
 
@@ -129,7 +129,7 @@ export async function buildCrmAgentContext(
     .from('agent_configs')
     .select('focus_plan,focus_confirmed_at')
     .eq('org_id', orgId)
-    .eq('agent_key', CRM_AGENT_KEY)
+    .eq('agent_key', CRM_FOCUS)
     .maybeSingle();
   if (config.error) throw config.error;
   const row = config.data as { focus_plan: unknown; focus_confirmed_at: string | null } | null;

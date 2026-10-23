@@ -71,7 +71,7 @@ export default async function AgentsScreen() {
       });
     const [configs, scheduleRows, proposalRows, decidedRows, daySpent, weekSpent, runsRes] = await Promise.all([
       listAgentConfigs(supabase, viewer.orgId),
-      listSchedules(supabase, viewer.orgId),
+      listSchedules(supabase, viewer.orgId, WEEKLY_STUDIO),
       listPendingProposals(supabase, viewer.orgId, 'reach'),
       listRecentlyDecided(supabase, viewer.orgId, 5, 'reach'),
       spentSince(24 * 3600_000),
@@ -80,6 +80,7 @@ export default async function AgentsScreen() {
         .from('agent_runs')
         .select('*')
         .eq('org_id', viewer.orgId)
+        .eq('agent_key', WEEKLY_STUDIO)
         .order('started_at', { ascending: false })
         .limit(10),
     ]);
