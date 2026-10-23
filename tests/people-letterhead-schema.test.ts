@@ -114,14 +114,15 @@ describe('the workspace logo', () => {
       const grants = flat(statements(file)).match(/grant [^;]*update[^;]*on public\.orgs to[^;]*;/g) ?? [];
       for (const grant of grants) expect(grant, file).not.toContain('logo_path');
     }
-    // The column list signed-in users may update is the one main states, to the letter.
-    const newest = files
+    // The column list signed-in users may update is the one main states, to the letter: the company details,
+    // then the TIN alone (20261125130000, Accounting Settings), and nothing else since.
+    const orgGrants = files
       .map((file) => flat(statements(file)).match(/grant update \(([^)]*)\) on public\.orgs to authenticated;/g) ?? [])
-      .flat()
-      .at(-1);
-    expect(newest).toBe(
+      .flat();
+    expect(orgGrants.slice(-2)).toEqual([
       'grant update (name, registration_no, sst_no, website, industry, company_size, address, city, state, postcode) on public.orgs to authenticated;',
-    );
+      'grant update (tin) on public.orgs to authenticated;',
+    ]);
   });
 
   test('a public bucket of 1 MB for three image types, stated again on a second run', () => {
