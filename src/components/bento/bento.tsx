@@ -102,7 +102,7 @@ export function BentoCard({
               {subtitle ? (
                 <p
                   className={cn(
-                    'truncate text-xs',
+                    'text-pretty break-words text-xs',
                     onPrimary ? 'text-primary-foreground/70' : 'text-muted-foreground',
                   )}
                 >
