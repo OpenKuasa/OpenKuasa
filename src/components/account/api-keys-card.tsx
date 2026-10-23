@@ -34,6 +34,15 @@ function created(iso: string): string {
   return Number.isNaN(date.getTime()) ? '' : `Made ${DATE.format(date)}`;
 }
 
+/**
+ * Whether the green new-key box still shows. The box lives in the create form's action state, which a revalidation
+ * does not reset, so it is tied to the live key list instead: once that key is revoked it is gone from the list and
+ * so is the box. When the list could not be read there is nothing to compare, so the box stays.
+ */
+export function shouldShowNewKey(newKeyId: string, keys: KeyListing[] | null): boolean {
+  return keys === null || keys.some((key) => key.id === newKeyId);
+}
+
 /** The new key, right after it is made: once, with a copy button. */
 export function NewKeyNotice({ keyValue, name }: { keyValue: string; name: string }) {
   return (
@@ -57,7 +66,7 @@ export function NewKeyNotice({ keyValue, name }: { keyValue: string; name: strin
   );
 }
 
-function CreateKeyForm({ needsCode }: { needsCode: boolean }) {
+function CreateKeyForm({ needsCode, keys }: { needsCode: boolean; keys: KeyListing[] | null }) {
   // A native form action clears the fields after each submit, which is what a code field wants.
   const [state, formAction, pending] = useActionState(createKeyAction, undefined);
 
@@ -92,7 +101,7 @@ function CreateKeyForm({ needsCode }: { needsCode: boolean }) {
           {state.error}
         </p>
       ) : null}
-      {state && 'key' in state ? <NewKeyNotice keyValue={state.key} name={state.name} /> : null}
+      {state && 'key' in state && shouldShowNewKey(state.id, keys) ? <NewKeyNotice keyValue={state.key} name={state.name} /> : null}
     </div>
   );
 }
@@ -181,7 +190,7 @@ export function ApiKeysCard({
         {readOnly ? (
           <ReadOnlyNotice>The demo workspace is read-only. Sign up to make API keys.</ReadOnlyNotice>
         ) : (
-          <CreateKeyForm needsCode={needsCode} />
+          <CreateKeyForm needsCode={needsCode} keys={keys} />
         )}
         <KeyRows keys={keys} showOwner={false} canRevoke={!readOnly} />
       </div>

@@ -51,7 +51,7 @@ vi.mock('next/navigation', () => ({
 
 import DevelopersPage from '@/app/account/developers/page';
 import { createKeyAction, disconnectAppAction, revokeKeyAction } from '@/app/account/developers/actions';
-import { NewKeyNotice } from '@/components/account/api-keys-card';
+import { NewKeyNotice, shouldShowNewKey } from '@/components/account/api-keys-card';
 
 type Row = Record<string, unknown>;
 
@@ -368,7 +368,7 @@ describe('making a key', () => {
     mocks.createApiKey.mockResolvedValue({ ok: true, key: NEW_KEY, id: KEY_ALICE });
     // A workspace or person in the form is ignored: both come from the verified session.
     const state = await createKeyAction(undefined, form({ name: ' Laptop ', totp: '', org_id: ORG_B, user_id: BOB }));
-    expect(state).toEqual({ key: NEW_KEY, name: 'Laptop' });
+    expect(state).toEqual({ key: NEW_KEY, name: 'Laptop', id: KEY_ALICE });
     expect(mocks.createApiKey).toHaveBeenCalledWith(expect.anything(), { orgId: ORG_A, userId: ALICE, name: 'Laptop', totp: undefined });
     expect(mocks.revalidatePath).toHaveBeenCalledWith('/account/developers');
 
@@ -468,5 +468,19 @@ describe('disconnecting an app', () => {
     const state = await disconnectAppAction(undefined, form({ client_id: '' }));
     expect(state?.error).toBeTruthy();
     expect(calls).toEqual([]);
+  });
+});
+
+describe('the new-key box after a revoke', () => {
+  const listing = (id: string) => ({ id, name: 'Laptop', owner: 'Alice', isYours: true, createdAt: '2026-10-01T00:00:00Z', lastUsedAt: null });
+
+  test('shows while the new key is still listed, goes once it is revoked', () => {
+    expect(shouldShowNewKey(KEY_ALICE, [listing(KEY_ALICE)])).toBe(true);
+    expect(shouldShowNewKey(KEY_ALICE, [])).toBe(false);
+    expect(shouldShowNewKey(KEY_ALICE, [listing(KEY_BOB)])).toBe(false);
+  });
+
+  test('stays when the list could not be read', () => {
+    expect(shouldShowNewKey(KEY_ALICE, null)).toBe(true);
   });
 });

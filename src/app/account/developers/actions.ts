@@ -8,7 +8,7 @@ import { logFailure } from '@/lib/mcp/shared';
 import { createClient } from '@/lib/supabase/server';
 import type { SettingsState } from '@/app/account/actions';
 
-export type CreateKeyState = { key: string; name: string } | { error: string } | undefined;
+export type CreateKeyState = { key: string; name: string; id: string } | { error: string } | undefined;
 
 const PATH = '/account/developers';
 const DEMO_ERROR = 'The demo workspace is read-only. Sign up to make keys and connect AI tools.';
@@ -35,7 +35,7 @@ export async function createKeyAction(_prev: CreateKeyState, formData: FormData)
   if (!result.ok) return { error: result.error };
 
   revalidatePath(PATH);
-  return { key: result.key, name };
+  return { key: result.key, name, id: result.id };
 }
 
 /** Revokes a key with the person's own session: theirs, or any in a workspace they own or administer (RLS). */
