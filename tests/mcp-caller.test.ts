@@ -20,6 +20,10 @@ const db = {
 const memberKey = (org: string, user: string) => `${org}:${user}`;
 /** Tables whose reads fail, with an error that carries a token in its message. */
 const failing = new Set<string>();
+/** What a binding insert answers instead of writing, when set (`before` runs first, e.g. a racing writer). */
+const bindingInsert: { error: { code: string; message: string } | null; before?: () => void } = { error: null };
+/** Binding inserts asked for, as the viewer. */
+const inserts: Record<string, unknown>[] = [];
 
 /** Access tokens the auth server accepts: token → user id. */
 const tokens = new Map<string, string>();
@@ -104,6 +108,22 @@ vi.mock('@supabase/supabase-js', () => ({
             return { data: hit[0] ?? null, error: null };
           },
         };
+        Object.assign(builder, {
+          insert: async (row: Record<string, unknown>) => {
+            if (name !== 'mcp_oauth_bindings') throw new Error(`unexpected insert into ${name}`);
+            inserts.push(row);
+            bindingInsert.before?.();
+            if (bindingInsert.error) return { error: bindingInsert.error };
+            // RLS: only your own row, in a workspace you belong to; one row per person and client.
+            const user = String(row.user_id);
+            const org = String(row.org_id);
+            if (user !== viewer || !db.members.has(memberKey(org, user))) return { error: { code: '42501', message: 'rls' } };
+            const k = `${user}:${String(row.client_id)}`;
+            if (db.bindings.has(k)) return { error: { code: '23505', message: 'duplicate' } };
+            db.bindings.set(k, org);
+            return { error: null };
+          },
+        });
         return builder;
       },
     };
@@ -137,6 +157,9 @@ beforeEach(async () => {
   db.bindings.clear();
   tokens.clear();
   failing.clear();
+  bindingInsert.error = null;
+  bindingInsert.before = undefined;
+  inserts.length = 0;
   getUserCalls.length = 0;
   created.length = 0;
   resolveApiKey.mockReset();
@@ -199,17 +222,56 @@ describe('resolveCaller', () => {
     });
   });
 
-  test('an OAuth token with no connection on record is told to connect again', async () => {
-    const expected = { ok: false, status: 401, message: 'Connect OpenKuasa again from your AI tool.' };
-    expect(await resolveCaller(req(`Bearer ${oauthToken(ALICE)}`), 'Claude')).toEqual(expected);
-
+  test('an OAuth connection with no record binds, as the person, to the workspace they have open on first use', async () => {
     // Another client's connection, or another person's, is not this one.
-    bind(ALICE, 'cursor', ORG_A);
-    bind(BOB, 'claude-desktop', ORG_A);
-    expect(await resolveCaller(req(`Bearer ${oauthToken(ALICE)}`), 'Claude')).toEqual(expected);
+    bind(ALICE, 'cursor', ORG_B);
+    bind(BOB, 'claude-desktop', ORG_B);
+    db.profiles.set(ALICE, ORG_A);
+    const token = oauthToken(ALICE);
+    expect(await resolveCaller(req(`Bearer ${token}`), 'Claude')).toMatchObject({
+      ok: true,
+      caller: { userId: ALICE, orgId: ORG_A, orgName: 'Rimba Ventures', credentialId: `oauth:claude-desktop:${ALICE}` },
+    });
+    expect(inserts).toEqual([{ user_id: ALICE, client_id: 'claude-desktop', org_id: ORG_A }]);
+    expect(db.bindings.get(`${ALICE}:claude-desktop`)).toBe(ORG_A);
 
-    // Nothing is learned from use: the next call is refused the same way.
-    expect(await resolveCaller(req(`Bearer ${oauthToken(ALICE)}`), 'Claude')).toEqual(expected);
+    // From then on the record holds: switching to B is refused, not re-bound.
+    db.profiles.set(ALICE, ORG_B);
+    expect(await resolveCaller(req(`Bearer ${oauthToken(ALICE)}`), 'Claude')).toMatchObject({ ok: false, status: 403 });
+    expect(inserts).toHaveLength(1);
+  });
+
+  test('a first-use bind that races another one uses the row that won', async () => {
+    // Another request binds this connection to B between the read and the insert.
+    bindingInsert.before = () => bind(ALICE, 'claude-desktop', ORG_B);
+    db.profiles.set(ALICE, ORG_A);
+    const out = await resolveCaller(req(`Bearer ${oauthToken(ALICE)}`), 'Claude');
+    // B won; A is open, so the person is asked to switch back.
+    expect(out).toEqual({ ok: false, status: 403, message: 'Switch back to Kopi Co in OpenKuasa, or connect again for Rimba Ventures.' });
+    expect(db.bindings.get(`${ALICE}:claude-desktop`)).toBe(ORG_B);
+  });
+
+  test('an OAuth connection that cannot be bound is told to connect again', async () => {
+    const expected = { ok: false, status: 401, message: 'Connect OpenKuasa again from your AI tool.' };
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      // The write is refused.
+      bindingInsert.error = { code: '42501', message: `denied for ${'x'}` };
+      expect(await resolveCaller(req(`Bearer ${oauthToken(ALICE)}`), 'Claude')).toEqual(expected);
+      expect(db.bindings.size).toBe(0);
+      expect(JSON.stringify(logged.mock.calls)).toContain('42501');
+
+      // No workspace at all: nothing to bind to, nothing written.
+      bindingInsert.error = null;
+      inserts.length = 0;
+      db.members.clear();
+      db.joined.clear();
+      db.profiles.set(ALICE, null);
+      expect(await resolveCaller(req(`Bearer ${oauthToken(ALICE)}`), 'Claude')).toEqual(expected);
+      expect(inserts).toEqual([]);
+    } finally {
+      logged.mockRestore();
+    }
   });
 
   test('refuses when current workspace differs from the credential\'s', async () => {

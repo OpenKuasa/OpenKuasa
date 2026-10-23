@@ -369,6 +369,22 @@ describe('consent actions', () => {
   });
 });
 
+/** `next` values sign-in must ignore: other sites, protocol-relative or backslash tricks, and any page but the consent screen. */
+const REJECTED_NEXT = [
+  '//evil.test/x',
+  '/\\evil.test/x',
+  '/\\/evil.test',
+  'https://evil.test/oauth/consent?authorization_id=a',
+  'javascript:alert(1)',
+  'oauth/consent?authorization_id=a',
+  '/command',
+  '/oauth/consentx',
+  '/oauth/consent/../command',
+  '/oauth/consent%2F..%2F..%2Fcommand',
+  ' /oauth/consent',
+  '',
+];
+
 describe('sign-in brings people back', () => {
   const signIn = (next?: string) =>
     signInAction(undefined, form({ email: 'smoke@openkuasa-test.dev', password: 'pw', ...(next === undefined ? {} : { next }) }));
@@ -376,8 +392,15 @@ describe('sign-in brings people back', () => {
   test('the sign-in page carries a safe next path into its form', async () => {
     const html = renderToStaticMarkup(await LoginPage({ searchParams: Promise.resolve({ next: CONSENT_PATH }) }));
     expect(decode(html)).toContain(`name="next" value="${CONSENT_PATH}"`);
-    const offsite = renderToStaticMarkup(await LoginPage({ searchParams: Promise.resolve({ next: 'https://evil.test/' }) }));
-    expect(offsite).not.toContain('name="next"');
+    for (const next of REJECTED_NEXT) {
+      const html = renderToStaticMarkup(await LoginPage({ searchParams: Promise.resolve({ next }) }));
+      expect(html, next).not.toContain('name="next"');
+    }
+  });
+
+  test('signing in ignores any next that is not the consent screen', async () => {
+    session();
+    for (const next of REJECTED_NEXT) expect(await redirectOf(() => signIn(next)), next).toBe('/command');
   });
 
   test('signing in goes to next, through the code prompt when one is owed; anything off-site goes home', async () => {

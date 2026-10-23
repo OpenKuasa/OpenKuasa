@@ -3,8 +3,9 @@
  *
  * Two credentials are accepted. A personal API key (`okk_…`), which `resolveApiKey` checks and exchanges for the
  * person's access token, bound to the key's workspace. Or a Supabase OAuth 2.1 access token, checked with the auth
- * server on every call and bound to the workspace the person allowed it in on the consent screen (`/oauth/consent`
- * writes that row in `mcp_oauth_bindings`; no row means the connection is not bound).
+ * server on every call and bound to the workspace recorded for it in `mcp_oauth_bindings`: the one the person allowed
+ * on the consent screen (`/oauth/consent`), or, when the auth server skipped that screen and nothing is recorded, the
+ * one they have open at first use, recorded then as them.
  *
  * Every call then reads, as the person: their role in the credential's workspace (none means removed), and the
  * workspace they now have open; a different one is refused rather than acted on behind their back.
@@ -83,9 +84,39 @@ async function fromApiKey(key: string) {
   };
 }
 
+/** The workspace recorded for this person's client, read as them; null when none. A read error throws (503). */
+async function bindingOf(supabase: SupabaseClient, userId: string, clientId: string): Promise<string | null> {
+  const { data, error } = await supabase
+    .from('mcp_oauth_bindings')
+    .select('org_id')
+    .eq('user_id', userId)
+    .eq('client_id', clientId)
+    .maybeSingle();
+  if (error) throw error;
+  const orgId = (data as { org_id?: unknown } | null)?.org_id;
+  return typeof orgId === 'string' && orgId ? orgId : null;
+}
+
 /**
- * An OAuth access token: accepted by the auth server, its subject that user, issued to a named client. Its workspace
- * is the one the person allowed this client in, read as them; null when there is none on record.
+ * First use of a connection with nothing recorded (the auth server skipped the consent screen): record, as the
+ * person, the workspace they have open. Losing a race to another first use keeps the row that won. Null when there
+ * is no workspace or the row cannot be written.
+ */
+async function bindOnFirstUse(supabase: SupabaseClient, userId: string, clientId: string): Promise<string | null> {
+  const current = await currentOrgFor(supabase, userId);
+  if (!current) return null;
+  const { error } = await supabase
+    .from('mcp_oauth_bindings')
+    .insert({ user_id: userId, client_id: clientId, org_id: current.orgId });
+  if (!error) return current.orgId;
+  if ((error as { code?: unknown }).code === '23505') return bindingOf(supabase, userId, clientId);
+  logFailure('bind on first use', error);
+  return null;
+}
+
+/**
+ * An OAuth access token: accepted by the auth server, its subject that user, issued to a named client, acting in the
+ * workspace recorded for that client (bound on first use when nothing is). Its workspace is null when unbindable.
  */
 async function fromOAuth(token: string, supabase: SupabaseClient) {
   const { data, error } = await supabase.auth.getUser(token);
@@ -94,21 +125,8 @@ async function fromOAuth(token: string, supabase: SupabaseClient) {
   const claims = claimsOf(token);
   const clientId = claims?.client_id;
   if (!claims || claims.sub !== userId || typeof clientId !== 'string' || !clientId) return null;
-  const { data: binding, error: bindingError } = await supabase
-    .from('mcp_oauth_bindings')
-    .select('org_id')
-    .eq('user_id', userId)
-    .eq('client_id', clientId)
-    .maybeSingle();
-  // A read error throws: 503 below, not "connect again".
-  if (bindingError) throw bindingError;
-  const orgId = (binding as { org_id?: unknown } | null)?.org_id;
-  return {
-    credentialId: `oauth:${clientId}:${userId}`,
-    userId,
-    orgId: typeof orgId === 'string' && orgId ? orgId : null,
-    accessToken: token,
-  };
+  const orgId = (await bindingOf(supabase, userId, clientId)) ?? (await bindOnFirstUse(supabase, userId, clientId));
+  return { credentialId: `oauth:${clientId}:${userId}`, userId, orgId, accessToken: token };
 }
 
 /**
@@ -125,7 +143,7 @@ export async function resolveCaller(request: Request, clientName: string): Promi
     const credential = oauthClient ? await fromOAuth(token, oauthClient) : await fromApiKey(token);
     if (!credential) return { ok: false, status: 401, message: CREDENTIAL_REFUSED };
     const { credentialId, userId, orgId, accessToken } = credential;
-    // An OAuth connection with no workspace on record: the person allows it again on the consent screen.
+    // An OAuth connection that could not be bound (no workspace, or the record could not be written).
     if (!orgId) return { ok: false, status: 401, message: CONNECT_AGAIN };
     const supabase = oauthClient ?? userClient(accessToken);
 

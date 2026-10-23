@@ -4,7 +4,7 @@ import { Logo } from '@/components/brand/logo';
 import { DemoButton } from '@/components/auth/demo-button';
 import { GoogleNotEnabledButton } from '@/components/auth/google-not-enabled-button';
 import { LoginForm } from '@/components/auth/login-form';
-import { safeAppPath } from '@/lib/security/safe-path';
+import { signInReturnPath } from '@/lib/security/safe-path';
 
 export const metadata: Metadata = {
   title: 'Sign in · OpenKuasa',
@@ -24,7 +24,7 @@ export default async function LoginPage({
   const { notice, next } = await searchParams;
   const message = notice ? NOTICES[notice] : undefined;
   // Where to return once signed in, e.g. the consent screen an AI tool sent the person to.
-  const returnTo = safeAppPath(next);
+  const returnTo = signInReturnPath(next);
 
   return (
     <div className="flex min-h-dvh w-full">

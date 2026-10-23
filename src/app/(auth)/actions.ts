@@ -14,7 +14,7 @@ import {
 import { endOtherSessions } from '@/lib/auth/sessions';
 import { createWorkspaceError, workspaceNameSchema } from '@/lib/auth/workspace-name';
 import { demoLimited, passwordResetLimited, signInLimited, signUpLimited } from '@/lib/security/limits';
-import { safeAppPath } from '@/lib/security/safe-path';
+import { signInReturnPath } from '@/lib/security/safe-path';
 
 // Persist the "remember me" choice so token refreshes (in the proxy) keep the
 // same cookie lifetime. A session cookie itself clears on browser close.
@@ -73,7 +73,7 @@ export async function signInAction(
   const password = String(formData.get('password') ?? '');
   const remember = formData.get('remember') === 'on';
   // Where to go once signed in, e.g. back to the consent screen of an AI tool.
-  const next = safeAppPath(formData.get('next'));
+  const next = signInReturnPath(formData.get('next'));
   const values = { email };
 
   const parsed = signInSchema.safeParse({ email, password });

@@ -34,3 +34,16 @@ export function safeAppPath(value: unknown): string | null {
 
   return `${url.pathname}${url.search}${url.hash}`;
 }
+
+/** The only page sign-in returns to after signing in: the consent screen an AI tool sent the person to. */
+const SIGN_IN_RETURN = '/oauth/consent';
+
+/**
+ * A `next` for the sign-in page and action: a same-site path (as `safeAppPath` checks) to the consent screen,
+ * otherwise null. Any other page is ignored, so sign-in cannot be used to send people somewhere else.
+ */
+export function signInReturnPath(value: unknown): string | null {
+  const path = safeAppPath(value);
+  if (!path) return null;
+  return path === SIGN_IN_RETURN || path.startsWith(`${SIGN_IN_RETURN}?`) ? path : null;
+}
