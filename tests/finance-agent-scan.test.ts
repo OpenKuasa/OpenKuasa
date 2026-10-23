@@ -269,6 +269,30 @@ describe('scanFinance', () => {
     });
   });
 
+  it('every candidate of every check passes the action schema (the proposer drops ones that do not)', () => {
+    const r = raw({
+      checks: [
+        { key: 'invoice_overdue', params: { days: 1, min_amount: 0 } },
+        { key: 'bill_due_soon', params: { days: 30 } },
+        { key: 'expense_waiting', params: { days: 1 } },
+        { key: 'quotation_expiring', params: { days: 30 } },
+        { key: 'draft_stale', params: { days: 3 } },
+        { key: 'bank_unmatched', params: { days: 3 } },
+        { key: 'sst_period_closing', params: { days: 30 } },
+      ],
+      invoices: [{ id: A, invoiceNo: null, customer: null, dueDate: '2026-10-01', balance: 1 }],
+      bills: [{ id: B, billNo: null, supplier: null, dueDate: '2026-10-01', balance: 1 }],
+      expenses: [{ id: C, amount: 1, vendor: null, createdAt: '2026-10-01T00:00:00Z' }],
+      quotations: [{ id: A, quotationNo: null, customer: null, validUntil: '2026-10-30' }],
+      drafts: [{ kind: 'bill', id: B, party: null, updatedAt: '2026-10-01T00:00:00Z' }],
+      bankLines: [{ accountId: C, account: 'Main', lineDate: '2026-10-01', amount: 1 }],
+      sst: { periodStartMonth: 1, taxes: ['sales'], filed: [] },
+    });
+    const all = scanFinance(r, NOW);
+    expect(new Set(all.map((c) => c.checkKey)).size).toBe(7);
+    for (const c of all) expect(financeAgentNoteInput.safeParse(c.input).success).toBe(true);
+  });
+
   it('cuts long names so a body stays within 500 characters', () => {
     const long = 'N'.repeat(400);
     const r = raw({
