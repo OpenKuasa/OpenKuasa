@@ -3,7 +3,7 @@ import { AskHero, type AskPersona } from '@/components/chat/ask-hero';
 const KASTURI: AskPersona = {
   name: 'Kasturi',
   role: 'your sales co-pilot',
-  heading: 'How can we close more deals, Saudara?',
+  heading: 'How can we close more deals?',
   api: '/api/crm/chat',
   // The figures are the sample ones on the demo dashboard below the card.
   demoAnswer:

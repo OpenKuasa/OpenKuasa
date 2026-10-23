@@ -59,6 +59,8 @@ import {
 import { ReplyText, TypedText } from '@/components/chat/reply-text';
 import { ChangeList } from '@/components/chat/tool-cards';
 import { changeHeading, changeRows } from '@/lib/chat/change-rows';
+import { greet } from '@/lib/chat/greeting';
+import { useOptionalViewer } from '@/components/app/viewer-context';
 
 /** Who answers in the card, and where its questions go. Plain strings, so a server screen can pass it. */
 export type AskPersona = {
@@ -89,6 +91,7 @@ export function AskHero({
   prompts: string[];
   isDemo: boolean;
 }) {
+  const viewer = useOptionalViewer();
   const [input, setInput] = useState('');
   const [demoAsked, setDemoAsked] = useState(false);
   const [focused, setFocused] = useState(false);
@@ -171,7 +174,7 @@ export function AskHero({
             {persona.name} · {persona.role}
           </div>
           <h1 className="mt-1 text-2xl font-bold tracking-tight">
-            {persona.heading}
+            {greet(persona.heading, viewer?.firstName)}
           </h1>
           <div className="mt-3 flex flex-wrap gap-2">
             {prompts.map((p) => (

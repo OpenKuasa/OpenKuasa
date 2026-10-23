@@ -22,6 +22,7 @@ test('uses full_name from user metadata when present', () => {
     orgName: 'Acme Sdn Bhd',
     role: 'owner',
     isDemo: false,
+    firstName: 'Siti',
   });
 });
 

@@ -3,7 +3,7 @@ import { AskHero, type AskPersona } from '@/components/chat/ask-hero';
 const LEKIU: AskPersona = {
   name: 'Lekiu',
   role: 'your HR co-pilot',
-  heading: 'How is the team doing, Saudara?',
+  heading: 'How is the team doing?',
   api: '/api/people/chat',
   // The figures are the demo workspace's, as the cards below the chat show them.
   demoAnswer:

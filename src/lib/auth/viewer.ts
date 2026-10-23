@@ -1,4 +1,5 @@
 import { cache } from 'react';
+import { firstNameOf } from '@/lib/chat/greeting';
 import { redirect } from 'next/navigation';
 import { createClient } from '@/lib/supabase/server';
 import type { OrgRole } from './current-org';
@@ -22,6 +23,8 @@ export type Viewer = {
   orgName: string;
   role: OrgRole;
   isDemo: boolean;
+  /** The first word of the name the person set; null when they set none (the email stands in) or in the demo. */
+  firstName?: string | null;
   /** Lekiu: has at least one direct report. Left out for everyone else; the app layout adds it. */
   managesTeam?: boolean;
 };
@@ -46,6 +49,7 @@ const PREVIEW_VIEWER: Viewer = {
   orgName: 'Preview workspace',
   role: 'viewer',
   isDemo: true,
+  firstName: null,
 };
 
 export function initialsOf(name: string): string {
@@ -77,6 +81,7 @@ export function toViewer(
     name,
     email,
     initials: initialsOf(name),
+    firstName: !isDemo && typeof fullName === 'string' ? firstNameOf(fullName) : null,
     avatarUrl,
     orgName: org.name,
     role: org.role,
