@@ -22,6 +22,7 @@ const auth = {
   generateLinkCalls: 0,
   verifyCalls: [] as string[],
   goodCode: '123456',
+  onRefresh: null as null | (() => void),
 };
 
 /** The database: keys, members (role by org and user). */
@@ -137,6 +138,7 @@ vi.mock('@supabase/supabase-js', () => ({
           const r = auth.refresh.get(refresh_token);
           if (!r || r.used) return { data: { session: null }, error: { message: 'Invalid Refresh Token: Already Used' } };
           r.used = true;
+          auth.onRefresh?.();
           return { data: { session: issue(r.userId, r.aal, r.session) }, error: null };
         },
         mfa: {
@@ -199,6 +201,7 @@ beforeEach(() => {
   auth.generateLinkCalls = 0;
   auth.signOuts = [];
   auth.verifyCalls = [];
+  auth.onRefresh = null;
   db.keys = [];
   db.members.clear();
   db.svcUpdates = [];
@@ -210,16 +213,47 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.restoreAllMocks();
   vi.useRealTimers();
   vi.unstubAllEnvs();
 });
 
 describe('createApiKey', () => {
+  test('keys are okk_ and 40 base62 characters, never repeated', async () => {
+    const { generateApiKey } = await load();
+    const keys = Array.from({ length: 200 }, () => generateApiKey());
+    for (const key of keys) expect(key).toMatch(/^okk_[A-Za-z0-9]{40}$/);
+    expect(new Set(keys).size).toBe(200);
+  });
+
+  test('a failure logs one line with no key, token or email in it', async () => {
+    const { createApiKey, resolveApiKey } = await load();
+    const made = await createApiKey(personClient(ALICE), { orgId: ORG, userId: ALICE, name: 'k' });
+    if (!made.ok) throw new Error(made.error);
+    const token = (await resolveApiKey(made.key)) as { accessToken: string };
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const leak = `${made.key} ${token.accessToken} alice@example.test ${sha256(made.key)}`;
+
+    svc.auth.admin.generateLink.mockRejectedValueOnce(Object.assign(new Error(`link for ${leak}`), { code: 'over_email_send_rate_limit' }));
+    expect(await createApiKey(personClient(ALICE), { orgId: ORG, userId: ALICE, name: 'k2' })).toMatchObject({ ok: false });
+    svc.from.mockImplementationOnce(() => {
+      throw new TypeError(`lookup ${leak}`);
+    });
+    expect(await resolveApiKey(made.key)).toEqual({ ok: false });
+
+    const text = logged.mock.calls.flat().map(String).join('\n');
+    expect(logged.mock.calls.map((c) => c.length)).toEqual([1, 1]);
+    expect(text).toBe('[mcp-keys] create failed: over_email_send_rate_limit\n[mcp-keys] resolve failed: TypeError');
+    for (const secret of [made.key, made.key.slice(4), token.accessToken, 'alice@example.test', sha256(made.key)]) {
+      expect(text).not.toContain(secret);
+    }
+  });
+
   test('creates okk_ keys, stores only the hash, shows the key once', async () => {
     const { createApiKey } = await load();
     const made = await createApiKey(personClient(ALICE), { orgId: ORG, userId: ALICE, name: '  Cursor laptop  ' });
     if (!made.ok) throw new Error(made.error);
-    expect(made.key).toMatch(/^okk_[A-Za-z0-9_-]{43}$/);
+    expect(made.key).toMatch(/^okk_[A-Za-z0-9]{40}$/);
 
     expect(db.keys).toHaveLength(1);
     const row = db.keys[0];
@@ -296,11 +330,23 @@ describe('resolveApiKey', () => {
   test('refuses unknown and malformed keys without a lookup', async () => {
     const { resolveApiKey } = await load();
     svc.from.mockClear();
-    for (const bad of ['', 'sk_live_abc', 'okk_', 'okk_short', `okk_${'a'.repeat(43)}!`, `OKK_${'a'.repeat(43)}`]) {
+    const bads = [
+      '',
+      'sk_live_abc',
+      'okk_',
+      'okk_short',
+      `okk_${'a'.repeat(39)}`,
+      `okk_${'a'.repeat(41)}`,
+      `okk_${'a'.repeat(39)}-`,
+      `okk_${'a'.repeat(39)}_`,
+      `okk_${'a'.repeat(40)}!`,
+      `OKK_${'a'.repeat(40)}`,
+    ];
+    for (const bad of bads) {
       expect(await resolveApiKey(bad)).toEqual({ ok: false });
     }
     expect(svc.from).not.toHaveBeenCalled();
-    expect(await resolveApiKey(`okk_${'a'.repeat(43)}`)).toEqual({ ok: false });
+    expect(await resolveApiKey(`okk_${'a'.repeat(40)}`)).toEqual({ ok: false });
   });
 
   test('revoked key and removed member are refused even with a cached token', async () => {
@@ -374,6 +420,24 @@ describe('resolveApiKey', () => {
     expect(auth.refreshCalls - before).toBe(3);
     const stored = decryptApiKey(String(db.keys[0].session_secret), ORG, process.env, 'mcp-refresh-token')!;
     expect(auth.refresh.get(stored)?.used).toBe(false);
+  });
+
+  test('a session refreshed as the key is revoked is ended, not left running', async () => {
+    const keys = await load();
+    const made = await keys.createApiKey(personClient(ALICE), { orgId: ORG, userId: ALICE, name: 'k' });
+    if (!made.ok) throw new Error(made.error);
+    const { resolveApiKey } = await load();
+    // Revoked between the refresh and the save of the rotated token (as the trigger would leave it).
+    auth.onRefresh = () => {
+      Object.assign(db.keys[0], { revoked_at: new Date().toISOString(), session_secret: null });
+    };
+    expect(await resolveApiKey(made.key)).toEqual({ ok: false });
+    expect(auth.refreshCalls).toBe(1);
+    expect(auth.signOuts).toHaveLength(1);
+    const [jwt, scope] = auth.signOuts[0];
+    expect(scope).toBe('local');
+    expect(auth.access.get(jwt)?.ended).toBe(true);
+    expect([...auth.refresh.values()].every((r) => r.used)).toBe(true);
   });
 
   test('updates last_used_at at most once a minute', async () => {

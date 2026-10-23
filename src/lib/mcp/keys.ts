@@ -24,8 +24,12 @@ import { serviceClient } from '@/lib/supabase/service';
 const TABLE = 'mcp_api_keys';
 const PURPOSE = 'mcp-refresh-token' as const;
 const KEY_PREFIX = 'okk_';
-/** `okk_` and 32 bytes as unpadded base64url. */
-const KEY_SHAPE = /^okk_[A-Za-z0-9_-]{43}$/;
+/** `okk_` and 40 random base62 characters (about 238 bits). */
+const KEY_SHAPE = /^okk_[A-Za-z0-9]{40}$/;
+const KEY_LENGTH = 40;
+const BASE62 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+/** The largest multiple of 62 a byte can hold; bytes at or above it are dropped so every character is equally likely. */
+const BYTE_LIMIT = 248;
 /** An access token is refreshed once it is this close to expiring. */
 const REFRESH_MARGIN_MS = 60 * 1000;
 /** `last_used_at` is written at most this often per key. */
@@ -75,6 +79,30 @@ function anonClient(accessToken?: string): SupabaseClient {
   });
 }
 
+/** A new key: `okk_` and 40 characters drawn evenly from base62 by rejection sampling. */
+export function generateApiKey(): string {
+  let body = '';
+  while (body.length < KEY_LENGTH) {
+    for (const byte of randomBytes(64)) {
+      if (byte >= BYTE_LIMIT) continue;
+      body += BASE62[byte % 62];
+      if (body.length === KEY_LENGTH) break;
+    }
+  }
+  return KEY_PREFIX + body;
+}
+
+/**
+ * One line for a failure that is otherwise swallowed: the operation and the error's class or code only. Never the
+ * message, which can carry a token or an email.
+ */
+function logFailure(operation: string, error: unknown): void {
+  const withCode = error && typeof error === 'object' && 'code' in error ? (error as { code: unknown }).code : undefined;
+  const raw = typeof withCode === 'string' && withCode ? withCode : error instanceof Error ? error.name : typeof error;
+  const code = /^[A-Za-z0-9_.-]{1,40}$/.test(raw) ? raw : 'unknown';
+  console.error(`[mcp-keys] ${operation} failed: ${code}`);
+}
+
 const hashKey = (key: string) => createHash('sha256').update(key, 'utf8').digest('hex');
 const seal = (refreshToken: string, orgId: string) => encryptApiKey(refreshToken, orgId, process.env, PURPOSE);
 const unseal = (sealed: string, orgId: string) => decryptApiKey(sealed, orgId, process.env, PURPOSE);
@@ -87,9 +115,11 @@ function expiryOf(session: Session): number {
 /** Ends one session only (not the person's other sign-ins). Best effort. */
 async function endSession(accessToken: string): Promise<void> {
   try {
-    await serviceClient().auth.admin.signOut(accessToken, 'local');
-  } catch {
+    const { error } = await serviceClient().auth.admin.signOut(accessToken, 'local');
+    if (error) logFailure('end session', error);
+  } catch (error) {
     // The caller has already refused the key; a session it could not end lapses on its own.
+    logFailure('end session', error);
   }
 }
 
@@ -176,7 +206,7 @@ export async function createApiKey(
       opened = session.access_token;
     }
 
-    const key = KEY_PREFIX + randomBytes(32).toString('base64url');
+    const key = generateApiKey();
     const { data: row, error: insertError } = await service
       .from(TABLE)
       .insert({ org_id: orgId, user_id: userId, name, key_hash: hashKey(key), session_secret: seal(session.refresh_token, orgId) })
@@ -189,7 +219,8 @@ export async function createApiKey(
     const id = String((row as { id: string }).id);
     cache.set(id, { userId, accessToken: session.access_token, expiresAt: expiryOf(session) });
     return { ok: true, key, id };
-  } catch {
+  } catch (error) {
+    logFailure('create', error);
     if (opened) await endSession(opened);
     return { ok: false, error: KEY_FAILED };
   }
@@ -220,11 +251,19 @@ async function refresh(service: SupabaseClient, row: KeyRow): Promise<Cached | n
         .eq('session_secret', sealed)
         .is('revoked_at', null)
         .select('id');
-      if (saveError) return null;
+      if (saveError) {
+        logFailure('store refreshed session', saveError);
+        await endSession(session.access_token);
+        return null;
+      }
       if (!saved || saved.length !== 1) {
-        // Not stored: revoked meanwhile, or another server stored a newer token first. Only the latter may go on.
+        // Not stored: revoked meanwhile, or another server stored a newer token first. Only the latter may go on;
+        // otherwise the session just opened is ended, not left to run out.
         const now = await loadById(service, row.id);
-        if (!now || now.revoked_at || !now.session_secret) return null;
+        if (!now || now.revoked_at || !now.session_secret) {
+          await endSession(session.access_token);
+          return null;
+        }
       }
       const next = { userId: row.user_id, accessToken: session.access_token, expiresAt: expiryOf(session) };
       cache.set(row.id, next);
@@ -244,7 +283,10 @@ async function accessTokenFor(service: SupabaseClient, row: KeyRow): Promise<Cac
   let running = inflight.get(row.id);
   if (!running) {
     running = refresh(service, row)
-      .catch(() => null)
+      .catch((error: unknown) => {
+        logFailure('refresh', error);
+        return null;
+      })
       .finally(() => inflight.delete(row.id));
     inflight.set(row.id, running);
   }
@@ -258,8 +300,9 @@ async function touch(service: SupabaseClient, row: KeyRow): Promise<void> {
   touched.set(row.id, now);
   try {
     await service.from(TABLE).update({ last_used_at: new Date(now).toISOString() }).eq('id', row.id);
-  } catch {
+  } catch (error) {
     // Bookkeeping only.
+    logFailure('touch', error);
   }
 }
 
@@ -290,7 +333,8 @@ export async function resolveApiKey(
     if (!(await isMember(token.accessToken, row.org_id, row.user_id))) return { ok: false };
     await touch(service, row);
     return { ok: true, id: row.id, userId: row.user_id, orgId: row.org_id, accessToken: token.accessToken };
-  } catch {
+  } catch (error) {
+    logFailure('resolve', error);
     return { ok: false };
   }
 }
@@ -310,7 +354,8 @@ export async function revokeApiKey(supabase: SupabaseClient, id: string): Promis
       .is('revoked_at', null)
       .select('id');
     if (error || !data || data.length !== 1) return false;
-  } catch {
+  } catch (error) {
+    logFailure('revoke', error);
     return false;
   }
 
@@ -331,8 +376,9 @@ export async function revokeApiKey(supabase: SupabaseClient, id: string): Promis
     }
     if (accessToken) await endSession(accessToken);
     await service.from(TABLE).update({ session_secret: null }).eq('id', id);
-  } catch {
+  } catch (error) {
     // Best effort; the key is already refused.
+    logFailure('end revoked session', error);
   }
   return true;
 }

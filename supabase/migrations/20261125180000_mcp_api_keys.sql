@@ -92,6 +92,6 @@ create view public.mcp_api_keys_public with (security_invoker = true) as
   select id, org_id, user_id, name, created_at, last_used_at, revoked_at
     from public.mcp_api_keys;
 
-revoke all on public.mcp_api_keys_public from public, anon;
+revoke all on public.mcp_api_keys_public from public, anon, authenticated;
 grant select on public.mcp_api_keys_public to authenticated;
 grant select on public.mcp_api_keys_public to service_role;

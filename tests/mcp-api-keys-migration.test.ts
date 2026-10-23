@@ -69,8 +69,14 @@ describe('mcp api keys migration', () => {
     expect(view).not.toContain('session_secret');
     expect(view).not.toContain('key_hash');
     expect(view).not.toContain('*');
-    expect(flat).toContain('revoke all on public.mcp_api_keys_public from public, anon;');
-    expect(flat).toContain('grant select on public.mcp_api_keys_public to authenticated;');
+    // Read-only for a signed-in person: every default privilege is taken back, then select alone is given.
+    expect(flat).toContain('revoke all on public.mcp_api_keys_public from public, anon, authenticated;');
+    expect(flat.match(/grant [^;]* on public\.mcp_api_keys_public to authenticated;/g)).toEqual([
+      'grant select on public.mcp_api_keys_public to authenticated;',
+    ]);
+    expect(flat.indexOf('revoke all on public.mcp_api_keys_public')).toBeLessThan(
+      flat.indexOf('grant select on public.mcp_api_keys_public to authenticated;'),
+    );
   });
 
   test('the service role is granted what the server uses, explicitly', () => {
