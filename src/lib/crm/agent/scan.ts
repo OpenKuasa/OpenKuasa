@@ -16,9 +16,27 @@ function cut(name: string): string {
   return chars.length <= NAME_MAX ? name : `${chars.slice(0, NAME_MAX - 1).join('').trimEnd()}…`;
 }
 
-/** Same shape as the Overview: `Company — Title`, or just the title. */
+function norm(text: string) {
+  return text.toLowerCase().replace(/\s+/g, ' ').trim();
+}
+
+/**
+ * True when the title already names the company: it contains the whole name, or one of its
+ * dash-separated parts is a leading run of whole words of it ("Ming Hardware" for
+ * "Ming Hardware Trading").
+ */
+function namesCompany(title: string, company: string) {
+  const c = norm(company);
+  if (norm(title).includes(c)) return true;
+  return title.split(/\s[—–-]\s/).some((part) => {
+    const p = norm(part);
+    return p !== '' && c.startsWith(`${p} `);
+  });
+}
+
+/** Same shape as the Overview: `Company — Title`, or just the title when it already names the company. */
 function dealName(deal: Deal) {
-  return cut(deal.company && deal.company !== deal.title ? `${deal.company} — ${deal.title}` : deal.title);
+  return cut(deal.company && !namesCompany(deal.title, deal.company) ? `${deal.company} — ${deal.title}` : deal.title);
 }
 
 /** Whole days between an ISO timestamp and `now`; null when it does not parse. */

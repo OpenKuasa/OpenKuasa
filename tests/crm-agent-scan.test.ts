@@ -61,6 +61,29 @@ describe('scanCrm', () => {
     expect(c.title).toBe('Note on Renewal — quiet 10 days');
   });
 
+  it('leaves the company out when the deal title already names it', () => {
+    const plan = { checks: [{ key: 'deal_quiet', params: { days: 7 } }] };
+    const titles = scanCrm(
+      raw({
+        plan,
+        deals: [
+          deal({ id: 'a', title: 'Coffee beans wholesale — Kedai Kopi Senang', company: 'Kedai Kopi Senang' }),
+          deal({ id: 'b', title: 'Supply contract — Ming Hardware', company: 'Ming Hardware Trading' }),
+          deal({ id: 'c', title: 'Renewal for ACME', company: 'Acme' }),
+          // Only a whole leading part of the company counts, not any short word.
+          deal({ id: 'd', title: 'Supply — Ming Hard', company: 'Ming Hardware Trading' }),
+        ],
+      }),
+      NOW,
+    ).map((c) => c.title);
+    expect(titles).toEqual([
+      'Follow up on Coffee beans wholesale — Kedai Kopi Senang — quiet 10 days',
+      'Follow up on Supply contract — Ming Hardware — quiet 10 days',
+      'Follow up on Renewal for ACME — quiet 10 days',
+      'Follow up on Ming Hardware Trading — Supply — Ming Hard — quiet 10 days',
+    ]);
+  });
+
   it('a deal touched 2 days ago is not quiet at 7 days; won and lost never appear', () => {
     const plan = { checks: [{ key: 'deal_quiet', params: { days: 7 } }] };
     const deals = [
