@@ -20,6 +20,7 @@ export const LIVE_SCREENS: ReadonlySet<string> = new Set([
 
   // Kasturi
   'crm/assistant',
+  'crm/agents',
   'crm/contacts',
   'crm/deals',
   'crm/lead-forms',

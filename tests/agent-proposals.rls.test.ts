@@ -117,6 +117,23 @@ testWithSeed('another workspace cannot update the owner’s proposal (RLS)', asy
   expect(check.data?.status).toBe('pending');
 });
 
+testWithSeed('a crm proposal is inserted by the service role and read by a workspace member', async (ctx) => {
+  needsTable(ctx);
+  const ins = await service!
+    .from('agent_proposals')
+    .insert({ ...proposalFields(owner.orgId), product: 'crm' })
+    .select('id')
+    .single();
+  expect(ins.error, ins.error?.message).toBeNull();
+  const id = (ins.data as { id: string }).id;
+  const seen = await owner.c.from('agent_proposals').select('id, product').eq('id', id).maybeSingle();
+  expect(seen.error, seen.error?.message).toBeNull();
+  expect(seen.data?.product).toBe('crm');
+  // Another workspace still cannot see it.
+  const hidden = await other.c.from('agent_proposals').select('id').eq('id', id);
+  expect(hidden.data ?? []).toHaveLength(0);
+});
+
 testWithSeed('the owner cannot update a non-granted column', async (ctx) => {
   needsTable(ctx);
   const id = await seedPending(owner.orgId);
