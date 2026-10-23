@@ -309,7 +309,7 @@ export const PRODUCTS: Product[] = [
   {
     key: 'finance',
     name: 'Bendahara',
-    tagline: 'Accounting & e-Invois LHDN',
+    tagline: 'Accounting & SST',
     icon: Landmark,
     sections: [
       {

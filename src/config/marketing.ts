@@ -71,12 +71,12 @@ export const MEGA_MENU: MegaColumn[] = [
   },
   {
     name: 'Bendahara',
-    tagline: 'Accounting with e-invoicing',
+    tagline: 'Accounting, SST and reports',
     href: '/finance/assistant',
     icon: Landmark,
     items: [
       { label: 'Invoicing', desc: 'Quote, invoice and get paid' },
-      { label: 'e-Invoice LHDN', desc: 'MyInvois submission, built in' },
+      { label: 'e-Invoice LHDN', desc: 'MyInvois submission, coming soon' },
       { label: 'Expenses & Bills', desc: 'Supplier bills and payments' },
       { label: 'Banking', desc: 'Statements, receipts, vouchers' },
       { label: 'Receipts Inbox', desc: 'Snap a receipt, AI books it' },
@@ -152,11 +152,11 @@ export const PRODUCT_CARDS: ProductCard[] = [
     key: 'finance',
     name: 'Bendahara',
     category: 'Accounting',
-    tagline: 'Accounting & e-Invois LHDN',
-    blurb: 'Invoicing, expenses and compliant e-Invoicing straight to LHDN.',
+    tagline: 'Accounting & SST',
+    blurb: 'Invoicing, expenses, SST and reports, with e-Invoicing to LHDN coming soon.',
     href: '/finance/assistant',
     icon: Landmark,
-    features: ['Invoicing & quotes', 'e-Invoice MyInvois', 'Reports & SST'],
+    features: ['Invoicing & quotes', 'Expenses & bills', 'Reports & SST'],
   },
 ];
 
