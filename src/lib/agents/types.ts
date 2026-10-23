@@ -45,6 +45,7 @@ export type AgentRunAsset = {
 
 export const WEEKLY_STUDIO = 'weekly-studio';
 export const CRM_FOCUS = 'crm-focus';
+export const FINANCE_FOCUS = 'finance-focus';
 
 /**
  * Thrown when a run cannot start because the workspace already has one in
