@@ -417,3 +417,63 @@ describe('runRead', () => {
     expect(plain).not.toHaveProperty('cv');
   });
 });
+
+describe('runChange activity log', () => {
+  const readFirst = async (f: Fakes, store: TranscriptStore) => {
+    await runRead(opsFor(f), store, CALLER, 'listCandidates', {});
+  };
+
+  it('logs a successful change once, named for the thing changed', async () => {
+    const f = fakeTools();
+    const store = memoryTranscriptStore();
+    await readFirst(f, store);
+    const log = vi.fn(async () => true);
+    const out = await runChange(opsFor(f), store, CALLER, 'deleteCandidate', { id: 'c1' }, undefined, { log });
+    expect(out.ok).toBe(true);
+    expect(out).not.toHaveProperty('logged');
+    expect(log).toHaveBeenCalledTimes(1);
+    expect(log).toHaveBeenCalledWith({ operation: 'deleteCandidate', target: 'Aisyah Lim' });
+  });
+
+  it('adds logged: false when the entry could not be written, and the change stands', async () => {
+    const f = fakeTools();
+    const store = memoryTranscriptStore();
+    await readFirst(f, store);
+    const out = await runChange(opsFor(f), store, CALLER, 'deleteCandidate', { id: 'c1' }, undefined, { log: async () => false });
+    expect(out).toMatchObject({ ok: true, logged: false });
+    expect(writeCalls(f)).toHaveLength(1);
+  });
+
+  it('a logger that throws never fails the change', async () => {
+    const f = fakeTools();
+    const store = memoryTranscriptStore();
+    await readFirst(f, store);
+    const out = await runChange(opsFor(f), store, CALLER, 'deleteCandidate', { id: 'c1' }, undefined, {
+      log: async () => {
+        throw new Error('boom');
+      },
+    });
+    expect(out).toMatchObject({ ok: true, logged: false });
+  });
+
+  it('does not log a refused, failed or unconfirmed change', async () => {
+    const f = fakeTools();
+    const store = memoryTranscriptStore();
+    const log = vi.fn(async () => true);
+    await runChange(opsFor(f), store, CALLER, 'deleteCandidate', { id: 'c9' }, undefined, { log });
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    await runChange(opsFor(f), store, CALLER, 'throwing', {}, undefined, { log });
+    expect(log).not.toHaveBeenCalled();
+  });
+
+  it('falls back to the heading when no row names the change', async () => {
+    const f = fakeTools();
+    const store = memoryTranscriptStore();
+    const log = vi.fn(async () => true);
+    await runChange(opsFor(f, () => ({ throwing: 'user-approval', scheduleInterview: 'user-approval' })), store, CALLER, 'scheduleInterview', { application_id: APP, date: '2026-11-01', time: '10:00', kind: 'online' }, undefined, { log });
+    expect(log).toHaveBeenCalledTimes(1);
+    const arg = log.mock.calls[0] as unknown as [{ operation: string; target: string }];
+    expect(arg[0].operation).toBe('scheduleInterview');
+    expect(arg[0].target.length).toBeGreaterThan(0);
+  });
+});

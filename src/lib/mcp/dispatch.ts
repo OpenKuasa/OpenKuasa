@@ -23,9 +23,12 @@ import type { Operation, Operations } from '@/lib/mcp/operations';
 import type { TranscriptKey, TranscriptStore } from '@/lib/mcp/transcript';
 
 export type DispatchResult =
-  | { ok: true; result: unknown; summary?: { heading: string; rows: ChangeRow[] }; cv?: { name: string; mediaType: string; data: Uint8Array } }
+  | { ok: true; result: unknown; logged?: false; summary?: { heading: string; rows: ChangeRow[] }; cv?: { name: string; mediaType: string; data: Uint8Array } }
   | { ok: false; error: string }
   | { ok: false; needsConfirm: true; note: string; confirm: string };
+
+/** Writes the activity entry for a change. The caller layer builds it knowing the client's name. */
+export type ChangeLog = (entry: { operation: string; target: string }) => Promise<boolean>;
 
 export type CallerRef = { credentialId: string; userId: string };
 
@@ -154,6 +157,7 @@ export async function runChange(
   name: string,
   args: unknown,
   confirm?: string,
+  deps?: { log?: ChangeLog },
 ): Promise<DispatchResult> {
   const op = ops.byName.get(name);
   if (!op || op.kind !== 'write') return { ok: false, error: UNKNOWN_CHANGE };
@@ -206,9 +210,23 @@ export async function runChange(
   const succeeded = (ran.result as { ok?: unknown } | null)?.ok;
   if (op.product === 'finance' && succeeded) revalidateFinance(name);
   const results = resultsIn(messages);
+  const summary =
+    succeeded === false ? undefined : { heading: changeHeading(name), rows: changeRows(name, input, nameIn(results), rowIn(results)) };
+  // One entry per change that went through. A failure to write it never undoes or fails the change.
+  let logged = true;
+  if (succeeded !== false && deps?.log) {
+    const target = summary!.rows.find((r) => r.kind === 'record')?.to ?? summary!.heading;
+    try {
+      logged = await deps.log({ operation: name, target });
+    } catch {
+      console.error(`[mcp] ${name} activity entry failed`);
+      logged = false;
+    }
+  }
   return {
     ok: true,
     result: ran.result,
-    ...(succeeded === false ? {} : { summary: { heading: changeHeading(name), rows: changeRows(name, input, nameIn(results), rowIn(results)) } }),
+    ...(logged ? {} : { logged: false as const }),
+    ...(summary ? { summary } : {}),
   };
 }

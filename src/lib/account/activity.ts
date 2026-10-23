@@ -10,6 +10,7 @@ export const ACTIVITY_CATEGORIES = [
   { value: 'data', label: 'Data' },
   { value: 'security', label: 'Security' },
   { value: 'billing', label: 'Billing' },
+  { value: 'mcp', label: 'AI tools' },
 ] as const;
 
 export const ACTIVITY_PERIODS = [

@@ -28,6 +28,7 @@ const CATEGORY_BADGES: Record<
   data: { label: 'Data', variant: 'outline' },
   security: { label: 'Security', variant: 'destructive' },
   billing: { label: 'Billing', variant: 'outline' },
+  mcp: { label: 'AI tool', variant: 'secondary' },
 };
 
 export function ActivityTable({ entries }: { entries: ActivityEntry[] }) {
