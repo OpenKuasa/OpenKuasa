@@ -61,7 +61,7 @@ export function readBack(menu: FocusMenu, plan: FocusPlan): string[] {
   const lines: string[] = [];
   for (const check of plan.checks) {
     const spec = menu.checks.find((c) => c.key === check.key);
-    if (spec) lines.push(spec.describe(check.params));
+    if (spec) lines.push(spec.describe(cleanParams(spec, check.params)));
   }
   return lines;
 }

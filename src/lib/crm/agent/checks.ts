@@ -44,7 +44,8 @@ export const CRM_FOCUS_MENU: FocusMenu = {
 };
 
 export const CRM_STARTER_EXAMPLES: readonly string[] = [
-  'Keep an eye on deals that have gone quiet for a week.',
-  'Tell me about deals worth RM 10,000 or more that are closing soon.',
-  'Make sure no follow-up is overdue and new contacts get followed up.',
+  'Deals quiet for 7+ days',
+  'Contacts with no activity in 14 days',
+  'Overdue follow-ups',
+  'Big deals closing this week',
 ];

@@ -24,6 +24,11 @@ describe('CRM_FOCUS_MENU', () => {
   });
 
   it('has starter examples', () => {
-    expect(CRM_STARTER_EXAMPLES.length).toBeGreaterThan(0);
+    expect(CRM_STARTER_EXAMPLES).toEqual([
+      'Deals quiet for 7+ days',
+      'Contacts with no activity in 14 days',
+      'Overdue follow-ups',
+      'Big deals closing this week',
+    ]);
   });
 });

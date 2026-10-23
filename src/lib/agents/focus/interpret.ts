@@ -15,7 +15,7 @@ export function interpretPrompt(menu: FocusMenu, focusText: string): string {
     '',
     'Owner\'s words:',
     '```owner-focus',
-    focusText.replaceAll('```', '\'\'\''),
+    focusText.slice(0, 500).replaceAll('```', '\'\'\''),
     '```',
     '',
     'Menu of checks (use only these keys):',
