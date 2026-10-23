@@ -3,6 +3,7 @@ import { getViewer, hasSupabaseEnv } from '@/lib/auth/viewer';
 import {
   createCrmDeal,
   deleteCrmDeal,
+  getCrmDeal,
   listCrmDealContacts,
   listCrmDeals,
   markCrmDealLost,
@@ -43,6 +44,7 @@ import {
   setDefaultCrmPipeline,
   updateCrmPipelineStage,
 } from '@/lib/crm/pipelines';
+import { loadRecordNotes, readOpenParam, OPEN_PARAM } from '@/lib/crm/notes';
 import { runCrmWrite } from '@/lib/crm/run-write';
 import { loadCrmSettings } from '@/lib/crm/settings';
 import { errorCodeOf } from '@/lib/ai/call-log';
@@ -239,7 +241,16 @@ async function removeStageAction(_prev: CrmFormState, formData: FormData) {
   );
 }
 
+async function loadDealNotesAction(dealId: string) {
+  'use server';
+  // The workspace is the viewer's, never the caller's input; the database's row security applies too.
+  const { orgId } = await getViewer();
+  const supabase = await createClient();
+  return loadRecordNotes(supabase, orgId, { dealId });
+}
+
 const ACTIONS: CrmDealActions = {
+  notes: loadDealNotesAction,
   save: saveDealAction,
   move: moveDealAction,
   markLost: markDealLostAction,
@@ -272,6 +283,8 @@ export default async function CrmDealsPage({
   // The layout already loaded the viewer for this request; this reuses it.
   const { orgId, role } = await getViewer();
   const supabase = await createClient();
+  const params = await searchParams;
+  const openId = readOpenParam(params?.[OPEN_PARAM]);
   // Viewers can read deals but the database refuses their writes.
   const canWrite = role !== 'viewer';
 
@@ -284,6 +297,7 @@ export default async function CrmDealsPage({
       links: Awaited<ReturnType<typeof listDealInvoiceLinks>>;
     } | null;
     requireLostReason: boolean;
+    openDeal: Awaited<ReturnType<typeof getCrmDeal>>;
   } | null = null;
   try {
     // Fetched together: each trip to the database costs about the same.
@@ -292,7 +306,7 @@ export default async function CrmDealsPage({
       listCrmDeals(supabase, orgId, DEALS_LOADED),
       // Only the form needs these; the board still shows if they cannot load.
       canWrite
-        ? listCrmDealContacts(supabase, orgId, CONTACTS_OFFERED, contactParam((await searchParams)?.contact)).catch((error) => {
+        ? listCrmDealContacts(supabase, orgId, CONTACTS_OFFERED, contactParam(params?.contact)).catch((error) => {
             console.error('[crm/deals] could not load contacts', errorCodeOf(error));
             return [];
           })
@@ -315,7 +329,16 @@ export default async function CrmDealsPage({
             })
         : false,
     ]);
-    live = { pipelines, deals, contacts, billing, requireLostReason };
+    // A deal opened by link that is beyond the ones loaded is read by its id.
+    // An unknown or foreign id opens nothing, and so does a read that fails.
+    const openDeal =
+      canWrite && openId && !deals.deals.some((deal) => deal.id === openId)
+        ? await getCrmDeal(supabase, orgId, openId).catch((error) => {
+            console.error('[crm/deals] could not load the linked deal', errorCodeOf(error));
+            return null;
+          })
+        : null;
+    live = { pipelines, deals, contacts, billing, requireLostReason, openDeal };
   } catch (error) {
     // The CRM migration is applied to a database separately from a deploy, so
     // the tables can be missing for a while. The page says so; it never shows sample data in its place.
@@ -357,6 +380,8 @@ export default async function CrmDealsPage({
       contacts={live.contacts}
       actions={canWrite ? ACTIONS : undefined}
       requireLostReason={live.requireLostReason}
+      openId={openId}
+      openDeal={live.openDeal}
       now={new Date().toISOString()}
     />
   );

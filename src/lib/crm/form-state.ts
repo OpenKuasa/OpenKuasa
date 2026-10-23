@@ -1,3 +1,5 @@
+import type { RecordNote } from '@/lib/crm/notes';
+
 /** What a Kasturi form action hands back to the form that called it. */
 export type CrmFormState =
   | {
@@ -8,6 +10,9 @@ export type CrmFormState =
     }
   | { ok: false; error: string; values: Record<string, string> }
   | undefined;
+
+/** Hands back a deal's or contact's notes for its pop-up, or null when they cannot be had. */
+export type CrmNotesLoader = (id: string) => Promise<RecordNote[] | null>;
 
 export type CrmFormAction = (
   prev: CrmFormState,
@@ -23,10 +28,14 @@ export type CrmContactActions = {
   completeFollowUp: CrmFormAction;
   /** Takes `payload`: JSON of `{ table, mapping }` from the import card. */
   importContacts: CrmFormAction;
+  /** Takes a contact's id; read-only. */
+  notes: CrmNotesLoader;
 };
 
 /** The writes the Deals page offers. Absent for people who can only read. */
 export type CrmDealActions = {
+  /** Takes a deal's id; read-only. */
+  notes: CrmNotesLoader;
   /** Creates a deal, or updates one when the form carries `dealId`. */
   save: CrmFormAction;
   /** Takes `dealId` and `stageId`. */

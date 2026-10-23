@@ -21,6 +21,7 @@ import {
   Trash2,
 } from 'lucide-react';
 import { BentoCard } from '@/components/bento/bento';
+import { LoadedRecordNotes } from '@/components/crm/record-notes';
 import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
@@ -44,7 +45,7 @@ import {
   type CrmDeal,
   type CrmDealContactChoice,
 } from '@/lib/crm/deals';
-import type { CrmDealActions, CrmFormAction } from '@/lib/crm/form-state';
+import type { CrmDealActions, CrmFormAction, CrmNotesLoader } from '@/lib/crm/form-state';
 import type { DealInvoiceChoice } from '@/lib/crm/invoice-links';
 import type { CrmPipelineStage } from '@/lib/crm/pipelines';
 import { cn } from '@/lib/utils';
@@ -68,6 +69,7 @@ export function DealFormCard({
   contacts,
   invoices,
   newDealContactId,
+  loadNotes,
   onSaved,
   onClose,
   firstFieldRef,
@@ -82,6 +84,8 @@ export function DealFormCard({
   /** The stages of the pipeline the deal is in, or is being added to. */
   stages: CrmPipelineStage[];
   contacts: CrmDealContactChoice[];
+  /** Reads the notes of the deal being edited when its card opens. Absent: no notes are shown. */
+  loadNotes?: CrmNotesLoader;
   /** Called after a save has gone through. */
   onSaved: () => void;
   /** Cancel when editing, Close when adding. */
@@ -261,6 +265,7 @@ export function DealFormCard({
           ) : null}
         </div>
       </form>
+      {editing && loadNotes ? <LoadedRecordNotes recordId={editing.id} load={loadNotes} /> : null}
     </BentoCard>
   );
 }

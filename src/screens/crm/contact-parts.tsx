@@ -4,6 +4,7 @@ import { type RefObject } from 'react';
 import Link from 'next/link';
 import { Check, FileText, Handshake, MoreHorizontal, Pencil, Plus, Trash2 } from 'lucide-react';
 import { BentoCard } from '@/components/bento/bento';
+import { LoadedRecordNotes } from '@/components/crm/record-notes';
 import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
@@ -17,7 +18,7 @@ import { TableCell, TableRow } from '@/components/ui/table';
 import { cn } from '@/lib/utils';
 import type { CrmContact } from '@/lib/crm/contacts';
 import type { CrmFollowUp } from '@/lib/crm/follow-ups';
-import type { CrmFormAction } from '@/lib/crm/form-state';
+import type { CrmFormAction, CrmNotesLoader } from '@/lib/crm/form-state';
 import type { BillingCustomerChoice } from '@/lib/crm/invoice-links';
 import { SELECT_CLASS, useCrmForm } from './crm-form';
 
@@ -26,6 +27,7 @@ export function ContactFormCard({
   action,
   editing,
   billingCustomers,
+  loadNotes,
   onSaved,
   onClose,
   firstFieldRef,
@@ -35,6 +37,8 @@ export function ContactFormCard({
   billingCustomers?: BillingCustomerChoice[];
   /** The contact being edited; null to add a new one. */
   editing: CrmContact | null;
+  /** Reads the notes of the contact being edited when its card opens. Absent: no notes are shown. */
+  loadNotes?: CrmNotesLoader;
   /** Called after a save has gone through. */
   onSaved: () => void;
   /** Cancel when editing, Close when adding. */
@@ -190,6 +194,7 @@ export function ContactFormCard({
           ) : null}
         </div>
       </form>
+      {editing && loadNotes ? <LoadedRecordNotes recordId={editing.id} load={loadNotes} /> : null}
     </BentoCard>
   );
 }

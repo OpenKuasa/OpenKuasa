@@ -55,7 +55,7 @@ const SERVER_PAGES = {
  * Routes whose screen reads the URL's query string (a range filter, the month
  * shown, a search): the page hands its `searchParams` through to the screen.
  */
-const SEARCH_PARAM_PAGES = new Set(['crm/reports', 'crm/calendar', 'crm/deals', 'people/attendance', 'people/calendar', 'people/payroll', 'people/shift-calendar', 'people/timesheet', 'hire/talent-pool', 'finance/sst-report', 'finance/dashboard', 'finance/audit-trail']);
+const SEARCH_PARAM_PAGES = new Set(['crm/reports', 'crm/calendar', 'crm/contacts', 'crm/deals', 'people/attendance', 'people/calendar', 'people/payroll', 'people/shift-calendar', 'people/timesheet', 'hire/talent-pool', 'finance/sst-report', 'finance/dashboard', 'finance/audit-trail']);
 
 /** `product/item` for every item in the nav. */
 function navRoutes() {

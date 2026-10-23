@@ -4,6 +4,7 @@ import {
   CrmContactFormError,
   createCrmContact,
   deleteCrmContact,
+  getCrmContact,
   listCrmContacts,
   parseCrmContactFields,
   parseCrmContactForm,
@@ -25,6 +26,7 @@ import {
   type BillingCustomerChoice,
 } from '@/lib/crm/invoice-links';
 import type { CrmContactActions, CrmFormState } from '@/lib/crm/form-state';
+import { loadRecordNotes, readOpenParam, OPEN_PARAM } from '@/lib/crm/notes';
 import { runCrmWrite } from '@/lib/crm/run-write';
 import { errorCodeOf } from '@/lib/ai/call-log';
 import { createClient } from '@/lib/supabase/server';
@@ -149,7 +151,16 @@ async function importContactsAction(_prev: CrmFormState, formData: FormData) {
   });
 }
 
+async function loadContactNotesAction(contactId: string) {
+  'use server';
+  // The workspace is the viewer's, never the caller's input; the database's row security applies too.
+  const { orgId } = await getViewer();
+  const supabase = await createClient();
+  return loadRecordNotes(supabase, orgId, { contactId });
+}
+
 const ACTIONS: CrmContactActions = {
+  notes: loadContactNotesAction,
   save: saveContactAction,
   remove: deleteContactAction,
   addFollowUp: addFollowUpAction,
@@ -157,17 +168,23 @@ const ACTIONS: CrmContactActions = {
   importContacts: importContactsAction,
 };
 
-export default async function CrmContactsPage() {
+export default async function CrmContactsPage({
+  searchParams,
+}: {
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
+} = {}) {
   // No project configured (dev / preview / tests): the sample view.
   if (!hasSupabaseEnv()) return <ContactsScreen />;
 
   // The layout already loaded the viewer for this request; this reuses it.
   const { orgId, role } = await getViewer();
   const supabase = await createClient();
+  const openId = readOpenParam((await searchParams)?.[OPEN_PARAM]);
 
   let live: Awaited<ReturnType<typeof listCrmContacts>> | null = null;
   let followUps: Awaited<ReturnType<typeof listOpenFollowUps>> = {};
   let billingCustomers: BillingCustomerChoice[] = [];
+  let openContact: Awaited<ReturnType<typeof getCrmContact>> = null;
   try {
     // Fetched together: each trip to the database costs about the same.
     [live, followUps, billingCustomers] = await Promise.all([
@@ -185,6 +202,14 @@ export default async function CrmContactsPage() {
             return [];
           }),
     ]);
+    // A contact opened by link that is beyond the ones loaded is read by its id.
+    // An unknown or foreign id opens nothing, and so does a read that fails.
+    if (role !== 'viewer' && openId && !live.contacts.some((contact) => contact.id === openId)) {
+      openContact = await getCrmContact(supabase, orgId, openId).catch((error) => {
+        console.error('[crm/contacts] could not load the linked contact', errorCodeOf(error));
+        return null;
+      });
+    }
   } catch (error) {
     // The CRM migration is applied to a database separately from a deploy, so
     // the table can be missing for a while. The page says so; it never shows sample data in its place.
@@ -206,6 +231,8 @@ export default async function CrmContactsPage() {
       totalContacts={live.total}
       followUps={followUps}
       billingCustomers={billingCustomers}
+      openId={openId}
+      openContact={openContact}
       // Viewers can read contacts but the database refuses their writes.
       actions={role === 'viewer' ? undefined : ACTIONS}
     />

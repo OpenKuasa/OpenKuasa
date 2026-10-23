@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { usePathname, useSearchParams } from 'next/navigation';
 import { BarChart3, PieChart, Plus, Target, TrendingUp, Users } from 'lucide-react';
@@ -255,6 +255,10 @@ type ContactsScreenProps = {
   actions?: CrmContactActions;
   /** Bendahara's customers, for the form's "Billing customer" picker. Kasturi only. */
   billingCustomers?: BillingCustomerChoice[];
+  /** `?open=<id>`: the contact whose card opens on load, when it is not among `contacts`. Kasturi only. */
+  openContact?: Contact | null;
+  /** `?open=<id>`, when it is a valid id. */
+  openId?: string | null;
 };
 
 export default function ContactsScreen({
@@ -263,6 +267,8 @@ export default function ContactsScreen({
   followUps,
   actions,
   billingCustomers,
+  openContact = null,
+  openId = null,
 }: ContactsScreenProps = {}) {
   // With live contacts, only what is backed by real data is shown: the total
   // and the table. The trend, score and pipeline cards are sample figures and
@@ -273,7 +279,10 @@ export default function ContactsScreen({
   const [selected, setSelected] = useState<string[]>([]);
   // One thing is open at a time: the edit card, a delete question, or a
   // follow-up form.
-  const [editing, setEditing] = useState<Contact | null>(null);
+  // A link such as /crm/contacts?open=<id> opens that contact's card. An id that is not a contact of this workspace opens nothing.
+  const [editing, setEditing] = useState<Contact | null>(
+    actions && openId ? (rows.find((c) => c.id === openId) ?? openContact) : null,
+  );
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [followUpFor, setFollowUpFor] = useState<string | null>(null);
   const [importing, setImporting] = useState(false);
@@ -299,6 +308,10 @@ export default function ContactsScreen({
   // A link such as /crm/contacts?contact=<id> opens on that one contact,
   // whatever the view and filters are, so it works for an archived contact too.
   const pathname = usePathname();
+  // Once read, the link's contact leaves the address, so a reload does not reopen the card.
+  useEffect(() => {
+    if (openId && pathname) window.history.replaceState(null, '', pathname);
+  }, [openId, pathname]);
   const openedId = useSearchParams().get(CONTACT_PARAM);
   const opened = openedId ? (rows.find((c) => c.id === openedId) ?? null) : null;
   const shown = openedId ? (opened ? [opened] : []) : filtered.slice(0, pageSize);
@@ -387,6 +400,7 @@ export default function ContactsScreen({
             action={actions.save}
             editing={editing}
             billingCustomers={billingCustomers}
+            loadNotes={actions.notes}
             // An edit is finished once saved. After adding, the cleared form
             // stays for the next contact until it is closed.
             onSaved={() => {

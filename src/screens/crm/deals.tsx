@@ -78,6 +78,10 @@ type DealsScreenProps = {
   actions?: CrmDealActions;
   /** The workspace's rule that a deal marked lost needs a reason (Kasturi > Settings). */
   requireLostReason?: boolean;
+  /** `?open=<id>`: the deal whose card opens on load, when it is not among `deals`. */
+  openDeal?: CrmDeal | null;
+  /** `?open=<id>`, when it is a valid id. */
+  openId?: string | null;
   /** When the page was put together, as an ISO string: "today" for the report and the trend. */
   now?: string;
 };
@@ -90,6 +94,8 @@ export default function DealsScreen({
   invoices,
   actions,
   requireLostReason = false,
+  openDeal = null,
+  openId = null,
   now,
 }: DealsScreenProps = {}) {
   // With live deals every figure comes from them. The sample screen keeps
@@ -102,7 +108,11 @@ export default function DealsScreen({
   const allDeals = moves.deals;
   const at = useMemo(() => new Date(now ?? SAMPLE_NOW), [now]);
 
-  const [pipelineId, setPipelineId] = useState<string | null>(null);
+  // A link such as /crm/deals?open=<id> opens that deal's card. An id that is not a deal of this workspace opens nothing.
+  const linkedDeal =
+    actions && openId ? (loadedDeals.find((deal) => deal.id === openId) ?? openDeal) : null;
+
+  const [pipelineId, setPipelineId] = useState<string | null>(linkedDeal?.pipelineId ?? null);
   // The one picked, else the default, which is listed first.
   const pipeline = allPipelines.find((p) => p.id === pipelineId) ?? allPipelines[0] ?? null;
   const stages = useMemo(() => pipeline?.stages ?? [], [pipeline]);
@@ -118,7 +128,7 @@ export default function DealsScreen({
 
   // One thing is open at a time: the form card, or a question on one deal.
   const [adding, setAdding] = useState(newDealContactId !== null);
-  const [editing, setEditing] = useState<CrmDeal | null>(null);
+  const [editing, setEditing] = useState<CrmDeal | null>(linkedDeal);
   const [asking, setAsking] = useState<{ kind: 'delete' | 'lost'; id: string } | null>(null);
   const [reportOpen, setReportOpen] = useState(false);
   const [managing, setManaging] = useState(false);
@@ -167,14 +177,14 @@ export default function DealsScreen({
 
   // New Deal and Daily Report are plain buttons: what they open is focused
   // once it is on the page.
-  const [formOpened, setFormOpened] = useState(newDealContactId !== null ? 1 : 0);
+  const [formOpened, setFormOpened] = useState(newDealContactId !== null || linkedDeal ? 1 : 0);
   useEffect(() => {
     if (formOpened > 0) focusForm();
   }, [formOpened]);
-  // Once read, the contact leaves the address, so a reload does not reopen the form.
+  // Once read, the contact or deal leaves the address, so a reload does not reopen the form.
   useEffect(() => {
-    if (contactParam && pathname) window.history.replaceState(null, '', pathname);
-  }, [contactParam, pathname]);
+    if ((contactParam || openId) && pathname) window.history.replaceState(null, '', pathname);
+  }, [contactParam, openId, pathname]);
   useEffect(() => {
     if (reportOpen) reportCloseRef.current?.focus();
   }, [reportOpen]);
@@ -283,6 +293,7 @@ export default function DealsScreen({
             stages={stages}
             contacts={contacts ?? []}
             invoices={invoices}
+            loadNotes={actions.notes}
             // An edit is finished once saved. After adding, the cleared form
             // stays for the next deal until it is closed.
             onSaved={() => {

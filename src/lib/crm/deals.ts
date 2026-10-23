@@ -375,6 +375,27 @@ export async function listCrmDeals(
   };
 }
 
+/** One deal of the workspace by id, for a link to a deal beyond the ones loaded. Null when there is none. */
+export async function getCrmDeal(
+  client: SupabaseClient,
+  orgId: string,
+  id: string,
+): Promise<CrmDeal | null> {
+  const { data, error } = await client
+    .from('crm_deals')
+    .select(DEAL_COLUMNS)
+    .eq('org_id', orgId)
+    .eq('id', id)
+    .maybeSingle();
+
+  if (error) throw error;
+  if (!data) return null;
+
+  const row = data as unknown as CrmDealRow;
+  const names = await ownerNames(client, [row]);
+  return mapCrmDeal(row, row.owner_user_id ? (names.get(row.owner_user_id) ?? null) : null);
+}
+
 type DealContactRow = {
   id: string;
   company: string | null;

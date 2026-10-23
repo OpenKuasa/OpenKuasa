@@ -303,6 +303,27 @@ export async function listCrmContacts(
   };
 }
 
+/** One contact of the workspace by id, for a link to a contact beyond the ones loaded. Null when there is none. */
+export async function getCrmContact(
+  client: SupabaseClient,
+  orgId: string,
+  id: string,
+): Promise<CrmContact | null> {
+  const { data, error } = await client
+    .from('crm_contacts')
+    .select(CONTACT_COLUMNS)
+    .eq('org_id', orgId)
+    .eq('id', id)
+    .maybeSingle();
+
+  if (error) throw error;
+  if (!data) return null;
+
+  const row = data as unknown as CrmContactRow;
+  const names = await ownerNames(client, [row]);
+  return mapCrmContact(row, row.owner_user_id ? (names.get(row.owner_user_id) ?? null) : null);
+}
+
 export async function createCrmContact(
   client: SupabaseClient,
   payload: CrmContactInsert,
