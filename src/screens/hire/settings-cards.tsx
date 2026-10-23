@@ -1,11 +1,7 @@
 import Link from 'next/link';
 import type { ReactNode } from 'react';
-import { Globe, Users, Workflow } from 'lucide-react';
+import { Globe, Workflow } from 'lucide-react';
 import { BentoCard } from '@/components/bento/bento';
-import { Badge } from '@/components/ui/badge';
-import type { TeamMember } from '@/lib/account/data';
-import { PERMISSIONS, ROLES, roleLabel } from '@/lib/auth/permissions';
-import type { OrgRole } from '@/lib/auth/current-org';
 import { careersPath } from '@/lib/hire/public-careers';
 import type { SettingsModel } from '@/lib/hire/settings-model';
 import { cn } from '@/lib/utils';
@@ -19,8 +15,6 @@ import { cn } from '@/lib/utils';
 const LINK = 'inline-flex min-h-11 items-center font-medium text-primary underline-offset-4 hover:underline';
 const ROW = 'flex min-h-11 items-center justify-between gap-3 rounded-lg border bg-background/50 px-3 py-2';
 const NOTE = 'text-xs text-muted-foreground';
-/** How many people the team card lists before it says how many more there are. */
-const TEAM_SHOWN = 8;
 
 function SettingsCard({
   title,
@@ -129,57 +123,6 @@ export function CareersBoardCard({ board, failed }: { board: SettingsModel['boar
   );
 }
 
-/* ---- Hiring team ------------------------------------------------------ */
-
-/** "Owners, admins and members": a list of roles, plural, in sentence form. */
-function rolesInWords(roles: OrgRole[]): string {
-  const names = roles.map((r, i) => (i === 0 ? roleLabel(r) : r) + 's');
-  return names.length < 2 ? names.join('') : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
-}
-
-/** Who may change hiring data, from the one table of what each role may do. */
-function whoMayChange(): string {
-  const allow = PERMISSIONS.find((p) => p.capability === 'edit-data')?.allow ?? [];
-  const lookOnly = ROLES.filter((r) => !allow.includes(r));
-  const first = `${rolesInWords(allow)} can change hiring data.`;
-  return lookOnly.length ? `${first} ${rolesInWords(lookOnly)} can only look.` : first;
-}
-
-export function HiringTeamCard({ team, demo }: { team: TeamMember[] | null; demo: boolean }) {
-  // You first, so a long list never folds you into "and N more"; the rest keep the order they joined in.
-  const ordered = team ? [...team.filter((m) => m.isYou), ...team.filter((m) => !m.isYou)] : [];
-  const shown = ordered.slice(0, TEAM_SHOWN);
-  const more = (team?.length ?? 0) - shown.length;
-  return (
-    <SettingsCard title="Hiring team" subtitle="Everyone in your workspace" icon={Users}>
-      {demo ? (
-        <p className="text-sm">In your own workspace, the people on your team show here.</p>
-      ) : team === null ? (
-        <p className="text-sm text-muted-foreground">Couldn&apos;t load your team, please refresh</p>
-      ) : (
-        <ul className="space-y-1.5">
-          {shown.map((m) => (
-            <li key={m.userId} className={ROW}>
-              <span className="min-w-0 truncate text-sm font-medium">
-                {m.name}
-                {m.isYou ? <span className="font-normal text-muted-foreground"> (you)</span> : null}
-              </span>
-              <Badge variant="secondary" className="shrink-0">
-                {roleLabel(m.role)}
-              </Badge>
-            </li>
-          ))}
-          {more > 0 ? <li className={NOTE}>and {more} more</li> : null}
-        </ul>
-      )}
-      <p className={cn(NOTE, 'mt-3')}>{whoMayChange()}</p>
-      <Link href="/account/team" className={cn(LINK, 'text-sm')}>
-        Manage team
-      </Link>
-    </SettingsCard>
-  );
-}
-
 /* ---- greeting --------------------------------------------------------- */
 
 const DEMO_COMPANY = 'Rimba Ventures';
@@ -187,5 +130,5 @@ const DEMO_COMPANY = 'Rimba Ventures';
 /** The Settings subtitle: the viewer's own workspace, the demo company for a demo, or no company at all. */
 export function settingsGreeting(orgName: string | null | undefined, demo: boolean): string {
   const name = demo ? DEMO_COMPANY : (orgName ?? '').trim();
-  return name ? `Recruiting preferences for ${name}, Saudara.` : 'Recruiting preferences, Saudara.';
+  return name ? `Recruiting preferences for ${name}.` : 'Recruiting preferences.';
 }

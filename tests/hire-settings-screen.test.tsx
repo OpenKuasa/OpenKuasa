@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
-import type { TeamMember } from '@/lib/account/data';
+import type { WorkspaceOverview } from '@/lib/account/workspace-overview';
 import type { SettingsModel } from '@/lib/hire/settings-model';
 import { DEFAULT_HIRE_SETTINGS } from '@/lib/hire/types';
 
@@ -13,11 +13,11 @@ import { DEFAULT_HIRE_SETTINGS } from '@/lib/hire/types';
 const mocks = vi.hoisted(() => ({
   getViewer: vi.fn(),
   loadHire: vi.fn(),
-  getTeam: vi.fn(),
+  loadWorkspaceOverview: vi.fn(),
 }));
 
 vi.mock('@/lib/auth/viewer', () => ({ getViewer: mocks.getViewer }));
-vi.mock('@/lib/account/data', () => ({ getTeam: mocks.getTeam }));
+vi.mock('@/lib/account/workspace-overview', () => ({ loadWorkspaceOverview: mocks.loadWorkspaceOverview }));
 vi.mock('@/screens/hire/parts', () => ({
   LOAD_FAILED: <p>load failed</p>,
   loadHire: mocks.loadHire,
@@ -48,9 +48,8 @@ const model = (over: Partial<SettingsModel['board']> = {}): SettingsModel => ({
   board: { enabled: true, orgId: 'o1', listed: 4, hiddenOpen: 0, ...over },
 });
 
-const member = (over: Partial<TeamMember>): TeamMember => ({
-  userId: 'u', name: 'Someone', email: 's@example.com', initials: 'S', avatarUrl: null,
-  role: 'member', joinedAt: '2026-10-01T00:00:00Z', isYou: false, ...over,
+const workspace = (over: Partial<WorkspaceOverview> = {}): WorkspaceOverview => ({
+  companyName: 'Kedai Maju Sdn Bhd', registrationNo: '202601099999', members: 4, ...over,
 });
 
 const render = async () => renderToStaticMarkup(await SettingsScreen());
@@ -60,10 +59,7 @@ const words = (html: string) => html.replace(/<[^>]*>/g, ' ').replace(/&#x27;/g,
 beforeEach(() => {
   mocks.getViewer.mockReset().mockResolvedValue(viewer());
   mocks.loadHire.mockReset().mockResolvedValue({ model: model(), isDemo: false });
-  mocks.getTeam.mockReset().mockResolvedValue([
-    member({ userId: 'u1', name: 'Aisyah', role: 'owner', isYou: true }),
-    member({ userId: 'u2', name: 'Farah', role: 'viewer' }),
-  ]);
+  mocks.loadWorkspaceOverview.mockReset().mockResolvedValue(workspace());
 });
 
 describe('the screen', () => {
@@ -111,71 +107,46 @@ describe('the screen', () => {
     expect(html).not.toContain('href="/careers/o1"');
   });
 
-  it('lists the team with their roles, marks you, and links to the Team page', async () => {
+  it('shows the Workspace card first, with the company, the team size and links to Account', async () => {
     const html = await render();
     const text = words(html);
-    expect(text).toContain('Aisyah (you) Owner');
-    expect(text).toContain('Farah Viewer');
-    expect(text).toContain('Owners, admins and members can change hiring data. Viewers can only look.');
+    expect(text).toMatch(/Settings.*Workspace.*Application form/);
+    expect(text).toContain('Kedai Maju Sdn Bhd Reg. no 202601099999');
+    expect(text).toContain('4 people have access to this workspace');
+    expect(html).toMatch(/<a [^>]*href="\/account\/company"[^>]*>Edit company<\/a>/);
     expect(html).toMatch(/<a [^>]*href="\/account\/team"[^>]*>Manage team<\/a>/);
-  });
-
-  it('shows the first eight people and says how many more there are', async () => {
-    mocks.getTeam.mockResolvedValue(
-      Array.from({ length: 11 }, (_, i) => member({ userId: `u${i}`, name: `Person ${i + 1}` })),
-    );
-    const text = words(await render());
-    expect(text).toContain('Person 8');
-    expect(text).not.toMatch(/Person 9\b/);
-    expect(text).toContain('and 3 more');
-  });
-
-  it('always lists you, even when you joined after the first eight', async () => {
-    mocks.getTeam.mockResolvedValue(
-      Array.from({ length: 11 }, (_, i) => member({ userId: `u${i}`, name: `Person ${i + 1}`, isYou: i === 10 })),
-    );
-    const text = words(await render());
-    expect(text).toMatch(/^.*Hiring team.*Person 11 \(you\).*and 3 more/);
-    expect(text).not.toMatch(/Person 8\b/);
+    expect(text).not.toContain('Hiring team');
   });
 
   it('lets each card title and subtitle wrap instead of being cut off, and gives every link 44 pixels', async () => {
     const html = await render();
     const wraps = (text: string) =>
       new RegExp(`<[a-z]+[^>]*class="[^"]*\\bwhitespace-normal\\b[^"]*"[^>]*>${text}</`).test(html);
-    for (const t of ['Hiring pipeline', 'Stages candidates move through', 'Careers page', 'Your own public job board', 'Hiring team', 'Everyone in your workspace']) {
+    for (const t of ['Hiring pipeline', 'Stages candidates move through', 'Careers page', 'Your own public job board']) {
       expect(wraps(t), t).toBe(true);
     }
     const links = html.match(/<a\b[^>]*>/g) ?? [];
-    expect(links.length).toBe(4);
+    expect(links.length).toBe(5);
     for (const tag of links) expect(tag).toContain('min-h-11');
   });
 
-  it('says so on the team card alone when the team cannot be read', async () => {
-    mocks.getTeam.mockRejectedValue(new Error('down'));
+  it('says so on the Workspace card alone when the workspace cannot be read', async () => {
+    mocks.loadWorkspaceOverview.mockResolvedValue(null);
     const text = words(await render());
-    expect(text).toContain("Couldn't load your team, please refresh");
+    expect(text).toContain("Workspace Set in your account, used across every product Couldn't load");
     expect(text).toContain('Applied 7');
-  });
-
-  it('shows no one in the demo, and says where your own team shows', async () => {
-    mocks.getViewer.mockResolvedValue(viewer({ isDemo: true }));
-    const text = words(await render());
-    expect(text).toContain('In your own workspace, the people on your team show here.');
-    expect(text).not.toContain('Aisyah (you)');
-    expect(mocks.getTeam).not.toHaveBeenCalled();
   });
 
   it('says so on the hiring cards when the hiring data cannot be read', async () => {
     mocks.loadHire.mockResolvedValue({ model: null, isDemo: false });
     const html = await render();
     expect(html.match(/load failed/g)?.length).toBe(3);
-    expect(words(html)).toContain('Aisyah (you)');
+    expect(words(html)).toContain('Kedai Maju Sdn Bhd Reg. no');
   });
 
   it('escapes names that contain markup', async () => {
     mocks.getViewer.mockResolvedValue(viewer({ orgName: '<b>Kedai</b>' }));
-    mocks.getTeam.mockResolvedValue([member({ name: '<i>Zed</i>' })]);
+    mocks.loadWorkspaceOverview.mockResolvedValue(workspace({ companyName: '<i>Zed</i>' }));
     const html = await render();
     expect(html).toContain('&lt;b&gt;Kedai&lt;/b&gt;');
     expect(html).toContain('&lt;i&gt;Zed&lt;/i&gt;');
@@ -183,27 +154,27 @@ describe('the screen', () => {
   });
 
   it('greets the workspace, or the demo company for a demo', async () => {
-    expect(await render()).toContain('Recruiting preferences for Kedai Maju Sdn Bhd, Saudara.');
+    expect(await render()).toContain('Recruiting preferences for Kedai Maju Sdn Bhd.');
     mocks.loadHire.mockResolvedValue({ model: model(), isDemo: true });
-    expect(await render()).toContain('Recruiting preferences for Rimba Ventures, Saudara.');
+    expect(await render()).toContain('Recruiting preferences for Rimba Ventures.');
   });
 });
 
 describe('settingsGreeting', () => {
   it('names a real workspace', () => {
-    expect(settingsGreeting('Kedai Maju Sdn Bhd', false)).toBe('Recruiting preferences for Kedai Maju Sdn Bhd, Saudara.');
+    expect(settingsGreeting('Kedai Maju Sdn Bhd', false)).toBe('Recruiting preferences for Kedai Maju Sdn Bhd.');
   });
   it('leaves the company out when the name is empty, spaces, or missing', () => {
-    expect(settingsGreeting('', false)).toBe('Recruiting preferences, Saudara.');
-    expect(settingsGreeting('   ', false)).toBe('Recruiting preferences, Saudara.');
-    expect(settingsGreeting(null, false)).toBe('Recruiting preferences, Saudara.');
-    expect(settingsGreeting(undefined, false)).toBe('Recruiting preferences, Saudara.');
+    expect(settingsGreeting('', false)).toBe('Recruiting preferences.');
+    expect(settingsGreeting('   ', false)).toBe('Recruiting preferences.');
+    expect(settingsGreeting(null, false)).toBe('Recruiting preferences.');
+    expect(settingsGreeting(undefined, false)).toBe('Recruiting preferences.');
   });
   it('uses the demo name for the demo workspace whatever the stored name is', () => {
-    expect(settingsGreeting('Anything', true)).toBe('Recruiting preferences for Rimba Ventures, Saudara.');
+    expect(settingsGreeting('Anything', true)).toBe('Recruiting preferences for Rimba Ventures.');
   });
   it('trims the name', () => {
-    expect(settingsGreeting('  Kedai  ', false)).toBe('Recruiting preferences for Kedai, Saudara.');
+    expect(settingsGreeting('  Kedai  ', false)).toBe('Recruiting preferences for Kedai.');
   });
 });
 

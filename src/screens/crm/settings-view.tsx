@@ -2,11 +2,12 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
-import { Bell, Check, Download, FileText, GitBranch, Plug, ShieldCheck, Users } from 'lucide-react';
+import { Bell, Check, Download, FileText, GitBranch, Plug, ShieldCheck } from 'lucide-react';
 import { ScreenContainer } from '@/components/screen/screen-container';
 import { PageHeader } from '@/components/screen/page-header';
 import { BentoGrid, BentoCard } from '@/components/bento/bento';
 import { Button } from '@/components/ui/button';
+import { WorkspaceCard } from '@/components/settings/workspace-card';
 import type { CrmConnections } from '@/lib/crm/connections';
 import type { CrmFormAction } from '@/lib/crm/form-state';
 import {
@@ -16,7 +17,7 @@ import {
   type MyKasturiNotifications,
 } from '@/lib/crm/settings';
 import { cn } from '@/lib/utils';
-import { ConnectionRows, plural, StatusRow as Row } from './connection-rows';
+import { ConnectionRows, StatusRow, plural } from './connection-rows';
 import { useCrmForm } from './crm-form';
 
 type ExportNote = { tone: 'error' | 'info'; text: string } | null;
@@ -257,6 +258,8 @@ export function CrmSettingsView({
       <PageHeader title="Settings" subtitle="Kasturi's own rules and notifications, and where the rest of your workspace is set." />
 
       <BentoGrid>
+        <WorkspaceCard overview={overview} />
+
         <BentoCard
           title="Deal rules"
           subtitle="Rules everyone in the workspace works to"
@@ -275,28 +278,6 @@ export function CrmSettingsView({
           <NotificationsForm notifications={notifications} action={saveNotifications} />
         </BentoCard>
 
-        <BentoCard
-          title="Workspace"
-          subtitle="Set in your account, used across every product"
-          // The card's icon chip only draws icons from the animated set.
-          icon={Users}
-          className="col-span-2 md:col-span-6"
-        >
-          <ul className="space-y-1">
-            <Row
-              label={overview.companyName}
-              value={overview.registrationNo ? `Reg. no ${overview.registrationNo}` : 'No registration number yet'}
-              href="/account/company"
-              linkLabel="Edit company"
-            />
-            <Row
-              label="Team"
-              value={plural(overview.members, 'person has', 'people have') + ' access to this workspace'}
-              href="/account/team"
-              linkLabel="Manage team"
-            />
-          </ul>
-        </BentoCard>
 
         <BentoCard
           title="Pipelines"
@@ -315,7 +296,7 @@ export function CrmSettingsView({
           ) : (
             <ul className="space-y-1">
               {overview.pipelines.map((pipeline) => (
-                <Row
+                <StatusRow
                   key={pipeline.id}
                   label={pipeline.name}
                   value={`${plural(pipeline.stages, 'stage', 'stages')}${pipeline.isDefault ? ' · the default for new deals' : ''}`}
