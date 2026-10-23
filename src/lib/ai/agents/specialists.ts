@@ -20,7 +20,7 @@ import {
   type ToolSet,
 } from 'ai';
 import { z } from 'zod';
-import { subAgentSystem } from '@/lib/ai/agents/prompts';
+import { subAgentSystem, withToday } from '@/lib/ai/agents/prompts';
 import { cachedInstructions } from '@/lib/ai/prompt-cache';
 import { prepareCvStep } from '@/lib/ai/hire-tools';
 import {
@@ -580,12 +580,14 @@ function askTool(product: ProductToolkit, team: TeamContext, turn: TurnState, me
         (team.transcript ? `The conversation so far:\n${team.transcript}\n\n` : '') +
         `Task from Tuah: ${task}`;
 
+      const specialistPrompt = subAgentSystem(product.key, canChange);
       yield snapshot('working');
       try {
         const result = streamText({
           model: getModel('worker', team.apiKey),
           // A specialist's prompt is the same for every task of its kind: marked for the provider's cache.
-          system: cachedInstructions(subAgentSystem(product.key, canChange)),
+          // Today's date follows it, unmarked, so "this week" or "esok" in Tuah's task resolves to the right day.
+          system: cachedInstructions(withToday(specialistPrompt, new Date()), specialistPrompt),
           prompt: given,
           tools: specialistTools(product, team, results, prepared, given, turn, messages),
           // A CV this specialist reads reaches its own model as a user file in the next step:

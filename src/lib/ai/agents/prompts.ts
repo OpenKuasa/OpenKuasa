@@ -104,6 +104,16 @@ function todayBlock(now: Date): string {
 }
 
 /**
+ * A fixed prompt with the TODAY block after it, for the assistants whose prompt is built elsewhere
+ * (Tuah, and the specialists Tuah asks). Pass `fixed` as the cached part so the date is never cached.
+ */
+export function withToday(fixed: string, now: Date): string {
+  return `${fixed}
+
+${todayBlock(now)}`;
+}
+
+/**
  * Kasturi's instructions for one turn: the fixed prompt plus today's date in
  * Malaysia, which dates like "tomorrow" and "next Friday" are worked out from.
  */

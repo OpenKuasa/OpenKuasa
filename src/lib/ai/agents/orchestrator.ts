@@ -48,6 +48,7 @@ import {
   kasturiSystem,
   tuahSystem,
   tuahTeamSystem,
+  withToday,
 } from '@/lib/ai/agents/prompts';
 import { createTeamTools, type TeamContext } from '@/lib/ai/agents/specialists';
 import type { Screen } from '@/lib/chat/screen';
@@ -311,7 +312,8 @@ export function runTuah(
   return streamText({
     model: getModel('orchestrator', apiKey),
     // Tuah's prompt is the same on every call of a turn and from one turn to the next: marked for the provider's cache.
-    system: cachedInstructions(system),
+    // Today's date and time follow it, unmarked.
+    system: cachedInstructions(withToday(system, new Date()), system),
     messages,
     tools,
     toolApproval,
