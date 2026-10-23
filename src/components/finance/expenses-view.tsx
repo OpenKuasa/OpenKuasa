@@ -1,11 +1,10 @@
 'use client';
 
-import { AgentNoteMarker } from '@/components/finance/agent-note-marker';
-import type { NoteCounts } from '@/lib/finance/agent/notes';
 import { useState } from 'react';
 import { Ban, Banknote, Check, Download, FileText, Pencil, PieChart, Plus, Search, Tags, Trash2, TrendingUp, Undo2 } from 'lucide-react';
 import { BentoCard, BentoGrid, BentoStat } from '@/components/bento/bento';
 import { AreaTrend, DonutStat, type Series } from '@/components/charts';
+import { AgentNoteMarker } from '@/components/finance/agent-note-marker';
 import { type CategoryActions, CategoriesCard } from '@/components/finance/categories-card';
 import { ConfirmRow } from '@/components/finance/confirm-row';
 import { downloadCsv } from '@/components/finance/download-csv';
@@ -24,6 +23,7 @@ import { Input } from '@/components/ui/input';
 import { LiveDot } from '@/components/ui/live-dot';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import type { NoteCounts } from '@/lib/finance/agent/notes';
 import { localIsoDate } from '@/lib/finance/bill-math';
 import {
   EXPENSE_STATUS_LABELS,

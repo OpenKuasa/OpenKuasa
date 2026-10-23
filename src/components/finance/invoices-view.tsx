@@ -1,7 +1,5 @@
 'use client';
 
-import { AgentNoteMarker } from '@/components/finance/agent-note-marker';
-import type { NoteCounts } from '@/lib/finance/agent/notes';
 import { useState } from 'react';
 import {
   BadgeCheck,
@@ -21,6 +19,7 @@ import {
 } from 'lucide-react';
 import { BentoCard, BentoGrid, BentoStat } from '@/components/bento/bento';
 import { AreaTrend, DonutStat, type Series } from '@/components/charts';
+import { AgentNoteMarker } from '@/components/finance/agent-note-marker';
 import type { RecordPayment } from '@/components/finance/allocation-form-card';
 import { ConfirmRow } from '@/components/finance/confirm-row';
 import { CreditNoteFormCard, type CreditNoteFormActions } from '@/components/finance/credit-note-form-card';
@@ -40,6 +39,7 @@ import { Input } from '@/components/ui/input';
 import { LiveDot } from '@/components/ui/live-dot';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import type { NoteCounts } from '@/lib/finance/agent/notes';
 import { localIsoDate } from '@/lib/finance/bill-math';
 import type { FinanceContact } from '@/lib/finance/contacts';
 import { type CreditNoteSaved, creditNoteSavedNote, creditableInvoices } from '@/lib/finance/credit-note-form';
