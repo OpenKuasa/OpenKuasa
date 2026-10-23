@@ -52,19 +52,22 @@ async function loadKeys(supabase: SupabaseClient, viewer: Viewer): Promise<KeyLi
   }));
 }
 
-/** The person's sign-in connections and the workspace each acts in. Null when the auth server could not say. */
-async function loadApps(supabase: SupabaseClient, viewer: Viewer): Promise<ConnectedApp[] | null> {
+/**
+ * The person's sign-in connections and the workspace each acts in. Null when the auth server could not say; `quiet`
+ * (sign-in switched off, where the auth server's OAuth may well be off too) leaves that unlogged.
+ */
+async function loadApps(supabase: SupabaseClient, viewer: Viewer, quiet = false): Promise<ConnectedApp[] | null> {
+  const failed = (error: unknown) => {
+    if (!quiet) log('list grants', error);
+    return null;
+  };
   let grants;
   try {
     const { data, error } = await supabase.auth.oauth.listGrants();
-    if (error || !data) {
-      log('list grants', error);
-      return null;
-    }
+    if (error || !data) return failed(error);
     grants = data;
   } catch (error) {
-    log('list grants', error);
-    return null;
+    return failed(error);
   }
   if (grants.length === 0) return [];
 
@@ -100,7 +103,8 @@ export default async function DevelopersPage() {
   const live = hasSupabaseEnv() && !viewer.isDemo;
   const serverUrl = `${originFromHeaders(await headers()).replace(/\/+$/, '')}/api/mcp`;
   const seesWorkspace = live && can(viewer.role, 'manage-developers');
-  // Sign-in connections stay off until switched on: no grants are read and the card says Coming soon.
+  // Sign-in connections stay off until switched on: the card says Coming soon, but still lists (to disconnect) any
+  // connection made while it was on.
   const signIn = signInEnabled();
 
   let keys: KeyListing[] | null = [];
@@ -110,7 +114,7 @@ export default async function DevelopersPage() {
     const supabase = await createClient();
     [keys, apps, needsCode] = await Promise.all([
       loadKeys(supabase, viewer),
-      signIn ? loadApps(supabase, viewer) : Promise.resolve([]),
+      loadApps(supabase, viewer, !signIn),
       // A person with an authenticator gives its code when making a key; `getViewer` already made this session aal2.
       getMfaStatus(supabase).then((status) => status.factors.length > 0),
     ]);

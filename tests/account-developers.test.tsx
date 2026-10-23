@@ -274,23 +274,15 @@ describe('the Developers page', () => {
     expect(html).toContain('Your API keys');
   });
 
-  test('with sign-in switched off, connected apps and the Claude Desktop setup say Coming soon; keys are unchanged', async () => {
+  test('with sign-in switched off and nothing connected, connected apps and the Claude Desktop setup say Coming soon; keys are unchanged', async () => {
     vi.stubEnv('MCP_SIGN_IN_ENABLED', '');
     mocks.getViewer.mockResolvedValue(viewer('member'));
-    const client = session({
-      grants: {
-        data: [{ client: { id: CLIENT, name: 'Claude', uri: 'https://claude.ai', logo_uri: '' }, scopes: ['openid'], granted_at: '2026-10-21T08:00:00.000Z' }],
-        error: null,
-      },
-      bindings: [{ user_id: ALICE, client_id: CLIENT, org_id: ORG_B }],
-      keys: [keyRow(KEY_ALICE, ALICE, 'Laptop Cursor')],
-    });
+    session({ keys: [keyRow(KEY_ALICE, ALICE, 'Laptop Cursor')] });
     const html = await page();
-    expect(client.auth.oauth.listGrants).not.toHaveBeenCalled();
     const apps = html.slice(html.indexOf('Connected apps'), html.indexOf('Set up'));
     expect(apps).toContain('Coming soon');
     expect(apps).not.toContain('Disconnect');
-    expect(apps).not.toContain('Kopi Co');
+    expect(apps).not.toContain('No apps connected yet.');
     const setup = html.slice(html.indexOf('Set up'), html.indexOf('Webhooks'));
     const desktop = setup.slice(setup.indexOf('Claude Desktop and claude.ai'), setup.indexOf('Claude Code'));
     expect(desktop).toContain('Coming soon');
@@ -300,6 +292,52 @@ describe('the Developers page', () => {
     expect(setup).toContain('config.toml');
     expect(html).toContain('Laptop Cursor');
     expect(html).toContain('Create key');
+  });
+
+  test('with sign-in switched off, connections made while it was on are still listed with Disconnect', async () => {
+    vi.stubEnv('MCP_SIGN_IN_ENABLED', '');
+    mocks.getViewer.mockResolvedValue(viewer('member'));
+    const client = session({
+      grants: {
+        data: [{ client: { id: CLIENT, name: 'Claude', uri: 'https://claude.ai', logo_uri: '' }, scopes: ['openid'], granted_at: '2026-10-21T08:00:00.000Z' }],
+        error: null,
+      },
+      bindings: [{ user_id: ALICE, client_id: CLIENT, org_id: ORG_B }],
+    });
+    const html = await page();
+    expect(client.auth.oauth.listGrants).toHaveBeenCalled();
+    const apps = html.slice(html.indexOf('Connected apps'), html.indexOf('Set up'));
+    expect(apps).toContain('Claude');
+    expect(apps).toContain('Kopi Co');
+    expect(apps).toContain('Disconnect');
+    expect(apps).toContain(`value="${CLIENT}"`);
+    expect(apps).toContain('New sign-in connections aren&#x27;t available');
+    expect(apps).not.toContain('Coming soon');
+    // Setting up a new sign-in connection stays unavailable.
+    expect(html).not.toContain('Add custom connector');
+  });
+
+  test('with sign-in switched off, connected apps that cannot be read say Coming soon, not an error', async () => {
+    vi.stubEnv('MCP_SIGN_IN_ENABLED', '');
+    mocks.getViewer.mockResolvedValue(viewer('member'));
+    session({ grants: { data: null, error: new Error('oauth server disabled') } });
+    const html = await page();
+    const apps = html.slice(html.indexOf('Connected apps'), html.indexOf('Set up'));
+    expect(apps).toContain('Coming soon');
+    expect(apps).not.toContain('Couldn&#x27;t load');
+    expect(apps).not.toContain('Disconnect');
+    expect(html).toContain('Your API keys');
+  });
+
+  test('with sign-in switched off, the demo reads no grants and says Coming soon', async () => {
+    vi.stubEnv('MCP_SIGN_IN_ENABLED', '');
+    mocks.getViewer.mockResolvedValue(viewer('viewer', true));
+    const client = session();
+    const html = await page();
+    expect(client.auth.oauth.listGrants).not.toHaveBeenCalled();
+    const apps = html.slice(html.indexOf('Connected apps'), html.indexOf('Set up'));
+    expect(apps).toContain('Coming soon');
+    expect(apps).not.toContain('Disconnect');
   });
 
   test('switched on, connected apps are read and listed', async () => {

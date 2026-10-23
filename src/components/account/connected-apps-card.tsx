@@ -55,9 +55,33 @@ function DisconnectButton({ clientId, name }: { clientId: string; name: string }
   );
 }
 
+function AppList({ apps }: { apps: ConnectedApp[] }) {
+  return (
+    <ul className="space-y-1">
+      {apps.map((app) => (
+        <li
+          key={app.clientId}
+          className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 rounded-lg border bg-background/50 px-3 py-2"
+        >
+          <div className="min-w-0">
+            <p className="truncate text-sm font-medium">{app.name}</p>
+            <p className="truncate text-xs text-muted-foreground">
+              {[app.workspace ? `Acts in ${app.workspace}` : 'Workspace set on first use', connectedOn(app.grantedAt)]
+                .filter(Boolean)
+                .join(' · ')}
+            </p>
+          </div>
+          <DisconnectButton clientId={app.clientId} name={app.name} />
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 /**
  * "Connected apps": the person's sign-in connections. `apps` is null when they could not be read. `comingSoon` while
- * sign-in connections are switched off.
+ * sign-in connections are switched off: connections made while they were on are still listed, so they can be
+ * disconnected; with none (or none readable) the card says Coming soon.
  */
 export function ConnectedAppsCard({
   apps,
@@ -75,33 +99,29 @@ export function ConnectedAppsCard({
       icon={Plug}
       className="col-span-2 md:col-span-12"
     >
-      {comingSoon ? (
-        <p className="text-sm text-muted-foreground">Coming soon.</p>
-      ) : readOnly ? (
-        <ReadOnlyNotice>The demo workspace is read-only. Sign up to connect AI tools.</ReadOnlyNotice>
+      {readOnly ? (
+        comingSoon ? (
+          <p className="text-sm text-muted-foreground">Coming soon.</p>
+        ) : (
+          <ReadOnlyNotice>The demo workspace is read-only. Sign up to connect AI tools.</ReadOnlyNotice>
+        )
+      ) : comingSoon ? (
+        apps && apps.length > 0 ? (
+          <div className="space-y-2">
+            <p className="text-sm text-muted-foreground">
+              New sign-in connections aren&apos;t available. You can still disconnect these.
+            </p>
+            <AppList apps={apps} />
+          </div>
+        ) : (
+          <p className="text-sm text-muted-foreground">Coming soon.</p>
+        )
       ) : apps === null ? (
         <p className="grid min-h-16 place-items-center text-sm text-muted-foreground">Couldn&apos;t load</p>
       ) : apps.length === 0 ? (
         <p className="text-sm text-muted-foreground">No apps connected yet.</p>
       ) : (
-        <ul className="space-y-1">
-          {apps.map((app) => (
-            <li
-              key={app.clientId}
-              className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 rounded-lg border bg-background/50 px-3 py-2"
-            >
-              <div className="min-w-0">
-                <p className="truncate text-sm font-medium">{app.name}</p>
-                <p className="truncate text-xs text-muted-foreground">
-                  {[app.workspace ? `Acts in ${app.workspace}` : 'Workspace set on first use', connectedOn(app.grantedAt)]
-                    .filter(Boolean)
-                    .join(' · ')}
-                </p>
-              </div>
-              <DisconnectButton clientId={app.clientId} name={app.name} />
-            </li>
-          ))}
-        </ul>
+        <AppList apps={apps} />
       )}
     </BentoCard>
   );
