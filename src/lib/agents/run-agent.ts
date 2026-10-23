@@ -153,6 +153,6 @@ export async function runAgent(
   } catch {
     // Deliberately drop the exception: it may carry request details or a key.
     // The steps that completed before the failure were still paid for.
-    return finish('failed', { error: 'digest failed', cost_cents: cost });
+    return finish('failed', { error: def.digest ? 'digest failed' : 'run failed', cost_cents: cost });
   }
 }

@@ -54,23 +54,23 @@ import {
 } from '@/lib/reach/capabilities';
 import {
   setAgentCadence,
-  setAgentCadenceInput,
+  reachSetAgentCadenceInput,
   setAgentCap,
-  setAgentCapInput,
+  reachSetAgentCapInput,
   setAgentEnabled,
-  setAgentEnabledInput,
+  reachSetAgentEnabledInput,
 } from '@/lib/agents/config';
 import {
   cancelSchedule,
   cancelScheduleInput,
   createSchedule,
-  createScheduleInput,
+  reachCreateScheduleInput,
   pauseSchedule,
   pauseScheduleInput,
   resumeSchedule,
   resumeScheduleInput,
   setWorkspaceCaps,
-  setWorkspaceCapsInput,
+  reachSetWorkspaceCapsInput,
   syncCadenceSchedule,
   updateSchedule,
   updateScheduleInput,
@@ -320,11 +320,11 @@ async function runAgentConfig<I, O>(
 }
 
 export async function setAgentEnabledAction(input: unknown) {
-  return runAgentConfig(setAgentEnabledInput, input, setAgentEnabled);
+  return runAgentConfig(reachSetAgentEnabledInput, input, setAgentEnabled);
 }
 export async function setAgentCadenceAction(input: unknown) {
   // The dropdown also drives the schedule table (the runner reads only that).
-  return runAgentConfig(setAgentCadenceInput, input, async (ctx, parsed) => {
+  return runAgentConfig(reachSetAgentCadenceInput, input, async (ctx, parsed) => {
     const result = await setAgentCadence(ctx, parsed);
     if (!result.ok) return result;
     const synced = await syncCadenceSchedule(ctx, parsed.cadence, { agentKey: parsed.agent_key });
@@ -332,7 +332,7 @@ export async function setAgentCadenceAction(input: unknown) {
   });
 }
 export async function setAgentCapAction(input: unknown) {
-  return runAgentConfig(setAgentCapInput, input, setAgentCap);
+  return runAgentConfig(reachSetAgentCapInput, input, setAgentCap);
 }
 
 /** Same shape as {@link runAgentConfig}, for schedules + workspace caps. */
@@ -351,7 +351,7 @@ async function runSchedule<I, O>(
 }
 
 export async function createScheduleAction(input: unknown) {
-  return runSchedule(createScheduleInput, input, createSchedule);
+  return runSchedule(reachCreateScheduleInput, input, createSchedule);
 }
 export async function updateScheduleAction(input: unknown) {
   return runSchedule(updateScheduleInput, input, updateSchedule);
@@ -366,7 +366,7 @@ export async function cancelScheduleAction(input: unknown) {
   return runSchedule(cancelScheduleInput, input, cancelSchedule);
 }
 export async function setWorkspaceCapsAction(input: unknown) {
-  return runSchedule(setWorkspaceCapsInput, input, setWorkspaceCaps);
+  return runSchedule(reachSetWorkspaceCapsInput, input, setWorkspaceCaps);
 }
 
 /** What the person who pressed "Run now" is told when the start gate refuses. */

@@ -14,7 +14,10 @@ export type Candidate = {
   input: unknown;
   title: string;
   detail: string | null;
-  /** Stored on the proposal row (`check_key`) and handed to the definition's dedupe key. */
+  /**
+   * Stored on the proposal row (`check_key`) and handed to the definition's dedupe key.
+   * At most 64 characters (the database column limit).
+   */
   checkKey?: string;
   fillInput?: (name: string | undefined) => unknown;
 };

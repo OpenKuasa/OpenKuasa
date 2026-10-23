@@ -1,7 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { z } from 'zod';
 import { agentKeySchema } from './agent-keys';
-import type { AgentConfig } from './types';
+import { WEEKLY_STUDIO, type AgentConfig } from './types';
 
 export { AGENT_KEYS, agentKeySchema } from './agent-keys';
 
@@ -13,6 +13,13 @@ const cadence = z.enum(['off', 'daily', 'weekly']);
 export const setAgentEnabledInput = z.object({ agent_key: agentKey, enabled: z.boolean() });
 export const setAgentCadenceInput = z.object({ agent_key: agentKey, cadence });
 export const setAgentCapInput = z.object({ agent_key: agentKey, max_cost_cents: z.number().int().min(0).max(10000) });
+
+// Reach's own screens and chat tool accept ONLY Jebat's key: the generic schemas above also
+// accept every other registered agent (e.g. 'crm-focus'), which reach paths must never touch.
+const reachAgentKey = z.literal(WEEKLY_STUDIO);
+export const reachSetAgentEnabledInput = setAgentEnabledInput.extend({ agent_key: reachAgentKey });
+export const reachSetAgentCadenceInput = setAgentCadenceInput.extend({ agent_key: reachAgentKey });
+export const reachSetAgentCapInput = setAgentCapInput.extend({ agent_key: reachAgentKey });
 const COLS =
   'id,org_id,agent_key,enabled,cadence,max_cost_cents,daily_cap_cents,weekly_cap_cents,last_run_at,created_at,updated_at';
 

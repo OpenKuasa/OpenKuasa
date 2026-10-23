@@ -6,5 +6,5 @@ import { WEEKLY_STUDIO } from '@/lib/agents/types';
 // module load) is a runtime import cycle. tests/agent-config.test.ts asserts this list
 // equals [...AGENTS.keys()], so adding an agent to the registry without listing it here
 // fails the test.
-export const AGENT_KEYS: readonly [string, ...string[]] = [WEEKLY_STUDIO];
+export const AGENT_KEYS: readonly [string, ...string[]] = [WEEKLY_STUDIO, 'crm-focus'];
 export const agentKeySchema = z.enum(AGENT_KEYS);

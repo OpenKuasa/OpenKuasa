@@ -12,8 +12,7 @@ const agentKey = agentKeySchema;
 const iso = z.string().datetime({ offset: true });
 const FAILED = { ok: false, error: 'That change could not be saved.' } as const;
 
-export const createScheduleInput = z
-  .object({
+const createScheduleShape = z.object({
     agent_key: agentKey,
     interval_seconds: z.number().int().min(300).max(31_536_000),
     starts_at: iso.optional(),
@@ -21,11 +20,15 @@ export const createScheduleInput = z
     max_runs: z.number().int().min(1).max(1000).optional(),
     max_total_cents: z.number().int().min(0).max(100_000).optional(),
     nl_text: z.string().trim().max(200).optional(),
-  })
-  .refine((v) => !v.end_at || new Date(v.end_at) > new Date(), {
-    message: 'end_at must be in the future',
-    path: ['end_at'],
   });
+const endInFuture = (v: { end_at?: string }) => !v.end_at || new Date(v.end_at) > new Date();
+const endInFutureIssue = { message: 'end_at must be in the future', path: ['end_at'] };
+
+export const createScheduleInput = createScheduleShape.refine(endInFuture, endInFutureIssue);
+/** Reach's chat tool and screen: Jebat's key only (the generic schema accepts every agent). */
+export const reachCreateScheduleInput = createScheduleShape
+  .extend({ agent_key: z.literal(WEEKLY_STUDIO) })
+  .refine(endInFuture, endInFutureIssue);
 
 export const updateScheduleInput = z.object({
   id: z.string().uuid(),
@@ -43,6 +46,10 @@ export const setWorkspaceCapsInput = z.object({
   agent_key: agentKey.default(WEEKLY_STUDIO),
   daily_cap_cents: z.number().int().min(0).max(1_000_000),
   weekly_cap_cents: z.number().int().min(0).max(1_000_000),
+});
+
+export const reachSetWorkspaceCapsInput = setWorkspaceCapsInput.extend({
+  agent_key: z.literal(WEEKLY_STUDIO).default(WEEKLY_STUDIO),
 });
 
 const COLS =
