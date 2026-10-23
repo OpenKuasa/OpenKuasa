@@ -11,7 +11,6 @@ import {
   ClipboardCheck,
   ClipboardList,
   CalendarDays,
-  SlidersHorizontal,
   TrendingUp,
   MessageSquare,
   Zap,
@@ -133,9 +132,9 @@ export const PRODUCTS: Product[] = [
         ],
       },
       {
-        label: 'Setup',
+        label: 'Configuration',
         items: [
-          { label: 'Ad Settings', slug: 'ad-settings', icon: SlidersHorizontal },
+          { label: 'Settings', slug: 'ad-settings', icon: Settings },
         ],
       },
     ],
@@ -381,7 +380,7 @@ export const PRODUCTS: Product[] = [
       {
         label: 'Configuration',
         items: [
-          { label: 'Accounting Settings', slug: 'settings', icon: Settings },
+          { label: 'Settings', slug: 'settings', icon: Settings },
         ],
       },
     ],
