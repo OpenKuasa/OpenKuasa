@@ -4,6 +4,8 @@ import { BentoCard, BentoGrid } from '@/components/bento/bento';
 import { PageHeader } from '@/components/screen/page-header';
 import { ScreenContainer } from '@/components/screen/screen-container';
 import { AttendanceSettingsForm } from '@/components/people/attendance-settings-form';
+import { WorkspaceCard } from '@/components/settings/workspace-card';
+import { loadWorkspaceOverview } from '@/lib/account/workspace-overview';
 import { loadSettingsModel } from '@/lib/people/documents';
 import { HrOnlyScreen, LOAD_FAILED, loadPeople } from './parts';
 
@@ -22,15 +24,18 @@ export default async function SettingsScreen() {
 
   if (model?.hr_only) return <HrOnlyScreen title="Settings" />;
   const settings = model && !model.hr_only ? model : null;
+  const workspace = await loadWorkspaceOverview();
 
   return (
     <ScreenContainer>
       <PageHeader title="Settings" subtitle="These are the workspace's HR defaults." />
 
       <BentoGrid>
+        <WorkspaceCard overview={workspace} />
+
         <BentoCard
           title="Leave entitlements"
-          subtitle="Default for new balances · fixed for now"
+          subtitle="Default for new balances · changing them is coming soon"
           icon={Plane}
           className="col-span-2 md:col-span-6"
         >
@@ -63,14 +68,14 @@ export default async function SettingsScreen() {
 
         <BentoCard
           title="Overtime rates"
-          subtitle="Pay multiplier by kind of day · fixed for now"
+          subtitle="Pay multiplier by kind of day · changing them is coming soon"
           icon={Clock}
-          className="col-span-2 md:col-span-12"
+          className="col-span-2 md:col-span-6"
         >
           {!settings ? (
             LOAD_FAILED
           ) : (
-            <div className="grid gap-x-8 md:grid-cols-3">
+            <div>
               {settings.overtime.map((rate) => (
                 <ValueRow key={rate.label} label={rate.label}>
                   {rate.value}
