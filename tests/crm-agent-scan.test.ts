@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { buildCrmAgentContext, type CrmAgentRaw } from '@/lib/crm/agent/context';
+import { crmAgentNoteInput, crmFollowUpInput } from '@/lib/crm/agent/actions';
 import { scanCrm } from '@/lib/crm/agent/scan';
 
 const NOW = new Date('2026-10-23T04:00:00.000Z'); // 12:00 in Kuala Lumpur
@@ -161,6 +162,40 @@ describe('scanCrm', () => {
         checkKey: 'contact_new_no_follow_up',
       },
     ]);
+  });
+
+  it('cuts very long names so every candidate still passes its action schema', () => {
+    const C = '11111111-1111-4111-8111-111111111111';
+    const D = '22222222-2222-4222-8222-222222222222';
+    const long = 'N'.repeat(400);
+    const plan: CrmAgentRaw['plan'] = {
+      checks: [
+        { key: 'deal_quiet', params: { days: 7 } },
+        { key: 'deal_closing_soon', params: { days: 30, min_value: 0 } },
+        { key: 'follow_up_overdue', params: {} },
+        { key: 'contact_idle', params: { days: 14 } },
+        { key: 'contact_new_no_follow_up', params: { days: 30 } },
+      ],
+    };
+    const out = scanCrm(
+      raw({
+        plan,
+        deals: [
+          deal({ id: D, contactId: C, title: long, company: long }),
+          deal({ id: D, contactId: null, title: long, company: long, expectedClose: '2026-10-30' }),
+        ],
+        contacts: [contact({ id: C, name: long, createdAt: daysAgo(20), lastActivityAt: null })],
+        overdue: [{ id: 'f1', title: long, contactId: C, contactName: long, dueAt: '2026-10-20T00:00:00.000Z' }],
+      }),
+      NOW,
+    );
+    expect(new Set(out.map((c) => c.checkKey)).size).toBe(5);
+    for (const c of out) {
+      const schema = c.action === 'createFollowUp' ? crmFollowUpInput : crmAgentNoteInput;
+      expect(schema.safeParse(c.input).success, `${c.checkKey} ${c.action}`).toBe(true);
+      expect(c.title.length).toBeLessThanOrEqual(200);
+      expect(c.title).toContain('…');
+    }
   });
 
   it('keeps names with markup verbatim', () => {

@@ -7,9 +7,18 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 type Deal = CrmAgentRaw['deals'][number];
 type Contact = CrmAgentRaw['contacts'][number];
 
+/** Longest record name put into a title or body, so follow-up titles stay within 200 characters. */
+const NAME_MAX = 80;
+
+/** Cuts a name to about {@link NAME_MAX} characters with "…" (by code point, never splitting one). */
+function cut(name: string): string {
+  const chars = Array.from(name);
+  return chars.length <= NAME_MAX ? name : `${chars.slice(0, NAME_MAX - 1).join('').trimEnd()}…`;
+}
+
 /** Same shape as the Overview: `Company — Title`, or just the title. */
 function dealName(deal: Deal) {
-  return deal.company && deal.company !== deal.title ? `${deal.company} — ${deal.title}` : deal.title;
+  return cut(deal.company && deal.company !== deal.title ? `${deal.company} — ${deal.title}` : deal.title);
 }
 
 /** Whole days between an ISO timestamp and `now`; null when it does not parse. */
@@ -105,9 +114,9 @@ export function scanCrm(raw: CrmAgentRaw, now: Date): Candidate[] {
           action: 'createAgentNote',
           input: {
             contactId: followUp.contactId,
-            body: `Follow-up "${followUp.title}" overdue since ${since}.`,
+            body: `Follow-up "${cut(followUp.title)}" overdue since ${since}.`,
           },
-          title: `Note on ${followUp.contactName ?? names.get(followUp.contactId) ?? 'a contact'} — overdue follow-up`,
+          title: `Note on ${cut(followUp.contactName ?? names.get(followUp.contactId) ?? 'a contact')} — overdue follow-up`,
           detail: null,
           checkKey: check.key,
         });
@@ -118,8 +127,8 @@ export function scanCrm(raw: CrmAgentRaw, now: Date): Candidate[] {
         if (n === null || n < days) continue;
         out.push({
           action: 'createFollowUp',
-          input: { contactId: contact.id, title: `Check in with ${contact.name}`, dueDay },
-          title: `Follow up with ${contact.name} — quiet ${n} days`,
+          input: { contactId: contact.id, title: `Check in with ${cut(contact.name)}`, dueDay },
+          title: `Follow up with ${cut(contact.name)} — quiet ${n} days`,
           detail: null,
           checkKey: check.key,
         });
@@ -132,8 +141,8 @@ export function scanCrm(raw: CrmAgentRaw, now: Date): Candidate[] {
       for (const contact of oldestFirst(fresh, contactActivity)) {
         out.push({
           action: 'createFollowUp',
-          input: { contactId: contact.id, title: `Welcome call with ${contact.name}`, dueDay },
-          title: `Follow up with new contact ${contact.name}`,
+          input: { contactId: contact.id, title: `Welcome call with ${cut(contact.name)}`, dueDay },
+          title: `Follow up with new contact ${cut(contact.name)}`,
           detail: null,
           checkKey: check.key,
         });
