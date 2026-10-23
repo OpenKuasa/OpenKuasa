@@ -14,8 +14,8 @@ export default async function AppLayout({
 }) {
   let viewer = await getViewer();
 
-  // A live pending-proposals count for the AI Agents nav badge. A failed count must
-  // never break the app shell, so it falls back to zero.
+  // Each product's AI Agents nav item gets its own live pending-suggestions count. A failed
+  // count must never break the app shell, so it falls back to zero.
   const badges: NavBadges = {
     pendingProposals: 0,
     pendingCrmProposals: 0,
