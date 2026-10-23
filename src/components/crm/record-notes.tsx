@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { formatDay } from '@/lib/crm/deal-stats';
+import { formatDay, klDay } from '@/lib/crm/deal-stats';
 import type { RecordNote } from '@/lib/crm/notes';
 
 /**
@@ -18,7 +18,7 @@ export function RecordNotes({ notes }: { notes: RecordNote[] }) {
         {notes.map((note) => (
           <li key={note.id} className="rounded-md border bg-muted/30 px-3 py-2">
             <p className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-              <time dateTime={note.createdAt}>{formatDay(note.createdAt.slice(0, 10))}</time>
+              <time dateTime={note.createdAt}>{formatDay(klDay(new Date(note.createdAt)))}</time>
               {note.fromAgent ? (
                 <span className="rounded-full bg-muted px-1.5 py-px text-[0.7rem] font-medium text-muted-foreground">
                   from the agent

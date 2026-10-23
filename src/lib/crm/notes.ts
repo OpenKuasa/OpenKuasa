@@ -59,6 +59,7 @@ export async function listRecordNotes(
     .eq('org_id', orgId)
     .eq(column, id)
     .order('created_at', { ascending: false })
+    .order('id', { ascending: false })
     .limit(NOTES_SHOWN);
 
   if (error) throw error;

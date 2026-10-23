@@ -183,7 +183,12 @@ export default function DealsScreen({
   }, [formOpened]);
   // Once read, the contact or deal leaves the address, so a reload does not reopen the form.
   useEffect(() => {
-    if ((contactParam || openId) && pathname) window.history.replaceState(null, '', pathname);
+    if (!(contactParam || openId) || !pathname) return;
+    const params = new URLSearchParams(window.location.search);
+    params.delete('contact');
+    params.delete('open');
+    const rest = params.toString();
+    window.history.replaceState(null, '', rest ? `${pathname}?${rest}` : pathname);
   }, [contactParam, openId, pathname]);
   useEffect(() => {
     if (reportOpen) reportCloseRef.current?.focus();

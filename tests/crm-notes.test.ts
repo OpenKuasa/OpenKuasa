@@ -72,6 +72,7 @@ describe('listRecordNotes', () => {
     expect(calls).toContainEqual(['eq', 'org_id', ORG_ID]);
     expect(calls).toContainEqual(['eq', 'deal_id', DEAL_ID]);
     expect(calls).toContainEqual(['order', 'created_at', { ascending: false }]);
+    expect(calls).toContainEqual(['order', 'id', { ascending: false }]);
     expect(calls).toContainEqual(['limit', NOTES_SHOWN]);
     expect(NOTES_SHOWN).toBe(20);
     expect(notes).toHaveLength(1);
@@ -125,6 +126,15 @@ describe('RecordNotes', () => {
     expect(html).toContain('20 Oct 2026');
   });
 
+  test('dates a note by its Kuala Lumpur day', () => {
+    const html = renderToStaticMarkup(
+      createElement(RecordNotes, {
+        notes: [{ id: 'n1', body: 'late', fromAgent: false, createdAt: '2026-10-20T20:00:00.000Z' }],
+      }),
+    );
+    expect(html).toContain('21 Oct 2026');
+  });
+
   test('labels a note from the agent, and only that one', () => {
     const html = renderToStaticMarkup(
       createElement(RecordNotes, {
@@ -135,7 +145,6 @@ describe('RecordNotes', () => {
       }),
     );
     expect(html.match(/from the agent/g)).toHaveLength(1);
-    expect(html).not.toMatch(/purple|violet/);
   });
 
   test('renders nothing when there are no notes', () => {

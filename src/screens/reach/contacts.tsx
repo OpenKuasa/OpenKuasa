@@ -310,7 +310,11 @@ export default function ContactsScreen({
   const pathname = usePathname();
   // Once read, the link's contact leaves the address, so a reload does not reopen the card.
   useEffect(() => {
-    if (openId && pathname) window.history.replaceState(null, '', pathname);
+    if (!openId || !pathname) return;
+    const params = new URLSearchParams(window.location.search);
+    params.delete('open');
+    const rest = params.toString();
+    window.history.replaceState(null, '', rest ? `${pathname}?${rest}` : pathname);
   }, [openId, pathname]);
   const openedId = useSearchParams().get(CONTACT_PARAM);
   const opened = openedId ? (rows.find((c) => c.id === openedId) ?? null) : null;
