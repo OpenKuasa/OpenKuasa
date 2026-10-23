@@ -1,10 +1,10 @@
--- Bendahara accounting settings check. Run it after 20261125130000_bendahara_accounting_settings.sql, in the same
+-- Bendahara accounting settings check. Run it after 20261125140000_bendahara_accounting_settings.sql, in the same
 -- transaction for a dry run, or by itself once applied. It leaves nothing behind either way: the block always ends
 -- with RAISE, so every row and the helper function below are rolled back. Read the message:
 --   BENDAHARA_ACCOUNTING_SETTINGS_CHECK PASSED ...   or   ... FAILED: <what went wrong>
 --
 --   begin;
---   \i supabase/migrations/20261125130000_bendahara_accounting_settings.sql
+--   \i supabase/migrations/20261125140000_bendahara_accounting_settings.sql
 --   \i supabase/tests/bendahara_accounting_settings_check.sql
 --   rollback;
 --

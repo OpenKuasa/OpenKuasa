@@ -119,7 +119,7 @@ begin
 
   -- ---- structure ------------------------------------------------------------
   -- finance_transactions_audit: 20261125120000 (audit trail).
-  -- finance_period_lock: 20261125130000 (accounting settings, the books lock).
+  -- finance_period_lock: 20261125140000 (accounting settings, the books lock).
   select string_agg(tgname, ',' order by tgname) into t from pg_trigger
    where tgrelid = 'public.finance_transactions'::regclass and not tgisinternal and tgenabled = 'O';
   if t is distinct from 'finance_period_lock,finance_transaction_guard,finance_transaction_insert_guard,finance_transaction_sign_off,'

@@ -208,7 +208,7 @@ begin
   -- it has left draft (20261117090000), the five banking adds, the two that keep money off an archived account
   -- (20261116110000), the ledger's stamp of when a payment was voided (20261111090000), and the audit trail's log
   -- (finance_transactions_audit, 20261125120000).
-  -- finance_period_lock: 20261125130000 (accounting settings, the books lock).
+  -- finance_period_lock: 20261125140000 (accounting settings, the books lock).
   select string_agg(tgname, ',' order by tgname) into t from pg_trigger
    where not tgisinternal and tgrelid = 'public.finance_transactions'::regclass;
   if t is distinct from 'finance_period_lock,finance_transaction_guard,finance_transaction_insert_guard,finance_transaction_sign_off,finance_transaction_still,'

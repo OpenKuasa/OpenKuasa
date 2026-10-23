@@ -62,7 +62,7 @@ export const FIN_HELD_STILL = 'FIN28';
 export const HELD_STILL = 'This is waiting to be paid, so it can no longer be changed. Delete it and record it again.';
 
 /**
- * The accounting settings' refusals (20261125130000_bendahara_accounting_settings.sql). FIN63 can meet any write
+ * The accounting settings' refusals (20261125140000_bendahara_accounting_settings.sql). FIN63 can meet any write
  * that posts, issues, pays or voids, so `writeFailed` answers all four for every finance write; the sentences are
  * here, beside it, and `SETTINGS_MESSAGES` (settings.ts) is built from them.
  */

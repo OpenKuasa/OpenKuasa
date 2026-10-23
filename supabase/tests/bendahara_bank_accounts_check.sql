@@ -70,7 +70,7 @@ begin
   select string_agg(tgname, ',' order by tgname) into t from pg_trigger
    where not tgisinternal and tgrelid = 'public.finance_accounts'::regclass;
   -- The ledger's two, and the guard.
-  -- finance_period_lock: 20261125130000 (accounting settings, the books lock on opening balances).
+  -- finance_period_lock: 20261125140000 (accounting settings, the books lock on opening balances).
   if t is distinct from 'finance_bank_account_guard,finance_ledger_sync_bank_insert,finance_ledger_sync_bank_update,finance_period_lock' then
     fails := fails || format('triggers on finance_accounts are: %s', t);
   end if;

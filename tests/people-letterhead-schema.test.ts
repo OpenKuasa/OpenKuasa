@@ -115,7 +115,7 @@ describe('the workspace logo', () => {
       for (const grant of grants) expect(grant, file).not.toContain('logo_path');
     }
     // The column list signed-in users may update is the one main states, to the letter: the company details,
-    // then the TIN alone (20261125130000, Accounting Settings), and nothing else since.
+    // then the TIN alone (20261125140000, Accounting Settings), and nothing else since.
     const orgGrants = files
       .map((file) => flat(statements(file)).match(/grant update \(([^)]*)\) on public\.orgs to authenticated;/g) ?? [])
       .flat();

@@ -229,7 +229,7 @@ begin
     from pg_trigger g join pg_class c on c.oid = g.tgrelid
    where c.relname in ('finance_fx_revaluations', 'finance_fx_revaluation_rates', 'finance_fx_revaluation_lines')
      and c.relnamespace = 'public'::regnamespace and not g.tgisinternal;
-  -- finance_fx_revaluations:finance_period_lock: 20261125130000 (accounting settings, the books lock).
+  -- finance_fx_revaluations:finance_period_lock: 20261125140000 (accounting settings, the books lock).
   if t is distinct from 'finance_fx_revaluation_lines:finance_fx_revaluation_locked:O,'
        || 'finance_fx_revaluation_rates:finance_fx_revaluation_locked:O,'
        || 'finance_fx_revaluations:finance_fx_revaluation_locked:O,finance_fx_revaluations:finance_period_lock:O' then

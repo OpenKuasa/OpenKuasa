@@ -65,7 +65,7 @@ begin
   execute 'grant execute on function public.bendahara_check_try(text, text, text) to authenticated, anon';
 
   -- finance_transactions_audit: 20261125120000 (audit trail).
-  -- finance_period_lock: 20261125130000 (accounting settings, the books lock).
+  -- finance_period_lock: 20261125140000 (accounting settings, the books lock).
   -- ---- structure ------------------------------------------------------------
   select string_agg(tgname, ',' order by tgname) into t from pg_trigger
    where tgrelid = 'public.finance_transactions'::regclass and not tgisinternal;
