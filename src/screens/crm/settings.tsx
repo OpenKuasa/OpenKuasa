@@ -97,7 +97,7 @@ export default function SettingsScreen() {
     <ScreenContainer>
       <PageHeader
         title="Settings"
-        subtitle="Workspace, pipeline, team and privacy preferences, Saudara."
+        subtitle="Workspace, pipeline, team and privacy preferences."
       />
 
       <BentoGrid>
