@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { Settings, LogOut, type LucideIcon } from 'lucide-react';
+import { CircleUserRound, LogOut, type LucideIcon } from 'lucide-react';
 import { PRODUCTS, productHref } from '@/config/nav';
 import { Logo } from '@/components/brand/logo';
 import {
@@ -107,7 +107,7 @@ export function ProductRail({ activeKey }: { activeKey: string | null }) {
         <RailLink
           href="/account"
           label="Account"
-          icon={Settings}
+          icon={CircleUserRound}
           active={activeKey === 'account'}
         />
         <RailSignOut />

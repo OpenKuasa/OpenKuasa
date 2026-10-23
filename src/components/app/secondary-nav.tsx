@@ -2,13 +2,12 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { Settings, LogOut, PanelLeftClose } from 'lucide-react';
+import { PanelLeftClose } from 'lucide-react';
 import { type Product, badgeAriaLabel, firstItem, visibleSections } from '@/config/nav';
 import { useViewer } from '@/components/app/viewer-context';
 import { useNavBadges } from '@/components/app/nav-badges-context';
 import { useIconHover } from '@animateicons/react';
 import { AnimatedIcon } from '@/components/ui/animated-icon';
-import { SignOutButton } from '@/components/auth/sign-out-button';
 import { cn } from '@/lib/utils';
 
 /** A nav row whose icon animates when the whole row is hovered. */
@@ -102,22 +101,8 @@ export function SecondaryNav({
         ))}
       </nav>
 
-      <div className="flex items-center justify-between border-t px-3 py-2">
-        <div className="flex gap-1">
-          <Link
-            href="/account"
-            aria-label="Account"
-            className="grid size-8 place-items-center rounded-lg text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
-          >
-            <Settings className="size-4" />
-          </Link>
-          <SignOutButton
-            aria-label="Sign out"
-            className="grid size-8 place-items-center rounded-lg text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
-          >
-            <LogOut className="size-4" />
-          </SignOutButton>
-        </div>
+      {/* Account and sign-out live once, in the product rail. */}
+      <div className="flex items-center justify-end border-t px-3 py-2">
         <button
           type="button"
           onClick={onCollapse}
