@@ -1,6 +1,9 @@
 import type { FocusMenu } from '@/lib/agents/focus/plan';
 import { rm } from '@/lib/finance/format';
 
+/** "1 day", "14 days". */
+const daysText = (n: number): string => (n === 1 ? '1 day' : `${n} days`);
+
 /** Bendahara's own spend defaults: RM 0.50 a run, RM 2 a day, RM 5 a week. */
 export const FINANCE_DEFAULTS = { max_cost_cents: 50, daily_cap_cents: 200, weekly_cap_cents: 500 } as const;
 
@@ -19,25 +22,25 @@ export const FINANCE_FOCUS_MENU: FocusMenu = {
       },
       summary: 'Posted invoices more than N days past their due date with money still owed, optionally only above an amount in RM',
       describe: (p) =>
-        `Flag invoices more than ${p.days} days overdue` + (p.min_amount > 0 ? ` with ${rm(p.min_amount)} or more unpaid` : ''),
+        `Flag invoices more than ${daysText(p.days)} overdue` + (p.min_amount > 0 ? ` with ${rm(p.min_amount)} or more unpaid` : ''),
     },
     {
       key: 'bill_due_soon',
       params: { days: { min: 1, max: 60, default: 7 } },
       summary: 'Supplier bills due within N days (or already overdue) with money still to pay',
-      describe: (p) => `Warn about supplier bills due within ${p.days} days`,
+      describe: (p) => `Warn about supplier bills due within ${daysText(p.days)}`,
     },
     {
       key: 'expense_waiting',
       params: { days: { min: 1, max: 60, default: 7 } },
       summary: 'Expense claims waiting for approval for more than N days',
-      describe: (p) => `Flag expense claims waiting more than ${p.days} days for approval`,
+      describe: (p) => `Flag expense claims waiting more than ${daysText(p.days)} for approval`,
     },
     {
       key: 'quotation_expiring',
       params: { days: { min: 1, max: 30, default: 7 } },
       summary: 'Sent quotations with no answer that expire within N days',
-      describe: (p) => `Warn about sent quotations expiring within ${p.days} days`,
+      describe: (p) => `Warn about sent quotations expiring within ${daysText(p.days)}`,
     },
     {
       key: 'draft_stale',
@@ -49,13 +52,13 @@ export const FINANCE_FOCUS_MENU: FocusMenu = {
       key: 'bank_unmatched',
       params: { days: { min: 3, max: 90, default: 14 } },
       summary: 'Imported bank statement lines older than N days with nothing matched',
-      describe: (p) => `Flag bank statement lines older than ${p.days} days with nothing matched`,
+      describe: (p) => `Flag bank statement lines older than ${daysText(p.days)} with nothing matched`,
     },
     {
       key: 'sst_period_closing',
       params: { days: { min: 1, max: 30, default: 10 } },
       summary: "The current SST period ends within N days and its return isn't marked filed",
-      describe: (p) => `Warn ${p.days} days before the SST period ends if its return isn't marked filed`,
+      describe: (p) => `Warn ${daysText(p.days)} before the SST period ends if its return isn't marked filed`,
     },
   ],
 };

@@ -40,6 +40,21 @@ describe('FINANCE_FOCUS_MENU', () => {
     ).toEqual(['Flag invoices more than 30 days overdue with RM 5,000.00 or more unpaid']);
   });
 
+  it('says "1 day", not "1 days"', () => {
+    const plan = {
+      checks: ['invoice_overdue', 'bill_due_soon', 'expense_waiting', 'quotation_expiring', 'sst_period_closing'].map(
+        (key) => ({ key, params: { days: 1, min_amount: 0 } }),
+      ),
+    };
+    expect(readBack(FINANCE_FOCUS_MENU, plan)).toEqual([
+      'Flag invoices more than 1 day overdue',
+      'Warn about supplier bills due within 1 day',
+      'Flag expense claims waiting more than 1 day for approval',
+      'Warn about sent quotations expiring within 1 day',
+      "Warn 1 day before the SST period ends if its return isn't marked filed",
+    ]);
+  });
+
   it('drops keys off the menu and clamps params', () => {
     const { plan } = validatePlan(FINANCE_FOCUS_MENU, {
       checks: [
