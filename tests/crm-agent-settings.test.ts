@@ -223,6 +223,8 @@ describe('ensureCrmAgentConfig', () => {
     expect(ins.payload).toEqual({
       org_id: ORG,
       agent_key: 'crm-focus',
+      // Starts off: the owner picks daily or weekly (or presses Run now).
+      cadence: 'off',
       max_cost_cents: 50,
       daily_cap_cents: 200,
       weekly_cap_cents: 500,

@@ -125,6 +125,15 @@ describe('buildCrmAgentsView', () => {
     expect(buildCrmAgentsView(input()).settings.cadence).toBe('daily');
   });
 
+  it('asks for a schedule once the focus is confirmed and nothing is scheduled', () => {
+    expect(buildCrmAgentsView(input({ hasActiveSchedule: false })).needsSchedule).toBe(true);
+    expect(buildCrmAgentsView(input()).needsSchedule).toBe(false);
+    expect(
+      buildCrmAgentsView(input({ hasActiveSchedule: false, config: config({ focus_confirmed_at: null }) })).needsSchedule,
+    ).toBe(false);
+    expect(buildCrmAgentsView(input({ hasActiveSchedule: false, config: null })).needsSchedule).toBe(false);
+  });
+
   it('lists recent runs with their suggestion counts', () => {
     const view = buildCrmAgentsView(
       input({

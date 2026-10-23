@@ -25,7 +25,8 @@ export const CRM_START_REFUSED: Record<StartRefusal, string> = {
 };
 
 /**
- * Makes sure Kasturi's settings row exists, created with Kasturi's own defaults.
+ * Makes sure Kasturi's settings row exists, created with Kasturi's own defaults and its
+ * schedule off: the owner picks daily or weekly once the focus is confirmed.
  * Update-first (a no-op touch), then insert: column grants make upsert fail 42501.
  * A lost insert race (23505) means the row exists, which is what we wanted.
  */
@@ -44,7 +45,7 @@ export async function ensureCrmAgentConfig(client: SupabaseClient, orgId: string
   if (upd.data) return { ok: true, data: null };
   const ins = await client
     .from('agent_configs')
-    .insert({ org_id: orgId, agent_key: CRM_FOCUS, ...CRM_DEFAULTS });
+    .insert({ org_id: orgId, agent_key: CRM_FOCUS, cadence: 'off', ...CRM_DEFAULTS });
   if (ins.error && ins.error.code !== '23505') {
     console.error('[crm-agent-settings] ensure insert failed:', ins.error.code);
     return { ok: false, error: COULD_NOT_SAVE };

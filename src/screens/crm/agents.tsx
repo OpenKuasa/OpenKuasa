@@ -510,6 +510,7 @@ export default async function AgentsScreen() {
         <AgentSchedule
           settings={view.settings}
           spend={view.spend}
+          needsSchedule={view.needsSchedule}
           canManage={canManage}
           canRun={canEdit}
           hasKey={view.hasKey}

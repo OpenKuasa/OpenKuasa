@@ -22,6 +22,7 @@ import type { AgentCadence } from '@/lib/agents/types';
 import type { CrmAgentsView } from '@/screens/crm/agents-view';
 
 const CADENCE_LABEL: Record<AgentCadence, string> = { off: 'Off', daily: 'Daily', weekly: 'Weekly' };
+const NEEDS_SCHEDULE = 'Pick daily or weekly so the agent runs on its own, or press Run now.';
 const CADENCE_HINT = 'Daily runs at 7:00 am; weekly on Monday 7:00 am (Kuala Lumpur time)';
 
 type ActionResult = { ok: boolean; error?: string };
@@ -60,12 +61,14 @@ function SpendLine({ label, spent, cap }: { label: string; spent: number; cap: n
 export function AgentSchedule({
   settings,
   spend,
+  needsSchedule,
   canManage,
   canRun,
   hasKey,
 }: {
   settings: CrmAgentsView['settings'];
   spend: CrmAgentsView['spend'];
+  needsSchedule: boolean;
   canManage: boolean;
   canRun: boolean;
   hasKey: boolean;
@@ -117,6 +120,7 @@ export function AgentSchedule({
 
   return (
     <div className="space-y-4">
+      {needsSchedule && <p className="text-sm font-medium">{NEEDS_SCHEDULE}</p>}
       {canManage ? (
         <div className="space-y-4">
           <div className="space-y-1.5">

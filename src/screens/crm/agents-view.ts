@@ -52,6 +52,8 @@ export type CrmAgentsView = {
   focus: CrmFocusView;
   settings: { cadence: AgentCadence; maxCostCents: number; dailyCapCents: number; weeklyCapCents: number };
   spend: { todayCents: number; weekCents: number };
+  /** The focus is confirmed but nothing is scheduled: the Schedule section asks for one. */
+  needsSchedule: boolean;
   pending: AgentProposal[];
   suggestions: Record<string, CrmSuggestionView>;
   decided: AgentProposal[];
@@ -125,6 +127,7 @@ export function buildCrmAgentsView(input: CrmAgentsInput): CrmAgentsView {
       weeklyCapCents: config?.weekly_cap_cents ?? DEFAULTS.weekly_cap_cents,
     },
     spend: { todayCents: input.spentTodayCents, weekCents: input.spentWeekCents },
+    needsSchedule: focus.state === 'confirmed' && !input.hasActiveSchedule,
     pending: input.pending,
     suggestions,
     decided: input.decided,
