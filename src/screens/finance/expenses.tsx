@@ -20,6 +20,7 @@ import { listExpenseCategories, listExpenses } from '@/lib/finance/expenses';
 import { listRinggitAccounts } from '@/lib/finance/money';
 import { attachedReceiptsOrNone, listAttachedReceipts, receiptsByDocument } from '@/lib/finance/receipt-match';
 import { todayUtc } from '@/lib/finance/view-helpers';
+import { noteCountsFor } from '@/lib/finance/agent/notes';
 import { createClient } from '@/lib/supabase/server';
 import { SAMPLE_EXPENSES } from './cash-book-sample';
 import { SAMPLE_TODAY } from './sales-sample';
@@ -70,10 +71,13 @@ export default async function ExpensesScreen() {
     // Every category, both kinds, archived ones included, for the Categories card: an owner's or admin's only.
     plan.managesCategories ? listCategories(ctx) : [],
   ]);
+  // The agent's notes on the documents just loaded (only those ids). A failed read is logged and shows no marker.
+  const agentNotes = (await noteCountsFor(ctx, 'finance_expense', rows.map((r) => r.id))) ?? undefined;
   return (
     <ExpensesView
       rows={rows}
       today={todayUtc()}
+      agentNotes={agentNotes}
       receipts={receiptsByDocument(attached)}
       receiptLinkOf={receiptLinkAction}
       writer={

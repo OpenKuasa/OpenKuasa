@@ -91,6 +91,8 @@ export const LIVE_SCREENS: ReadonlySet<string> = new Set([
   // Bendahara. Dashboard and Overview read the books (2026-10-23); the Overview's cards with no
   // source say so, and its demo still shows fixed figures.
   'finance/assistant',
+  // The focus agent: it suggests notes on documents for a writer to approve.
+  'finance/agents',
   'finance/dashboard',
   'finance/customers-suppliers',
   'finance/products',

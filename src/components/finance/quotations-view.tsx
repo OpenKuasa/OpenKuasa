@@ -1,5 +1,7 @@
 'use client';
 
+import { AgentNoteMarker } from '@/components/finance/agent-note-marker';
+import type { NoteCounts } from '@/lib/finance/agent/notes';
 import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { ChartColumn, Check, Download, FilePlus, FileText, Pencil, Plus, Search, Send, Trash2, TrendingUp, X } from 'lucide-react';
@@ -103,11 +105,14 @@ export function QuotationsView({
   rows,
   view,
   writer,
+  agentNotes,
 }: {
   /** Every quotation, newest first; drafts included. */
   rows: QuotationListRow[];
   view: QuotationsViewData;
   writer?: QuotationsWriter;
+  /** Notes the agent left, by document id, for the ids shown. Absent with no database or when they could not be read. */
+  agentNotes?: NoteCounts;
 }) {
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState<QuotationFilter>('all');
@@ -522,7 +527,10 @@ export function QuotationsView({
                   const invoice = quotationInvoice(q);
                   return (
                     <TableRow key={q.id} className={cn(q.display_status === 'declined' && 'opacity-60')}>
-                      <TableCell className="whitespace-nowrap font-medium">{q.quotation_no ?? '—'}</TableCell>
+                      <TableCell className="whitespace-nowrap font-medium">
+                        {q.quotation_no ?? '—'}
+                        <AgentNoteMarker note={agentNotes?.[q.id]} />
+                      </TableCell>
                       <TableCell className="whitespace-nowrap text-muted-foreground">{displayDate(q.quote_date)}</TableCell>
                       <TableCell className="whitespace-nowrap">{q.customer_name}</TableCell>
                       <TableCell className="whitespace-nowrap text-right tabular-nums">

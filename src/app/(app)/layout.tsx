@@ -19,6 +19,7 @@ export default async function AppLayout({
   const badges: NavBadges = {
     pendingProposals: 0,
     pendingCrmProposals: 0,
+    pendingFinanceProposals: 0,
     unreadAnnouncements: 0,
     awaitingAcknowledgement: 0,
     waitingLeave: 0,
@@ -33,13 +34,15 @@ export default async function AppLayout({
       const supabase = await createClient();
       // Lekiu: does this member manage a team? That decides which approval pages the nav shows them. Owners and
       // admins see those pages by role. A failed read is "no team" (readMyTeam never throws).
-      const [pending, pendingCrm, team] = await Promise.all([
+      const [pending, pendingCrm, pendingFinance, team] = await Promise.all([
         countPendingProposals(supabase, viewer.orgId, 'reach').catch(() => 0),
         countPendingProposals(supabase, viewer.orgId, 'crm').catch(() => 0),
+        countPendingProposals(supabase, viewer.orgId, 'finance').catch(() => 0),
         can(viewer.role, 'approve') ? Promise.resolve([] as string[]) : readMyTeam(supabase, viewer.orgId),
       ]);
       badges.pendingProposals = pending;
       badges.pendingCrmProposals = pendingCrm;
+      badges.pendingFinanceProposals = pendingFinance;
       if (team.length > 0) viewer = { ...viewer, managesTeam: true };
     } catch {
       // keep the defaults

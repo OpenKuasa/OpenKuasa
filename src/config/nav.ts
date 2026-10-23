@@ -54,6 +54,7 @@ import { type NavNeed, canSee } from '@/lib/auth/permissions';
 export type NavBadgeKey =
   | 'pendingProposals'
   | 'pendingCrmProposals'
+  | 'pendingFinanceProposals'
   | 'unreadAnnouncements'
   | 'awaitingAcknowledgement'
   | 'waitingLeave'
@@ -315,7 +316,7 @@ export const PRODUCTS: Product[] = [
         label: 'Overview',
         items: [
           { label: 'Overview', slug: 'assistant', icon: LayoutDashboard },
-          { label: 'AI Agents', slug: 'agents', icon: Bot },
+          { label: 'AI Agents', slug: 'agents', icon: Bot, badge: 'pendingFinanceProposals' },
           { label: 'Dashboard', slug: 'dashboard', icon: TrendingUp },
         ],
       },

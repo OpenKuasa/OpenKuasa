@@ -1,5 +1,7 @@
 'use client';
 
+import { AgentNoteMarker } from '@/components/finance/agent-note-marker';
+import type { NoteCounts } from '@/lib/finance/agent/notes';
 import { useState } from 'react';
 import {
   BadgeCheck,
@@ -152,11 +154,14 @@ export function InvoicesView({
   rows,
   view,
   writer,
+  agentNotes,
 }: {
   /** Every invoice, newest first; drafts and void ones included. */
   rows: InvoiceListRow[];
   view: InvoicesViewData;
   writer?: InvoicesWriter;
+  /** Notes the agent left, by document id, for the ids shown. Absent with no database or when they could not be read. */
+  agentNotes?: NoteCounts;
 }) {
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState<InvoiceFilter>('open');
@@ -587,7 +592,10 @@ export function InvoicesView({
                   const items = writer ? menu(i, writer.actions) : [];
                   return (
                     <TableRow key={i.id} className={cn(i.display_status === 'void' && 'opacity-60')}>
-                      <TableCell className="whitespace-nowrap font-medium">{i.invoice_no ?? '—'}</TableCell>
+                      <TableCell className="whitespace-nowrap font-medium">
+                        {i.invoice_no ?? '—'}
+                        <AgentNoteMarker note={agentNotes?.[i.id]} />
+                      </TableCell>
                       <TableCell className="whitespace-nowrap text-muted-foreground">{displayDate(i.invoice_date)}</TableCell>
                       <TableCell className="whitespace-nowrap">{i.customer_name}</TableCell>
                       <TableCell className="whitespace-nowrap text-muted-foreground">{displayDate(i.due_date)}</TableCell>

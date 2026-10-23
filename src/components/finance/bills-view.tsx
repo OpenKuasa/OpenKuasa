@@ -1,5 +1,7 @@
 'use client';
 
+import { AgentNoteMarker } from '@/components/finance/agent-note-marker';
+import type { NoteCounts } from '@/lib/finance/agent/notes';
 import { useState } from 'react';
 import { Ban, Banknote, ChartColumn, Download, FileCheck, FileText, Pencil, PieChart, Plus, Search, Trash2 } from 'lucide-react';
 import { BentoCard, BentoGrid, BentoStat } from '@/components/bento/bento';
@@ -99,6 +101,7 @@ export function BillsView({
   receipts,
   receiptLinkOf,
   writer,
+  agentNotes,
 }: {
   /** Every bill, newest first; drafts and void ones included. */
   rows: BillListRow[];
@@ -110,6 +113,8 @@ export function BillsView({
   /** What payments not yet paid already hold of each bill, by bill id, from `heldByBill`. */
   held: Record<string, number>;
   writer?: BillsWriter;
+  /** Notes the agent left, by document id, for the ids shown. Absent with no database or when they could not be read. */
+  agentNotes?: NoteCounts;
 }) {
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState<BillFilter>('open');
@@ -476,6 +481,7 @@ export function BillsView({
                     <TableRow key={b.id} className={cn(b.display_status === 'void' && 'opacity-60')}>
                       <TableCell className="min-w-36 font-medium">
                         <span className="whitespace-nowrap">{b.bill_no ?? '—'}</span>
+                        <AgentNoteMarker note={agentNotes?.[b.id]} />
                         <AttachedReceipts receipts={receipts?.[b.id]} linkOf={receiptLinkOf} />
                       </TableCell>
                       <TableCell className="whitespace-nowrap text-muted-foreground">{displayDate(b.bill_date)}</TableCell>

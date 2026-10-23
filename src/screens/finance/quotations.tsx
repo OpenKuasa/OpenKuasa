@@ -17,6 +17,7 @@ import { listProducts } from '@/lib/finance/products';
 import { listQuotations } from '@/lib/finance/quotations';
 import { quotationsView } from '@/lib/finance/sales-followon-views';
 import { todayUtc } from '@/lib/finance/view-helpers';
+import { noteCountsFor } from '@/lib/finance/agent/notes';
 import { createClient } from '@/lib/supabase/server';
 import { SAMPLE_QUOTATIONS, SAMPLE_TODAY } from './sales-sample';
 
@@ -45,9 +46,12 @@ export default async function QuotationsScreen() {
     canEdit ? listContacts(ctx) : [],
     canEdit ? listProducts(ctx) : [],
   ]);
+  // The agent's notes on the documents just loaded (only those ids). A failed read is logged and shows no marker.
+  const agentNotes = (await noteCountsFor(ctx, 'finance_quotation', rows.map((r) => r.id))) ?? undefined;
   return (
     <QuotationsView
       rows={rows}
+      agentNotes={agentNotes}
       view={quotationsView(rows, todayUtc())}
       writer={
         canEdit

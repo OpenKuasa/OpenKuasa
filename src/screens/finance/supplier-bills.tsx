@@ -21,6 +21,7 @@ import { listPurchaseOrders } from '@/lib/finance/purchase-orders';
 import { listProducts } from '@/lib/finance/products';
 import { attachedReceiptsOrNone, listAttachedReceipts, receiptsByDocument } from '@/lib/finance/receipt-match';
 import { billsView, todayUtc } from '@/lib/finance/purchase-views';
+import { noteCountsFor } from '@/lib/finance/agent/notes';
 import { createClient } from '@/lib/supabase/server';
 
 /* ---- sample data (Rimba Ventures Sdn Bhd), shown when there is no database ---- */
@@ -137,12 +138,15 @@ export default async function SupplierBillsScreen() {
     // The ledger account behind purchases says which category a new bill starts in.
     canEdit ? purchasesCategoryId(ctx) : null,
   ]);
+  // The agent's notes on the documents just loaded (only those ids). A failed read is logged and shows no marker.
+  const agentNotes = (await noteCountsFor(ctx, 'finance_supplier_bill', rows.map((r) => r.id))) ?? undefined;
   // The picker offers approved orders, and keeps the order a draft is already linked to even once it is closed.
   const linked = new Set(rows.flatMap((b) => (b.display_status === 'draft' && b.purchase_order_id ? [b.purchase_order_id] : [])));
   return (
     <BillsView
       rows={rows}
       view={billsView(rows, payments, todayUtc())}
+      agentNotes={agentNotes}
       // Worked out here for everyone: a viewer has no payment rows in the browser, but still sees what is scheduled.
       held={heldByBill(payments)}
       receipts={receiptsByDocument(attached)}

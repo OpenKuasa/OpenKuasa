@@ -341,6 +341,7 @@ describe('the navigation badge figure', () => {
     expect(badged.map((i) => `${i.slug}:${i.badge}`).sort()).toEqual(
       [
         'agents:pendingCrmProposals',
+        'agents:pendingFinanceProposals',
         'agents:pendingProposals',
         'announcements:unreadAnnouncements',
         'my-documents:awaitingAcknowledgement',

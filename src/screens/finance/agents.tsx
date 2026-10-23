@@ -1,13 +1,20 @@
+import type { ReactNode } from 'react';
+import Link from 'next/link';
 import {
   ArrowLeftRight,
   BadgeCheck,
   BarChart3,
   Calculator,
+  CalendarClock,
   Clock,
   Gauge,
+  History,
+  Inbox,
+  NotebookPen,
   Plus,
   Radar,
   ScanLine,
+  Target,
   TrendingUp,
   type LucideIcon,
 } from 'lucide-react';
@@ -24,7 +31,30 @@ import {
 } from '@/components/charts';
 import { LiveDot } from '@/components/ui/live-dot';
 import { Button } from '@/components/ui/button';
+import { PendingApprovals } from '@/components/agents/pending-approvals';
+import { RecentlyDecided } from '@/components/agents/recently-decided';
+import { CouldntLoad } from '@/components/crm/couldnt-load';
+import { FinanceAgentFocus } from '@/components/finance/agent-focus';
+import { AgentNotesList } from '@/components/finance/agent-notes-list';
+import { FinanceAgentSchedule } from '@/components/finance/agent-schedule';
+import { listPendingProposals, listRecentlyDecided } from '@/lib/agents/proposals';
+import { workspaceSpendCents } from '@/lib/agents/spend';
+import { FINANCE_FOCUS, type AgentRunStatus } from '@/lib/agents/types';
+import { can } from '@/lib/auth/permissions';
+import { getViewer, hasSupabaseEnv } from '@/lib/auth/viewer';
+import { FINANCE_MAX_FOCUS_CHARS, FINANCE_STARTER_EXAMPLES } from '@/lib/finance/agent/checks';
+import { listAgentNotes } from '@/lib/finance/agent/notes';
+import { rm } from '@/lib/reach/format';
+import { listSchedules } from '@/lib/reach/schedule-capabilities';
+import { createClient } from '@/lib/supabase/server';
 import { cn } from '@/lib/utils';
+import {
+  buildFinanceAgentsView,
+  type FinanceAgentConfigRow,
+  type FinanceAgentRunRow,
+  type FinanceAgentsSection,
+  type FinanceAgentsView,
+} from './agents-view';
 
 /* ---- mock data (Rimba Ventures Sdn Bhd) --------------------------- */
 
@@ -150,7 +180,8 @@ const STRENGTHS_SERIES: Series[] = [
 
 /* ------------------------------------------------------------------ */
 
-export default function AgentsScreen() {
+/** The sample screen, for the no-database preview and the demo workspace. */
+export function AgentsSample() {
   return (
     <ScreenContainer>
       <PageHeader
@@ -318,6 +349,219 @@ export default function AgentsScreen() {
           );
         })}
       </BentoGrid>
+    </ScreenContainer>
+  );
+}
+
+/* ---- live screen ---------------------------------------------------- */
+
+const TITLE = 'AI Agents';
+const SUBTITLE = 'Watches your books for what you ask, and suggests notes for you to approve.';
+
+const CONFIG_COLS =
+  'enabled,cadence,max_cost_cents,daily_cap_cents,weekly_cap_cents,focus_text,focus_plan,focus_cannot,focus_confirmed_at';
+
+const RUN_STATUS: Record<AgentRunStatus, string> = {
+  running: 'Running',
+  done: 'Done',
+  failed: 'Failed',
+  skipped: 'Skipped',
+};
+
+/** ISO timestamp `ms` before now (kept out of the component body for render purity). */
+function isoAgo(ms: number): string {
+  return new Date(Date.now() - ms).toISOString();
+}
+
+function formatWhen(iso: string): string {
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime())
+    ? '—'
+    : d.toLocaleString('en-MY', {
+        day: 'numeric',
+        month: 'short',
+        hour: 'numeric',
+        minute: '2-digit',
+        timeZone: 'Asia/Kuala_Lumpur',
+      });
+}
+
+async function loadView(orgId: string): Promise<FinanceAgentsView | null> {
+  const supabase = await createClient();
+  // An unreadable spend shows as such on the strip (never as RM 0.00); the run gate refuses.
+  const spentSince = (ms: number) =>
+    workspaceSpendCents(supabase, orgId, isoAgo(ms), FINANCE_FOCUS).catch((): number | null => {
+      console.error('[finance/agents] workspace spend could not be read');
+      return null;
+    });
+  try {
+    const [configRes, runsRes, pending, decided, schedules, key, daySpent, weekSpent, notes] = await Promise.all([
+      supabase.from('agent_configs').select(CONFIG_COLS).eq('org_id', orgId).eq('agent_key', FINANCE_FOCUS).maybeSingle(),
+      supabase
+        .from('agent_runs')
+        .select('id,status,cost_cents,started_at')
+        .eq('org_id', orgId)
+        .eq('agent_key', FINANCE_FOCUS)
+        .in('trigger', ['schedule', 'manual'])
+        .order('started_at', { ascending: false })
+        .limit(10),
+      listPendingProposals(supabase, orgId, 'finance'),
+      listRecentlyDecided(supabase, orgId, 5, 'finance'),
+      listSchedules(supabase, orgId, FINANCE_FOCUS),
+      supabase.rpc('org_ai_key_status'),
+      spentSince(24 * 3600_000),
+      spentSince(7 * 24 * 3600_000),
+      // A failed notes read shows in the notes list only, never as the whole screen failing.
+      listAgentNotes({ client: supabase, orgId }).catch((): null => null),
+    ]);
+    if (configRes.error || runsRes.error) {
+      console.error('[finance/agents] could not load the agent', configRes.error?.code ?? runsRes.error?.code);
+      return null;
+    }
+    const runs = (runsRes.data ?? []) as FinanceAgentRunRow[];
+
+    // Suggestions made per run: one small read of run ids. Left out if it fails.
+    let suggestionsByRun: Record<string, number> | null = {};
+    if (runs.length > 0) {
+      const { data, error } = await supabase
+        .from('agent_proposals')
+        .select('run_id')
+        .eq('org_id', orgId)
+        .in(
+          'run_id',
+          runs.map((r) => r.id),
+        );
+      if (error) suggestionsByRun = null;
+      else {
+        for (const row of (data ?? []) as { run_id: string | null }[]) {
+          if (row.run_id) suggestionsByRun[row.run_id] = (suggestionsByRun[row.run_id] ?? 0) + 1;
+        }
+      }
+    }
+
+    return buildFinanceAgentsView({
+      config: (configRes.data as FinanceAgentConfigRow | null) ?? null,
+      hasActiveSchedule: schedules.some((s) => s.status === 'active'),
+      pending,
+      decided,
+      runs,
+      suggestionsByRun,
+      spentTodayCents: daySpent,
+      spentWeekCents: weekSpent,
+      // A failed read is unknown, not "no key": the server still refuses a run or save without one.
+      hasKey: key.error ? null : Array.isArray(key.data) ? key.data.length > 0 : Boolean(key.data),
+      notes,
+    });
+  } catch (error) {
+    console.error('[finance/agents] could not load the agent', (error as { code?: string } | null)?.code ?? 'unknown');
+    return null;
+  }
+}
+
+/**
+ * Bendahara's AI Agents screen: the focus the workspace wrote, the notes the agent suggests from
+ * it, when it runs and what it may spend, and the notes approved so far. The sample shows when no
+ * database is configured and in the demo workspace.
+ */
+export default async function AgentsScreen() {
+  if (!hasSupabaseEnv()) return <AgentsSample />;
+  const viewer = await getViewer();
+  if (viewer.isDemo) return <AgentsSample />;
+
+  // Focus, schedule and limits decide what the workspace key spends: owner/admin only.
+  const canManage = can(viewer.role, 'manage-agents');
+  // Run now, Approve/Dismiss and deleting a note: anyone who edits the workspace's data.
+  const canEdit = can(viewer.role, 'edit-data');
+
+  const view = await loadView(viewer.orgId);
+  if (!view) return <CouldntLoad title={TITLE} subtitle={SUBTITLE} thing="agent" />;
+
+  const cards: Record<FinanceAgentsSection, ReactNode> = {
+    waiting: (
+      <BentoCard key="waiting" title="Waiting for you" icon={Inbox} className="col-span-2 md:col-span-12">
+        <PendingApprovals
+          proposals={view.pending}
+          canEdit={canEdit}
+          heading="Suggestions"
+          emptyText="Nothing waiting"
+          rejectLabel="Dismiss"
+          views={view.suggestions}
+        />
+      </BentoCard>
+    ),
+    focus: (
+      <BentoCard
+        key="focus"
+        title="Focus"
+        subtitle="Tell the agent what to watch for, in your own words"
+        icon={Target}
+        className="col-span-2 md:col-span-12"
+      >
+        <FinanceAgentFocus
+          key={`${view.focus.state}:${view.focus.text}`}
+          focus={view.focus}
+          starters={FINANCE_STARTER_EXAMPLES}
+          maxChars={FINANCE_MAX_FOCUS_CHARS}
+          canManage={canManage}
+          hasKey={view.hasKey !== false}
+        />
+      </BentoCard>
+    ),
+    schedule: (
+      <BentoCard key="schedule" title="Schedule and limits" icon={CalendarClock} className="col-span-2 md:col-span-12">
+        <FinanceAgentSchedule
+          settings={view.settings}
+          spend={view.spend}
+          needsSchedule={view.needsSchedule}
+          canManage={canManage}
+          canRun={canEdit}
+          hasKey={view.hasKey !== false}
+        />
+      </BentoCard>
+    ),
+    notes: (
+      <BentoCard key="notes" title="Notes from the agent" icon={NotebookPen} className="col-span-2 md:col-span-12">
+        <AgentNotesList notes={view.notes} canEdit={canEdit} />
+      </BentoCard>
+    ),
+    history: (
+      <BentoCard key="history" title="Recent history" icon={History} className="col-span-2 md:col-span-12">
+        <div className="space-y-4">
+          {view.history.length === 0 ? (
+            <p className="grid min-h-16 place-items-center text-center text-sm text-muted-foreground">No runs yet.</p>
+          ) : (
+            <ul className="divide-y rounded-md border">
+              {view.history.map((run) => (
+                <li key={run.id} className="flex flex-wrap items-center justify-between gap-2 p-3 text-sm">
+                  <span className="font-medium">{RUN_STATUS[run.status] ?? run.status}</span>
+                  <span className="tabular-nums text-muted-foreground">
+                    {formatWhen(run.startedAt)}
+                    {run.suggestions !== null && ` · ${run.suggestions} suggestion${run.suggestions === 1 ? '' : 's'}`}
+                    {` · ${rm(run.costCents)}`}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+          <RecentlyDecided decided={view.decided} />
+        </div>
+      </BentoCard>
+    ),
+  };
+
+  return (
+    <ScreenContainer>
+      <PageHeader title={TITLE} subtitle={SUBTITLE} />
+      {view.hasKey === false && (
+        <p className="mb-4 rounded-md border border-dashed p-3 text-sm text-muted-foreground">
+          The agent runs on your workspace&rsquo;s own AI key.{' '}
+          <Link href="/account/ai" className="font-medium text-primary underline-offset-4 hover:underline">
+            Add an OpenRouter key
+          </Link>{' '}
+          to use it.
+        </p>
+      )}
+      <BentoGrid>{view.sections.map((s) => cards[s])}</BentoGrid>
     </ScreenContainer>
   );
 }

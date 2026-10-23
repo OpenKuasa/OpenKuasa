@@ -23,6 +23,7 @@ import { listProducts } from '@/lib/finance/products';
 import { listRefunds } from '@/lib/finance/refunds';
 import { invoicesView } from '@/lib/finance/sales-views';
 import { todayUtc } from '@/lib/finance/view-helpers';
+import { noteCountsFor } from '@/lib/finance/agent/notes';
 import { createClient } from '@/lib/supabase/server';
 import { SAMPLE_INVOICES, SAMPLE_PAYMENTS_IN, SAMPLE_TODAY } from './sales-sample';
 
@@ -76,9 +77,12 @@ export default async function InvoicesScreen() {
     canEdit ? listAccounts(ctx) : [],
     canEdit ? readFollowOn(ctx) : null,
   ]);
+  // The agent's notes on the documents just loaded (only those ids). A failed read is logged and shows no marker.
+  const agentNotes = (await noteCountsFor(ctx, 'finance_invoice', rows.map((r) => r.id))) ?? undefined;
   return (
     <InvoicesView
       rows={rows}
+      agentNotes={agentNotes}
       view={invoicesView(rows, payments, todayUtc())}
       writer={
         canEdit
