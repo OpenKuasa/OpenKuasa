@@ -23,6 +23,7 @@
   "dependencies": {
     "@ai-sdk/react": "^4.0.136",
     "@animateicons/react": "^0.12.0",
+    "@modelcontextprotocol/sdk": "1.32.1",
     "@openrouter/ai-sdk-provider": "^3.1.0",
     "@supabase/ssr": "^0.12.7",
     "@supabase/supabase-js": "^2.117.2",

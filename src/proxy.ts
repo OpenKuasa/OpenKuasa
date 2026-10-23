@@ -1,6 +1,9 @@
-import { type NextRequest } from 'next/server';
+import { NextResponse, type NextRequest } from 'next/server';
 import { cspHeaders, createNonce } from '@/lib/security/headers';
 import { updateSession } from '@/lib/supabase/middleware';
+
+/** Paths an MCP client calls with a bearer credential: no cookie session to refresh or set. */
+const BEARER_PATHS = new Set(['/api/mcp', '/.well-known/oauth-protected-resource']);
 
 export async function proxy(request: NextRequest) {
   const nonce = createNonce();
@@ -21,7 +24,7 @@ export async function proxy(request: NextRequest) {
     policy['Content-Security-Policy-Report-Only'] ?? policy['Content-Security-Policy'],
   );
 
-  const response = await updateSession(request);
+  const response = BEARER_PATHS.has(request.nextUrl.pathname) ? NextResponse.next() : await updateSession(request);
   for (const [key, value] of Object.entries(policy)) response.headers.set(key, value);
   return response;
 }
