@@ -62,6 +62,10 @@ describe('live screens', () => {
     expect(isSampleScreen('/finance/settings')).toBe(false);
   });
 
+  it('counts the Bendahara AI Agents screen as live', () => {
+    expect(isSampleScreen('/finance/agents')).toBe(false);
+  });
+
   it('counts FX Revaluation as live', () => {
     expect(isSampleScreen('/finance/fx-revaluation')).toBe(false);
   });
