@@ -14,7 +14,7 @@ export function screensToRefresh(
   return [...new Set([...registry.values()].map((def) => def.ui.screenPath))];
 }
 
-const HANDLED ='That suggestion has already been handled.';
+const HANDLED = 'That suggestion has already been handled.';
 
 /**
  * Approve a queued proposal, claim-first: atomically flip pending -> approved (pending and
