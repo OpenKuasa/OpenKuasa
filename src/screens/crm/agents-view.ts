@@ -30,9 +30,11 @@ export type CrmAgentsInput = {
   runs: CrmAgentRunRow[];
   /** Suggestions made per run id; null when they could not be counted. */
   suggestionsByRun: Record<string, number> | null;
-  spentTodayCents: number;
-  spentWeekCents: number;
-  hasKey: boolean;
+  /** Null when the spend could not be read: the strip says so rather than showing RM 0.00. */
+  spentTodayCents: number | null;
+  spentWeekCents: number | null;
+  /** Null when the key status could not be read: treated as unknown, never as "no key". */
+  hasKey: boolean | null;
 };
 
 export type CrmAgentsSection = 'waiting' | 'focus' | 'schedule' | 'history';
@@ -44,21 +46,22 @@ export type CrmFocusView = {
   cannot: string[];
 };
 
-/** How one waiting suggestion is shown: its record link and what approving does. */
-export type CrmSuggestionView = { href: string | null; effect: string };
+/** How one waiting suggestion is shown: its record link, what approving does, and the check behind it. */
+export type CrmSuggestionView = { href: string | null; effect: string; why: string | null };
 
 export type CrmAgentsView = {
   sections: CrmAgentsSection[];
   focus: CrmFocusView;
   settings: { cadence: AgentCadence; maxCostCents: number; dailyCapCents: number; weeklyCapCents: number };
-  spend: { todayCents: number; weekCents: number };
+  spend: { todayCents: number | null; weekCents: number | null };
   /** The focus is confirmed but nothing is scheduled: the Schedule section asks for one. */
   needsSchedule: boolean;
   pending: AgentProposal[];
   suggestions: Record<string, CrmSuggestionView>;
   decided: AgentProposal[];
   history: { id: string; status: AgentRunStatus; costCents: number; startedAt: string; suggestions: number | null }[];
-  hasKey: boolean;
+  /** True, false, or null when unknown (buttons stay enabled; the server still refuses without a key). */
+  hasKey: boolean | null;
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -95,7 +98,9 @@ export function suggestionView(p: AgentProposal): CrmSuggestionView {
     const on = dealId ? 'the deal' : 'the contact';
     effect = body ? `Leaves this note on ${on}: “${body}”` : `Leaves a note on ${on}.`;
   }
-  return { href, effect };
+  // The check's own summary, never the model's rationale.
+  const why = CRM_FOCUS_MENU.checks.find((c) => c.key === p.check_key)?.summary ?? null;
+  return { href, effect, why };
 }
 
 function focusView(config: CrmAgentConfigRow | null): CrmFocusView {

@@ -32,4 +32,18 @@ describe('AgentSchedule', () => {
     expect(render({ needsSchedule: true, canManage: false })).toContain(HINT);
     expect(render()).not.toContain(HINT);
   });
+
+  it('takes limits to the sen', () => {
+    const html = render();
+    expect(html.match(/step="0.01"/g)).toHaveLength(3);
+    expect(html).not.toContain('step="0.5"');
+  });
+
+  it('says when spend could not be read instead of showing RM 0.00', () => {
+    const html = render({ spend: { todayCents: null, weekCents: 40 } });
+    expect(html).toContain('Couldn’t read spend');
+    expect(html).toContain('RM 0.40 of RM 5.00');
+    expect(html).not.toContain('RM 0.00');
+    expect(render()).not.toContain('Couldn’t read spend');
+  });
 });

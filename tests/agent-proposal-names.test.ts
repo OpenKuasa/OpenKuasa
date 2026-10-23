@@ -17,6 +17,7 @@ const proposal = (action: string, input: unknown): AgentProposal => ({
   title: 't',
   detail: null,
   rationale: null,
+  check_key: null,
   status: 'pending',
   result: null,
   created_at: '',

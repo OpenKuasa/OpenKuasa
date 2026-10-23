@@ -48,7 +48,7 @@ export async function saveFocusAction(text: unknown): Promise<SaveFocusResult> {
   if (!ctx) return FORBIDDEN;
   if (typeof text !== 'string') return INVALID;
   const result = await saveFocus(
-    { client: ctx.client, service: serviceClient(), orgId: ctx.orgId},
+    { client: ctx.client, service: serviceClient(), orgId: ctx.orgId },
     text,
   );
   // Revalidate even on a refusal after the model call: the spend shows on the screen.

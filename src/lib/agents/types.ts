@@ -94,6 +94,8 @@ export type AgentProposal = {
   title: string;
   detail: string | null;
   rationale: string | null;
+  /** The check that raised it (Kasturi's focus checks); null for Jebat's rows. */
+  check_key: string | null;
   status: ProposalStatus;
   result: unknown;
   created_at: string;

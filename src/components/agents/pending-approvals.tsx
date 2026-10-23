@@ -11,8 +11,11 @@ import { applyProposalAction, rejectProposalAction } from '@/app/(app)/agents/ac
 
 type ActionResult = { ok: boolean; error?: string };
 
-/** A suggestion shown as a record link plus one line saying what approving does, built on the server. */
-export type SuggestionView = { href: string | null; effect: string };
+/**
+ * A suggestion shown as a record link plus one line saying what approving does, built on the server.
+ * `why` names the check that raised it; with a view the model's own rationale is not shown.
+ */
+export type SuggestionView = { href: string | null; effect: string; why: string | null };
 
 export function PendingApprovals({
   proposals,
@@ -77,7 +80,11 @@ export function PendingApprovals({
                 ) : (
                   <p className="font-medium">{p.title}</p>
                 )}
-                {p.rationale && <p className="text-muted-foreground">{p.rationale}</p>}
+                {view ? (
+                  view.why && <p className="text-muted-foreground">Why it came up: {view.why}</p>
+                ) : (
+                  p.rationale && <p className="text-muted-foreground">{p.rationale}</p>
+                )}
                 {p.detail && <p className="text-muted-foreground">{p.detail}</p>}
                 {view ? (
                   <p>{view.effect}</p>

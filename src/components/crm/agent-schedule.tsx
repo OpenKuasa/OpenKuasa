@@ -19,6 +19,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import type { AgentCadence } from '@/lib/agents/types';
+import { rm } from '@/lib/reach/format';
 import type { CrmAgentsView } from '@/screens/crm/agents-view';
 
 const CADENCE_LABEL: Record<AgentCadence, string> = { off: 'Off', daily: 'Daily', weekly: 'Weekly' };
@@ -27,8 +28,6 @@ const CADENCE_HINT = 'Daily runs at 7:00 am; weekly on Monday 7:00 am (Kuala Lum
 
 type ActionResult = { ok: boolean; error?: string };
 
-const rm = (cents: number) => `RM ${(cents / 100).toFixed(2)}`;
-
 /** RM text to whole cents, or null when it is not a number in range. */
 function toCents(value: string, maxCents: number): number | null {
   if (value.trim() === '') return null;
@@ -36,7 +35,15 @@ function toCents(value: string, maxCents: number): number | null {
   return Number.isFinite(cents) && cents >= 0 && cents <= maxCents ? cents : null;
 }
 
-function SpendLine({ label, spent, cap }: { label: string; spent: number; cap: number }) {
+function SpendLine({ label, spent, cap }: { label: string; spent: number | null; cap: number }) {
+  if (spent === null) {
+    return (
+      <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+        <span className="font-medium">{label}</span>
+        <span className="text-muted-foreground">Couldn&rsquo;t read spend</span>
+      </div>
+    );
+  }
   const full = cap > 0 ? spent >= cap : true;
   const pct = cap > 0 ? Math.min(100, (spent / cap) * 100) : 100;
   return (
@@ -153,7 +160,7 @@ export function AgentSchedule({
                   type="number"
                   min={0}
                   max={l.max}
-                  step={0.5}
+                  step={0.01}
                   className="tabular-nums"
                   value={l.value}
                   disabled={pending}

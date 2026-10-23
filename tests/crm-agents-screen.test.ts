@@ -32,6 +32,7 @@ function proposal(over: Partial<AgentProposal> = {}): AgentProposal {
     title: 'Note on Acme — quiet 9 days',
     detail: null,
     rationale: 'It has gone quiet.',
+    check_key: 'deal_quiet',
     status: 'pending',
     result: null,
     created_at: '2026-10-23T00:00:00Z',
@@ -106,6 +107,24 @@ describe('buildCrmAgentsView', () => {
     expect(view.suggestions.p3.href).toBeNull();
     expect(view.suggestions.p1.effect).toBe('Leaves this note on the deal: “No activity for 9 days.”');
     expect(view.suggestions.p2.effect).toBe('Adds a follow-up task “Check in with Siti”, due 24 Oct 2026.');
+  });
+
+  it('says why from the check that raised it, never the model rationale', () => {
+    const view = buildCrmAgentsView(
+      input({
+        pending: [proposal(), proposal({ id: 'p2', check_key: 'made_up' }), proposal({ id: 'p3', check_key: null })],
+      }),
+    );
+    expect(view.suggestions.p1.why).toBe('Open deals with no activity for N days');
+    expect(view.suggestions.p2.why).toBeNull();
+    expect(view.suggestions.p3.why).toBeNull();
+    expect(JSON.stringify(view.suggestions)).not.toContain('It has gone quiet.');
+  });
+
+  it('keeps an unreadable spend or key status unknown', () => {
+    const view = buildCrmAgentsView(input({ spentTodayCents: null, spentWeekCents: null, hasKey: null }));
+    expect(view.spend).toEqual({ todayCents: null, weekCents: null });
+    expect(view.hasKey).toBeNull();
   });
 
   it('encodes a link id rather than trusting it', () => {

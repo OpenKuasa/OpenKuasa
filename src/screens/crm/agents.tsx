@@ -40,6 +40,7 @@ import { CRM_FOCUS, type AgentRunStatus } from '@/lib/agents/types';
 import { can } from '@/lib/auth/permissions';
 import { getViewer, hasSupabaseEnv } from '@/lib/auth/viewer';
 import { CRM_MAX_FOCUS_CHARS, CRM_STARTER_EXAMPLES } from '@/lib/crm/agent/checks';
+import { rm } from '@/lib/reach/format';
 import { listSchedules } from '@/lib/reach/schedule-capabilities';
 import { createClient } from '@/lib/supabase/server';
 import { cn } from '@/lib/utils';
@@ -385,11 +386,11 @@ type Loaded = { view: CrmAgentsView };
 
 async function loadView(orgId: string): Promise<Loaded | null> {
   const supabase = await createClient();
-  // Fail open to "nothing spent" on the strip only; the run gate itself refuses instead.
+  // An unreadable spend shows as such on the strip (never as RM 0.00); the run gate refuses.
   const spentSince = (ms: number) =>
-    workspaceSpendCents(supabase, orgId, isoAgo(ms), CRM_FOCUS).catch(() => {
+    workspaceSpendCents(supabase, orgId, isoAgo(ms), CRM_FOCUS).catch((): number | null => {
       console.error('[crm/agents] workspace spend could not be read');
-      return 0;
+      return null;
     });
   try {
     const [configRes, runsRes, pending, decided, schedules, key, daySpent, weekSpent] = await Promise.all([
@@ -445,8 +446,9 @@ async function loadView(orgId: string): Promise<Loaded | null> {
         suggestionsByRun,
         spentTodayCents: daySpent,
         spentWeekCents: weekSpent,
-        // Same reading as the AI Chatbot screen: a stored key shows as a row.
-        hasKey: Array.isArray(key.data) ? key.data.length > 0 : Boolean(key.data),
+        // Same reading as the AI Chatbot screen: a stored key shows as a row. A failed read is
+        // unknown, not "no key": the server still refuses a run or save without one.
+        hasKey: key.error ? null : Array.isArray(key.data) ? key.data.length > 0 : Boolean(key.data),
       }),
     };
   } catch (error) {
@@ -501,7 +503,7 @@ export default async function AgentsScreen() {
           starters={CRM_STARTER_EXAMPLES}
           maxChars={CRM_MAX_FOCUS_CHARS}
           canManage={canManage}
-          hasKey={view.hasKey}
+          hasKey={view.hasKey !== false}
         />
       </BentoCard>
     ),
@@ -513,7 +515,7 @@ export default async function AgentsScreen() {
           needsSchedule={view.needsSchedule}
           canManage={canManage}
           canRun={canEdit}
-          hasKey={view.hasKey}
+          hasKey={view.hasKey !== false}
         />
       </BentoCard>
     ),
@@ -533,7 +535,7 @@ export default async function AgentsScreen() {
                     {formatWhen(run.startedAt)}
                     {run.suggestions !== null &&
                       ` · ${run.suggestions} suggestion${run.suggestions === 1 ? '' : 's'}`}
-                    {` · RM ${(run.costCents / 100).toFixed(2)}`}
+                    {` · ${rm(run.costCents)}`}
                   </span>
                 </li>
               ))}
@@ -548,7 +550,7 @@ export default async function AgentsScreen() {
   return (
     <ScreenContainer>
       <PageHeader title={TITLE} subtitle={SUBTITLE} />
-      {!view.hasKey && (
+      {view.hasKey === false && (
         <p className="mb-4 rounded-md border border-dashed p-3 text-sm text-muted-foreground">
           The agent runs on your workspace&rsquo;s own AI key.{' '}
           <Link href="/account/ai" className="font-medium text-primary underline-offset-4 hover:underline">
