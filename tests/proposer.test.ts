@@ -52,7 +52,7 @@ function fakeService(
         selects.push(rec);
         let isDecided = false;
         const chain: Record<string, unknown> = {};
-        for (const m of ['eq', 'gte', 'limit', 'in']) {
+        for (const m of ['eq', 'gte', 'limit', 'in', 'order', 'range']) {
           chain[m] = (...args: unknown[]) => {
             rec.calls.push({ method: m, args });
             if (m === 'in') isDecided = true;

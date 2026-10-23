@@ -5,6 +5,8 @@ import { TEXT_ESTIMATE_CENTS, costOr } from '@/lib/agents/costs';
 import { suggestProposals } from '@/lib/agents/openrouter-media';
 
 const MAX_PROPOSALS = 5;
+/** PostgREST returns at most this many rows per request. */
+const DECIDED_PAGE = 1000;
 
 export type { Candidate };
 
@@ -70,15 +72,24 @@ export async function proposeChanges(
   // (or just-approved) suggestion is not re-offered on the next run.
   if (settings.cooldownDays !== undefined) {
     const since = new Date(now.getTime() - settings.cooldownDays * 24 * 3600_000).toISOString();
-    const { data: decided, error: cErr } = await service
-      .from('agent_proposals')
-      .select('action, input, check_key')
-      .eq('org_id', orgId)
-      .eq('product', def.product)
-      .in('status', ['approved', 'rejected'])
-      .gte('decided_at', since);
-    if (cErr) return { proposed: 0, cost_cents: 0 }; // fail closed, like the pending read
-    for (const r of decided ?? []) pendingKeys.add(keyOfRow(r));
+    // Paged: a long cooldown (Bendahara's never expires) can hold more decided rows than one
+    // response returns, and a dropped page would let a decided suggestion come back.
+    for (let from = 0; ; from += DECIDED_PAGE) {
+      const { data: decided, error: cErr } = await service
+        .from('agent_proposals')
+        .select('action, input, check_key')
+        .eq('org_id', orgId)
+        .eq('product', def.product)
+        .in('status', ['approved', 'rejected'])
+        .gte('decided_at', since)
+        .order('decided_at', { ascending: true })
+        // Tiebreaker: rows sharing a decided_at must not shift between pages.
+        .order('id', { ascending: true })
+        .range(from, from + DECIDED_PAGE - 1);
+      if (cErr) return { proposed: 0, cost_cents: 0 }; // fail closed, like the pending read
+      for (const r of decided ?? []) pendingKeys.add(keyOfRow(r));
+      if ((decided ?? []).length < DECIDED_PAGE) break;
+    }
   }
   const offered = candidates.filter(
     (c) => !pendingKeys.has(dedupeKeyOf(c.action, c.input, c.checkKey)),
