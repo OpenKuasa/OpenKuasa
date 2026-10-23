@@ -11,6 +11,7 @@
  * Supplier credit notes are in ringgit. org_id comes from the context.
  */
 import { z } from 'zod';
+import { round2 } from './allocation-form';
 import { LINE_MESSAGES, isoDate, optionalText, ringgitAmount } from './document-lines';
 import {
   type FinResult,
@@ -193,14 +194,16 @@ async function readBillNumbers(ctx: FinanceWriteContext, ids: string[]): Promise
   return numbers;
 }
 
-/** Every supplier credit note in the workspace, newest first, with where its credit went. Drafts and void ones are included. */
-export async function listSupplierCreditNotes(ctx: FinanceWriteContext): Promise<SupplierCreditNoteRow[]> {
+/**
+ * Every page of rows from the supplier credit note totals, newest first. `openOnly` keeps issued notes with credit
+ * left, the only ones that count towards a supplier's open credit.
+ */
+async function readNoteTotals(ctx: FinanceWriteContext, columns: string, openOnly = false): Promise<Record<string, unknown>[]> {
   const notes: Record<string, unknown>[] = [];
   for (let from = 0; ; from += SUPPLIER_CREDIT_PAGE_SIZE) {
-    const { data, error } = await ctx.client
-      .from('finance_supplier_credit_note_totals')
-      .select(LIST_COLUMNS)
-      .eq('org_id', ctx.orgId)
+    let q = ctx.client.from('finance_supplier_credit_note_totals').select(columns).eq('org_id', ctx.orgId);
+    if (openOnly) q = q.eq('status', 'issued').gt('open_amount', 0);
+    const { data, error } = await q
       .order('credit_date', { ascending: false })
       .order('id', { ascending: true })
       .range(from, from + SUPPLIER_CREDIT_PAGE_SIZE - 1);
@@ -209,9 +212,15 @@ export async function listSupplierCreditNotes(ctx: FinanceWriteContext): Promise
     notes.push(...page);
     if (page.length < SUPPLIER_CREDIT_PAGE_SIZE) break;
   }
+  return notes;
+}
+
+/** Every supplier credit note in the workspace, newest first, with where its credit went. Drafts and void ones are included. */
+export async function listSupplierCreditNotes(ctx: FinanceWriteContext): Promise<SupplierCreditNoteRow[]> {
+  // The two reads do not depend on each other, so they run together.
+  const [notes, applications] = await Promise.all([readNoteTotals(ctx, LIST_COLUMNS), readApplications(ctx)]);
   if (notes.length === 0) return [];
 
-  const applications = await readApplications(ctx);
   // The note's own bill number is in the view; only bills credit was moved to need a read.
   const known = new Map(notes.map((n) => [n.bill_id as string, (n.bill_no as string | null) ?? null]));
   const unknown = [...new Set(applications.map((a) => a.bill_id))].filter((id) => !known.has(id));
@@ -242,15 +251,14 @@ export async function listSupplierCreditNotes(ctx: FinanceWriteContext): Promise
   });
 }
 
-/** Open credit by supplier: what issued notes still have to apply. Suppliers with none are left out. */
 /**
  * The supplier credit notes for a page that only shows them alongside something else (Supplier Bills):
  * a failed read is logged and gives none, so the page still loads.
  */
-export async function supplierCreditNotesOrNone(
-  read: () => Promise<SupplierCreditNoteRow[]>,
+export async function supplierCreditNotesOrNone<T>(
+  read: () => Promise<T[]>,
   log: (message: string, error: unknown) => void = console.error,
-): Promise<SupplierCreditNoteRow[]> {
+): Promise<T[]> {
   try {
     return await read();
   } catch (error) {
@@ -259,11 +267,28 @@ export async function supplierCreditNotesOrNone(
   }
 }
 
-export function openCreditBySupplier(rows: Pick<SupplierCreditNoteRow, 'supplier_id' | 'status' | 'open_amount'>[]): Record<string, number> {
+/** What a supplier's open credit is worked out from. */
+export type OpenSupplierCredit = Pick<SupplierCreditNoteRow, 'supplier_id' | 'status' | 'open_amount'>;
+
+/**
+ * Only what Supplier Bills needs to say how much credit a supplier has open: issued notes with credit left.
+ * Lighter than listSupplierCreditNotes, which also reads where credit went and those bills' numbers.
+ */
+export async function listOpenSupplierCredit(ctx: FinanceWriteContext): Promise<OpenSupplierCredit[]> {
+  const rows = await readNoteTotals(ctx, 'supplier_id,status,open_amount', true);
+  return rows.map((r) => ({
+    supplier_id: r.supplier_id as string,
+    status: r.status as SupplierCreditNoteRow['status'],
+    open_amount: Number(r.open_amount),
+  }));
+}
+
+/** Open credit by supplier: what issued notes still have to apply. Suppliers with none are left out. */
+export function openCreditBySupplier(rows: OpenSupplierCredit[]): Record<string, number> {
   const open: Record<string, number> = {};
   for (const r of rows) {
     if (r.status !== 'issued' || r.open_amount <= 0) continue;
-    open[r.supplier_id] = Math.round(((open[r.supplier_id] ?? 0) + r.open_amount) * 100) / 100;
+    open[r.supplier_id] = round2((open[r.supplier_id] ?? 0) + r.open_amount);
   }
   return open;
 }

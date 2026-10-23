@@ -4,6 +4,7 @@ import {
   applySupplierCreditInput,
   deleteSupplierCreditNote,
   issueSupplierCreditNote,
+  listOpenSupplierCredit,
   listSupplierCreditNotes,
   openCreditBySupplier,
   supplierCreditNotesOrNone,
@@ -68,10 +69,27 @@ describe('listSupplierCreditNotes', () => {
     // Only the bill not already known is read.
     expect(calls[2]).toMatchObject({ name: 'supplier_bills', filters: { org_id: 'org-1', 'id in': [LATER] } });
   });
-  it('reads nothing more when there are no notes', async () => {
+  it('reads the notes and the applications together, and no bill numbers when there are no notes', async () => {
     const { ctx, calls } = fakeFinance({ data: [], error: null });
     expect(await listSupplierCreditNotes(ctx)).toEqual([]);
+    expect(calls.map((c) => c.name).sort()).toEqual(['finance_supplier_credit_applications', 'finance_supplier_credit_note_totals']);
+  });
+});
+
+describe('listOpenSupplierCredit', () => {
+  it('reads only issued notes with credit left, and only the three columns open credit needs', async () => {
+    const { ctx, calls } = fakeFinance({
+      data: [{ supplier_id: 's', status: 'issued', open_amount: '40.50' }],
+      error: null,
+    });
+    expect(await listOpenSupplierCredit(ctx)).toEqual([{ supplier_id: 's', status: 'issued', open_amount: 40.5 }]);
     expect(calls).toHaveLength(1);
+    expect(calls[0]).toMatchObject({
+      name: 'finance_supplier_credit_note_totals',
+      columns: 'supplier_id,status,open_amount',
+      filters: { org_id: 'org-1', status: 'issued', 'open_amount gt': 0 },
+      range: [0, 999],
+    });
   });
 });
 

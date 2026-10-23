@@ -23,7 +23,7 @@ import { listPurchaseOrders } from '@/lib/finance/purchase-orders';
 import { listProducts } from '@/lib/finance/products';
 import { attachedReceiptsOrNone, listAttachedReceipts, receiptsByDocument } from '@/lib/finance/receipt-match';
 import { billsView, todayUtc } from '@/lib/finance/purchase-views';
-import { listSupplierCreditNotes, openCreditBySupplier, supplierCreditNotesOrNone } from '@/lib/finance/supplier-credit-notes';
+import { listOpenSupplierCredit, listSupplierCreditNotes, openCreditBySupplier, supplierCreditNotesOrNone } from '@/lib/finance/supplier-credit-notes';
 import { noteCountsFor } from '@/lib/finance/agent/notes';
 import { createClient } from '@/lib/supabase/server';
 
@@ -128,14 +128,15 @@ export default async function SupplierBillsScreen() {
   const canEdit = !viewer.isDemo && can(viewer.role, 'edit-data');
   // The forms offer suppliers, products and accounts; a viewer has no form, so none of them is read for them.
   // The receipts tied to a bill show in its row, for everyone who can see it.
-  const [rows, payments, attached, creditNotes, contacts, products, accounts, orders, categories, defaultCategoryId] = await Promise.all([
+  const [rows, payments, attached, creditNotes, openCreditRows, contacts, products, accounts, orders, categories, defaultCategoryId] = await Promise.all([
     listBills(ctx),
     listPaymentsOut(ctx),
     // Without the paperclips the page still loads: a failed read is logged and shows none.
     attachedReceiptsOrNone(() => listAttachedReceipts(ctx)),
-    // Supplier credit notes: the open credit each supplier has, for everyone, and what a bill can still be credited.
-    // Without them the page still loads: a failed read is logged and shows none.
-    supplierCreditNotesOrNone(() => listSupplierCreditNotes(ctx)),
+    // Supplier credit notes: the open credit each supplier has, for everyone; a writer's forms also need where credit
+    // went, so only they get the full list. Without them the page still loads: a failed read is logged and shows none.
+    canEdit ? supplierCreditNotesOrNone(() => listSupplierCreditNotes(ctx)) : [],
+    canEdit ? [] : supplierCreditNotesOrNone(() => listOpenSupplierCredit(ctx)),
     canEdit ? listContacts(ctx) : [],
     canEdit ? listProducts(ctx) : [],
     // Stage 5b: every active account; each form offers ringgit ones and those in its documents' currency.
@@ -156,7 +157,7 @@ export default async function SupplierBillsScreen() {
       agentNotes={agentNotes}
       // Worked out here for everyone: a viewer has no payment rows in the browser, but still sees what is scheduled.
       held={heldByBill(payments)}
-      openCredit={openCreditBySupplier(creditNotes)}
+      openCredit={openCreditBySupplier(canEdit ? creditNotes : openCreditRows)}
       receipts={receiptsByDocument(attached)}
       receiptLinkOf={receiptLinkAction}
       writer={
