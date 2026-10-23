@@ -7,6 +7,7 @@ import { ScreenContainer } from '@/components/screen/screen-container';
 import { PageHeader } from '@/components/screen/page-header';
 import { BentoGrid, BentoCard } from '@/components/bento/bento';
 import { Button } from '@/components/ui/button';
+import type { CrmConnections } from '@/lib/crm/connections';
 import type { CrmFormAction } from '@/lib/crm/form-state';
 import {
   EXPORT_CONTACTS_MAX,
@@ -15,6 +16,7 @@ import {
   type MyKasturiNotifications,
 } from '@/lib/crm/settings';
 import { cn } from '@/lib/utils';
+import { ConnectionRows, plural, StatusRow as Row } from './connection-rows';
 import { useCrmForm } from './crm-form';
 
 type ExportNote = { tone: 'error' | 'info'; text: string } | null;
@@ -110,59 +112,9 @@ export type CrmSettingsOverview = {
   members: number | null;
   contacts: number | null;
   pipelines: { id: string; name: string; isDefault: boolean; stages: number }[];
-  hasAiKey: boolean;
-  /** The address broadcasts are sent from; null when no email key is set. */
-  emailSender: string | null;
-  pagesWithChat: number | null;
-  automationsOn: number | null;
-};
+} & CrmConnections;
 
 const LINK = 'font-medium text-primary underline-offset-4 hover:underline';
-
-function plural(count: number | null, one: string, many: string) {
-  if (count === null) return `Some ${many}`;
-  return `${count.toLocaleString('en-MY')} ${count === 1 ? one : many}`;
-}
-
-/** A line of the screen that only reports something and says where to change it. */
-function Row({
-  label,
-  value,
-  href,
-  linkLabel,
-  on,
-}: {
-  label: string;
-  value: string;
-  href: string;
-  linkLabel: string;
-  /** Draws the value as a state pill: green when on, grey when not. */
-  on?: boolean;
-}) {
-  return (
-    <li className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 rounded-lg border bg-background/50 px-3 py-2">
-      <div className="min-w-0">
-        <p className="text-sm font-medium">{label}</p>
-        {on === undefined ? <p className="truncate text-xs text-muted-foreground">{value}</p> : null}
-      </div>
-      <div className="flex shrink-0 items-center gap-3">
-        {on === undefined ? null : (
-          <span
-            className={cn(
-              'rounded-full px-2 py-0.5 text-xs font-medium',
-              on ? 'bg-emerald-500/15 text-emerald-600' : 'bg-muted text-muted-foreground',
-            )}
-          >
-            {value}
-          </span>
-        )}
-        <Link href={href} className={cn(LINK, 'text-xs')}>
-          {linkLabel}
-        </Link>
-      </div>
-    </li>
-  );
-}
 
 function Saved({ pending, error, saved }: { pending: boolean; error: string | null; saved: boolean }) {
   if (error) {
@@ -384,48 +336,7 @@ export function CrmSettingsView({
           icon={Plug}
           className="col-span-2 md:col-span-6"
         >
-          <ul className="space-y-1">
-            <Row
-              label="AI key (OpenRouter)"
-              value={overview.hasAiKey ? 'Set' : 'Not set'}
-              on={overview.hasAiKey}
-              href="/account/ai"
-              linkLabel={overview.hasAiKey ? 'Manage' : 'Add a key'}
-            />
-            <Row
-              label="Email sending (Resend)"
-              value={overview.emailSender ? `From ${overview.emailSender}` : 'Not set'}
-              on={overview.emailSender !== null}
-              href="/crm/broadcast"
-              linkLabel={overview.emailSender ? 'Manage' : 'Set up'}
-            />
-            <Row
-              label="Chatbot on landing pages"
-              value={
-                overview.pagesWithChat === null
-                  ? 'Unknown'
-                  : overview.pagesWithChat === 0
-                    ? 'Off'
-                    : `On for ${plural(overview.pagesWithChat, 'page', 'pages')}`
-              }
-              on={(overview.pagesWithChat ?? 0) > 0}
-              href="/crm/chatbot"
-              linkLabel="Open"
-            />
-            <Row
-              label="Automations"
-              value={
-                overview.automationsOn === null
-                  ? 'Unknown'
-                  : overview.automationsOn === 0
-                    ? 'None on'
-                    : `${overview.automationsOn} on`
-              }
-              on={(overview.automationsOn ?? 0) > 0}
-              href="/crm/automations"
-              linkLabel="Open"
-            />
-          </ul>
+          <ConnectionRows connections={overview} />
         </BentoCard>
 
         <BentoCard

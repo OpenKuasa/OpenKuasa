@@ -1,6 +1,6 @@
 import { getViewer, hasSupabaseEnv } from '@/lib/auth/viewer';
 import { CrmContactFormError } from '@/lib/crm/contacts';
-import { getEmailKeyStatus } from '@/lib/crm/email-key';
+import { loadCrmConnections } from '@/lib/crm/connections';
 import type { CrmFormState } from '@/lib/crm/form-state';
 import { listCrmPipelines } from '@/lib/crm/pipelines';
 import { runCrmWrite } from '@/lib/crm/run-write';
@@ -70,7 +70,7 @@ export default async function CrmSettingsPage() {
   } | null = null;
   try {
     // Fetched together: each trip to the database costs about the same.
-    const [settings, notifications, pipelines, org, members, contacts, pagesWithChat, automationsOn, aiKey, emailKey] =
+    const [settings, notifications, pipelines, org, members, contacts, connections] =
       await Promise.all([
         loadCrmSettings(supabase, orgId),
         loadMyKasturiNotifications(supabase, userId),
@@ -78,27 +78,9 @@ export default async function CrmSettingsPage() {
         supabase.from('orgs').select('name,registration_no').eq('id', orgId).maybeSingle(),
         count(supabase.from('org_members').select('user_id', { count: 'exact', head: true }).eq('org_id', orgId)),
         count(supabase.from('crm_contacts').select('id', { count: 'exact', head: true }).eq('org_id', orgId)),
-        count(
-          supabase
-            .from('crm_landing_pages')
-            .select('id', { count: 'exact', head: true })
-            .eq('org_id', orgId)
-            .eq('chat_enabled', true)
-            .eq('status', 'published'),
-        ),
-        count(
-          supabase
-            .from('crm_automations')
-            .select('id', { count: 'exact', head: true })
-            .eq('org_id', orgId)
-            .eq('enabled', true),
-        ),
-        supabase.rpc('org_ai_key_status'),
-        getEmailKeyStatus(supabase),
+        loadCrmConnections(supabase, orgId),
       ]);
-    // A failed check is not an answer: "Not set" could lead an owner to
-    // replace a working key, and a missing name would show the wrong company.
-    if (aiKey.error) throw aiKey.error;
+    // A failed check is not an answer: a missing name would show the wrong company.
     if (org.error) throw org.error;
     const company = org.data as { name?: string; registration_no?: string | null } | null;
     live = {
@@ -115,10 +97,7 @@ export default async function CrmSettingsPage() {
           isDefault: pipeline.isDefault,
           stages: pipeline.stages.length,
         })),
-        hasAiKey: Array.isArray(aiKey.data) ? aiKey.data.length > 0 : Boolean(aiKey.data),
-        emailSender: emailKey?.senderEmail ?? null,
-        pagesWithChat,
-        automationsOn,
+        ...connections,
       },
     };
   } catch (error) {
