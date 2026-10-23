@@ -62,6 +62,43 @@ describe('crm agent notes migration', () => {
     expect(body).toContain("errcode = '42501'");
   });
 
+  test('crm_notes records the proposal, one note per proposal', () => {
+    expect(notes).toContain(
+      'add column agent_proposal_id uuid references public.agent_proposals(id) on delete set null',
+    );
+    expect(notes).toMatch(
+      /create unique index crm_notes_agent_proposal_id_key\s+on public\.crm_notes \(agent_proposal_id\) where agent_proposal_id is not null;/,
+    );
+  });
+
+  test('crm_add_agent_note needs a fresh, unused approval by the caller for this exact note', () => {
+    const body = fnBody(notes, 'create or replace function public.crm_add_agent_note(');
+    for (const clause of [
+      'from public.agent_proposals p',
+      'p.org_id = v_org',
+      "p.product = 'crm'",
+      "p.action = 'createAgentNote'",
+      "p.status = 'approved'",
+      'p.decided_by = auth.uid()',
+      "p.decided_at > now() - interval '10 minutes'",
+      "p.input->>'body' = p_body",
+      "(p.input->>'dealId')::uuid is not distinct from p_deal_id",
+      "(p.input->>'contactId')::uuid is not distinct from p_contact_id",
+      'not exists (select 1 from public.crm_notes n where n.agent_proposal_id = p.id)',
+      'order by p.decided_at desc',
+      'for update of p',
+      'if v_proposal is null then',
+    ]) {
+      expect(body).toContain(clause);
+    }
+    // the writer check comes before the proposal lookup, the lookup before the insert
+    expect(body.indexOf('private.is_org_writer(v_org)')).toBeLessThan(body.indexOf('from public.agent_proposals p'));
+    expect(body.indexOf('from public.agent_proposals p')).toBeLessThan(body.indexOf('insert into public.crm_notes'));
+    expect(body).toContain(
+      "values (v_org, p_deal_id, p_contact_id, p_body, 'agent', auth.uid(), v_proposal)",
+    );
+  });
+
   test('only authenticated may execute crm_add_agent_note', () => {
     expect(notes).toContain(
       'revoke all on function public.crm_add_agent_note(uuid, uuid, text) from public, anon;',
@@ -76,8 +113,13 @@ describe('crm agent notes migration', () => {
     expect(body).toContain('returns trigger');
     expect(body).toContain("set search_path = ''");
     expect(body).toContain("current_setting('app.agent_note', true) is distinct from 'on'");
+    expect(body).toContain("(new.source = 'agent' or new.agent_proposal_id is not null)");
     expect(body).toContain("old.source = 'agent'");
     expect(body).toContain('new.source is distinct from old.source');
+    expect(body).toContain('new.agent_proposal_id is distinct from old.agent_proposal_id');
+    expect(body).toContain('not exists (select 1 from public.agent_proposals p where p.id = old.agent_proposal_id)');
+    // created_by may only be cleared once the author's account is gone
+    expect(body).toContain('not exists (select 1 from auth.users u where u.id = old.created_by)');
     expect(body).toContain("errcode = '42501'");
     expect(notes).toContain(
       'revoke all on function private.crm_notes_agent_guard() from public, anon, authenticated;',
