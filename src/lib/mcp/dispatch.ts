@@ -173,7 +173,11 @@ export async function runChange(
   const gate = ops.gates?.[name];
   const messages = store.messages(key);
   const decided: Decision = typeof gate === 'function' ? await gate(input, { toolCallId, messages: withArgsAsSaid(messages, args) }) : 'user-approval';
-  if (typeof decided === 'object' && decided.type === 'denied') return { ok: false, error: decided.reason };
+  if (typeof decided === 'object' && decided.type === 'denied') {
+    // The note recorded above never gets a result: ending the turn keeps it from counting as a change still shown.
+    if (confirming) store.endTurn(key);
+    return { ok: false, error: decided.reason };
+  }
   const note = typeof decided === 'object' ? decided.reason : undefined;
   // A note the person has not seen (none yet, or not the one their token was given for) goes back to them first.
   if (note && note !== confirming?.note) {

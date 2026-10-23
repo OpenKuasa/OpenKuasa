@@ -285,9 +285,8 @@ describe('runChange', () => {
     const again = await runChange(opsFor(f, gates), store, CALLER, 'deleteCandidate', { id: 'c2' });
     expect(again).not.toEqual({ ok: false, error: ONE_DELETION });
   });
-  // Recorded as it stands (see the task report): a confirmed change its gate then refused leaves its note in the
-  // turn with no result, and Tuah's one-a-turn rule counts it until a change ends the turn.
-  it('a refused confirm leaves its note in the turn (current behaviour)', async () => {
+  // A confirmed change its gate then refused ends the turn, so its result-less note does not count as one a turn.
+  it('a refused confirm does not hold back the next deletion', async () => {
     const f = fakeTools();
     const store = memoryTranscriptStore();
     let refuse = false;
@@ -299,7 +298,9 @@ describe('runChange', () => {
     const token = (first as { confirm: string }).confirm;
     expect(await runChange(opsFor(f, gates), store, CALLER, 'deleteCandidate', { id: 'c1' }, token)).toEqual({ ok: false, error: 'Gone.' });
     refuse = false;
-    expect(await runChange(opsFor(f, gates), store, CALLER, 'deleteCandidate', { id: 'c2' })).toEqual({ ok: false, error: ONE_DELETION });
+    const next = await runChange(opsFor(f, gates), store, CALLER, 'deleteCandidate', { id: 'c2' });
+    expect(next).not.toEqual({ ok: false, error: ONE_DELETION });
+    expect(next).toMatchObject({ ok: false, needsConfirm: true, note: 'N' });
     expect(writeCalls(f)).toHaveLength(0);
   });
 });
