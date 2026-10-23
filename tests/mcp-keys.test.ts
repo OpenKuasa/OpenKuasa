@@ -182,13 +182,22 @@ vi.mock('@supabase/supabase-js', () => ({
   },
 }));
 
+const b64url = (value: unknown) => Buffer.from(JSON.stringify(value)).toString('base64url');
+/** The cookie session's access token: an app sign-in, or (with a client id) an AI tool's OAuth token. */
+const sessionToken = (userId: string, clientId?: string) =>
+  `${b64url({ alg: 'ES256' })}.${b64url({ sub: userId, aal: 'aal1', ...(clientId ? { client_id: clientId } : {}) })}.sig`;
+
 /** The signed-in person's own client, as a server action would pass it. */
-function personClient(userId: string, { factors = [] as { id: string; factor_type: string; status: string }[] } = {}) {
+function personClient(
+  userId: string,
+  { factors = [] as { id: string; factor_type: string; status: string }[], accessToken = sessionToken(userId) } = {},
+) {
   const canSee = (row: Row) =>
     row.user_id === userId || ['owner', 'admin'].includes(db.members.get(memberKey(String(row.org_id), userId)) ?? '');
   return {
     auth: {
       getUser: async () => ({ data: { user: { id: userId, email: auth.users.get(userId)?.email } }, error: null }),
+      getSession: async () => ({ data: { session: { access_token: accessToken } }, error: null }),
       mfa: { listFactors: async () => ({ data: { all: factors, totp: factors.filter((f) => f.factor_type === 'totp') }, error: null }) },
     },
     from: (name: string) => {
@@ -308,6 +317,16 @@ describe('createApiKey', () => {
     expect(db.keys).toHaveLength(0);
     expect(auth.generateLinkCalls).toBe(0);
     expect((await createApiKey(personClient(ALICE), { orgId: ORG, userId: ALICE, name: 'n'.repeat(60) })).ok).toBe(true);
+  });
+
+  test('never from an AI tool\'s OAuth session, which is only for /api/mcp', async () => {
+    const { createApiKey, KEY_NOT_ALLOWED } = await load();
+    const oauth = personClient(ALICE, { accessToken: sessionToken(ALICE, 'c0ffee00-0000-4000-8000-000000000001') });
+    expect(await createApiKey(oauth, { orgId: ORG, userId: ALICE, name: 'k' })).toEqual({ ok: false, error: KEY_NOT_ALLOWED });
+    expect(db.keys).toHaveLength(0);
+    expect(auth.generateLinkCalls).toBe(0);
+    // An app sign-in of the same person still makes one.
+    expect((await createApiKey(personClient(ALICE), { orgId: ORG, userId: ALICE, name: 'k' })).ok).toBe(true);
   });
 
   test('an MFA user must give a TOTP code', async () => {

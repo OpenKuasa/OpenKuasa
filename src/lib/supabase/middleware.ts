@@ -1,5 +1,6 @@
 import { createServerClient } from '@supabase/ssr';
 import { NextResponse, type NextRequest } from 'next/server';
+import { isOAuthClientToken } from '@/lib/auth/oauth-token';
 import { PREVIEW_BLOCKED_MESSAGE, deploymentMode } from '@/lib/auth/preview-mode';
 import { REMEMBER_COOKIE, isPersistent, sessionize } from './remember';
 
@@ -25,6 +26,25 @@ function serviceUnavailable(): NextResponse {
       },
     },
   );
+}
+
+/** Supabase's auth cookie, whole or as one of its chunks (`sb-<ref>-auth-token`, `.0`, `.1`…). */
+const AUTH_COOKIE = /^sb-.+-auth-token(\.\d+)?$/;
+
+/**
+ * Signs out a cookie session that holds an AI tool's OAuth token: its auth cookies are taken off the request, so
+ * nothing after the proxy sees a session, and expired in the browser. The session itself is not revoked; it is
+ * the AI tool's, and only the tool (or the person, in Account → Developers) ends it.
+ */
+function dropAuthCookies(request: NextRequest): NextResponse {
+  const names = request.cookies
+    .getAll()
+    .map(({ name }) => name)
+    .filter((name) => AUTH_COOKIE.test(name));
+  for (const name of names) request.cookies.delete(name);
+  const response = NextResponse.next({ request });
+  for (const name of names) response.cookies.set(name, '', { path: '/', maxAge: 0 });
+  return response;
 }
 
 /**
@@ -73,6 +93,13 @@ export async function updateSession(request: NextRequest) {
   // IMPORTANT: Do not run code between createServerClient and getUser().
   // getUser() revalidates the token and triggers a cookie refresh when needed.
   await supabase.auth.getUser();
+
+  // An OAuth access token is a full session of the person, issued to an AI tool for /api/mcp only: never an app
+  // sign-in. Only the token is read here (no user), and only to refuse.
+  const {
+    data: { session },
+  } = await supabase.auth.getSession();
+  if (session && isOAuthClientToken(session.access_token)) return dropAuthCookies(request);
 
   return response;
 }

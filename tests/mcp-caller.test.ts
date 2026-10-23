@@ -27,6 +27,8 @@ const inserts: Record<string, unknown>[] = [];
 
 /** Access tokens the auth server accepts: token → user id. */
 const tokens = new Map<string, string>();
+/** Each person's second-factor enrolments, as the auth server returns them on the user. */
+const factorsOf = new Map<string, { id: string; factor_type: string; status: string }[]>();
 const getUserCalls: string[] = [];
 
 const resolveApiKey = vi.fn();
@@ -75,7 +77,9 @@ vi.mock('@supabase/supabase-js', () => ({
         getUser: async (jwt?: string) => {
           getUserCalls.push(jwt ?? '');
           const id = jwt ? tokens.get(jwt) : undefined;
-          return id ? { data: { user: { id } }, error: null } : { data: { user: null }, error: { message: 'invalid JWT' } };
+          return id
+            ? { data: { user: { id, factors: factorsOf.get(id) ?? [] } }, error: null }
+            : { data: { user: null }, error: { message: 'invalid JWT' } };
         },
       },
       from: (name: string) => {
@@ -156,6 +160,7 @@ beforeEach(async () => {
   db.orgs.clear();
   db.bindings.clear();
   tokens.clear();
+  factorsOf.clear();
   failing.clear();
   bindingInsert.error = null;
   bindingInsert.before = undefined;
@@ -247,7 +252,12 @@ describe('resolveCaller', () => {
     db.profiles.set(ALICE, ORG_A);
     const out = await resolveCaller(req(`Bearer ${oauthToken(ALICE)}`), 'Claude');
     // B won; A is open, so the person is asked to switch back.
-    expect(out).toEqual({ ok: false, status: 403, message: 'Switch back to Kopi Co in OpenKuasa, or connect again for Rimba Ventures.' });
+    expect(out).toEqual({
+      ok: false,
+      status: 403,
+      message:
+        'This connection works in Kopi Co. Switch back to Kopi Co in OpenKuasa, or disconnect it in Account → Developers and connect again for Rimba Ventures.',
+    });
     expect(db.bindings.get(`${ALICE}:claude-desktop`)).toBe(ORG_B);
   });
 
@@ -289,7 +299,8 @@ describe('resolveCaller', () => {
     expect(await resolveCaller(req(`Bearer ${token}`), 'Claude')).toEqual({
       ok: false,
       status: 403,
-      message: 'Switch back to Rimba Ventures in OpenKuasa, or connect again for Kopi Co.',
+      message:
+        'This connection works in Rimba Ventures. Switch back to Rimba Ventures in OpenKuasa, or disconnect it in Account → Developers and connect again for Kopi Co.',
     });
     // A new token from the same client keeps the binding: it is the same connection.
     expect(await resolveCaller(req(`Bearer ${oauthToken(ALICE)}`), 'Claude')).toMatchObject({ ok: false, status: 403 });
@@ -347,7 +358,8 @@ describe('resolveCaller', () => {
     expect(await resolveCaller(req(`Bearer ${oauthToken(ALICE)}`), 'Claude')).toEqual({
       ok: false,
       status: 403,
-      message: 'Switch back to Rimba Ventures in OpenKuasa, or connect again for Kopi Co.',
+      message:
+        'This connection works in Rimba Ventures. Switch back to Rimba Ventures in OpenKuasa, or disconnect it in Account → Developers and connect again for Kopi Co.',
     });
     bind(ALICE, 'cursor', ORG_B);
     const token = oauthToken(ALICE, { client_id: 'cursor' });
@@ -360,11 +372,57 @@ describe('resolveCaller', () => {
     bind(ALICE, 'claude-desktop', ORG_A);
     db.members.delete(memberKey(ORG_A, ALICE));
     db.profiles.set(ALICE, ORG_B);
-    const removed = { ok: false, status: 401, message: 'You are no longer a member of this workspace, so this connection cannot act in it.' };
+    // Alice can no longer read A's name, so it is named plainly.
+    const removed = {
+      ok: false,
+      status: 401,
+      message: 'You are no longer a member of that workspace. Disconnect this connection in Account → Developers.',
+    };
     expect(await resolveCaller(req(`Bearer ${oauthToken(ALICE)}`), 'Claude')).toEqual(removed);
     expect(await resolveCaller(req(`Bearer ${oauthToken(ALICE)}`), 'Claude')).toEqual(removed);
     expect(inserts).toEqual([]);
     expect(db.bindings.get(`${ALICE}:claude-desktop`)).toBe(ORG_A);
+  });
+
+  test('an OAuth connection removed from a workspace whose name it can still read names it', async () => {
+    bind(ALICE, 'claude-desktop', ORG_A);
+    // Still a member of A but with a role the server does not act on.
+    db.members.set(memberKey(ORG_A, ALICE), 'guest');
+    expect(await resolveCaller(req(`Bearer ${oauthToken(ALICE)}`), 'Claude')).toEqual({
+      ok: false,
+      status: 401,
+      message: 'You are no longer a member of Rimba Ventures. Disconnect this connection in Account → Developers.',
+    });
+  });
+
+  test('an OAuth token below aal2 is refused for a person with a second factor; keys are unaffected', async () => {
+    const mfa = {
+      ok: false,
+      status: 401,
+      message: "Sign-in connections don't work with two-step sign-in yet. Use an API key from Account → Developers instead.",
+    };
+    bind(ALICE, 'claude-desktop', ORG_A);
+    factorsOf.set(ALICE, [{ id: 'f1', factor_type: 'totp', status: 'verified' }]);
+    expect(await resolveCaller(req(`Bearer ${oauthToken(ALICE, { client_id: 'claude-desktop', aal: 'aal1' })}`), 'Claude')).toEqual(mfa);
+    // No aal claim at all reads as below aal2.
+    expect(await resolveCaller(req(`Bearer ${oauthToken(ALICE)}`), 'Claude')).toEqual(mfa);
+    // Nothing was bound or read as the person past the check.
+    expect(inserts).toEqual([]);
+
+    // An aal2 token works.
+    expect(await resolveCaller(req(`Bearer ${oauthToken(ALICE, { client_id: 'claude-desktop', aal: 'aal2' })}`), 'Claude')).toMatchObject({
+      ok: true,
+      caller: { orgId: ORG_A },
+    });
+    // An unverified enrolment is not a second factor.
+    factorsOf.set(ALICE, [{ id: 'f2', factor_type: 'totp', status: 'unverified' }]);
+    expect(await resolveCaller(req(`Bearer ${oauthToken(ALICE, { client_id: 'claude-desktop', aal: 'aal1' })}`), 'Claude')).toMatchObject({
+      ok: true,
+    });
+    // An API key is not affected.
+    factorsOf.set(ALICE, [{ id: 'f1', factor_type: 'totp', status: 'verified' }]);
+    keyResolvesTo(ALICE, ORG_A, 'alice-at-1');
+    expect(await resolveCaller(req(`Bearer ${KEY}`), 'Claude')).toMatchObject({ ok: true });
   });
 
   test('first-use binding never happens when the connection already has a row', async () => {

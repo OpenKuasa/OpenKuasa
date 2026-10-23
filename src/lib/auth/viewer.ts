@@ -4,6 +4,7 @@ import { redirect } from 'next/navigation';
 import { createClient } from '@/lib/supabase/server';
 import type { OrgRole } from './current-org';
 import { MFA_VERIFY_PATH } from './mfa';
+import { isOAuthClientToken } from './oauth-token';
 import { canSee, type Capability } from './permissions';
 import {
   PREVIEW_BLOCKED_MESSAGE,
@@ -115,6 +116,13 @@ export const getViewer = cache(async (): Promise<Viewer> => {
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) redirect('/login');
+
+  // An AI tool's OAuth token is never an app session (the proxy strips one too); this covers anything that
+  // reaches a page or action without passing through it.
+  const {
+    data: { session },
+  } = await supabase.auth.getSession();
+  if (session && isOAuthClientToken(session.access_token)) redirect('/login');
 
   // A user with an authenticator must pass it before anything else loads.
   // Users without one skip the extra call entirely.

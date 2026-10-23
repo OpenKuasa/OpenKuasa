@@ -193,8 +193,19 @@ describe('consent page', () => {
     session();
     const html = await renderPage();
     const shown = text(html);
-    expect(shown).toContain('Allow Claude to access Rimba Ventures as smoke?');
-    expect(shown).toContain('It can look things up and make changes in this workspace, as you.');
+    expect(shown).toContain('Allow “Claude” to sign in to OpenKuasa as smoke?');
+    expect(shown).toContain(
+      'It will be able to do anything you can do in OpenKuasa, as you, until you disconnect it in Account → Developers.',
+    );
+    expect(shown).toContain('Its AI tool works in Rimba Ventures.');
+    expect(shown).toContain('Only allow this if you just started connecting an AI tool yourself.');
+    // Where Allow sends the person: normal size, the host in bold, above the buttons.
+    expect(shown).toContain('Sends you back to claude.ai');
+    expect(html).toMatch(/<p class="[^"]*text-sm[^"]*">Sends you back to <strong[^>]*>claude\.ai<\/strong><\/p>/);
+    expect(html).not.toMatch(/text-xs[^"]*">Sends you back/);
+    expect(html.indexOf('Sends you back to')).toBeLessThan(html.indexOf("Don&#x27;t allow"));
+    expect(html.indexOf('Sends you back to')).toBeLessThan(html.indexOf('>Allow<'));
+    expect(shown).not.toContain('look things up');
     expect(shown).toContain('Allow');
     expect(shown).toContain("Don't allow");
     expect(html).toContain(`value="${AUTH_ID}"`);
@@ -206,13 +217,23 @@ describe('consent page', () => {
 
   test('the person is named by their profile name when they set one', async () => {
     session({ fullName: 'Siti Aminah' });
-    expect(text(await renderPage())).toContain('Allow Claude to access Rimba Ventures as Siti Aminah?');
+    expect(text(await renderPage())).toContain('Allow “Claude” to sign in to OpenKuasa as Siti Aminah?');
   });
 
   test('names the workspace the person has open', async () => {
     session();
     mocks.currentOrgFor.mockResolvedValue({ orgId: ORG_B, role: 'admin' });
-    expect(text(await renderPage())).toContain('Allow Claude to access Kopi Co as smoke?');
+    expect(text(await renderPage())).toContain('Its AI tool works in Kopi Co.');
+  });
+
+  test('a client whose return address has no host shows no return line', async () => {
+    const client = session();
+    const details = (await client.auth.oauth.getAuthorizationDetails(AUTH_ID)) as Result;
+    calls = [];
+    session({ details: { ...details, data: { ...(details.data as object), redirect_uri: 'urn:ietf:wg:oauth:2.0:oob' } } });
+    const shown = text(await renderPage());
+    expect(shown).toContain('Allow “Claude” to sign in to OpenKuasa as smoke?');
+    expect(shown).not.toContain('Sends you back to');
   });
 
   test('a client that already has consent goes straight back', async () => {
@@ -225,7 +246,7 @@ describe('consent page', () => {
     for (const params of [{}, { authorization_id: '' }, { authorization_id: '../admin' }, { authorization_id: ['a', 'b'] }]) {
       const shown = text(await renderPage(params));
       expect(shown).toContain('This sign-in link is not valid. Start connecting again from your AI tool.');
-      expect(shown).not.toContain('Allow Claude');
+      expect(shown).not.toContain('Allow “Claude”');
     }
     expect(calls).toEqual([]);
   });
@@ -252,14 +273,14 @@ describe('consent page', () => {
     });
     const shown = text(await renderPage());
     expect(shown).toContain('This sign-in request is for another account.');
-    expect(shown).not.toContain('Allow Claude');
+    expect(shown).not.toContain('Allow “Claude”');
   });
 
   test('demo guests cannot connect', async () => {
     session({ user: { id: ALICE, email: '', is_anonymous: true } });
     const shown = text(await renderPage());
     expect(shown).toContain("The demo can't connect to AI tools. Sign in with your own OpenKuasa account.");
-    expect(shown).not.toContain('Allow Claude');
+    expect(shown).not.toContain('Allow “Claude”');
     expect(calls).toEqual([]);
   });
 
@@ -268,7 +289,7 @@ describe('consent page', () => {
     mocks.currentOrgFor.mockResolvedValue(null);
     const shown = text(await renderPage());
     expect(shown).toContain('Open a workspace in OpenKuasa first, then connect again from your AI tool.');
-    expect(shown).not.toContain('Allow Claude');
+    expect(shown).not.toContain('Allow “Claude”');
   });
 });
 

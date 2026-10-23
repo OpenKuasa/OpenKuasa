@@ -5,7 +5,8 @@
  * person's access token, bound to the key's workspace. Or a Supabase OAuth 2.1 access token, checked with the auth
  * server on every call and bound to the workspace recorded for it in `mcp_oauth_bindings`: the one the person allowed
  * on the consent screen (`/oauth/consent`), or, when the auth server skipped that screen and nothing is recorded, the
- * one they have open at first use, recorded then as them.
+ * one they have open at first use, recorded then as them. A person with a second factor is refused an OAuth token that
+ * was not raised to aal2 (not supported yet; they use a key).
  *
  * Every call then reads, as the person: their role in the credential's workspace (none means removed), and the
  * workspace they now have open; a different one is refused rather than acted on behind their back.
@@ -17,6 +18,7 @@
 import 'server-only';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { currentOrgFor, type CurrentOrg, type OrgRole } from '@/lib/auth/current-org';
+import { jwtClaims } from '@/lib/auth/oauth-token';
 import { resolveApiKey } from '@/lib/mcp/keys';
 import { logFailure as sharedLogFailure, userClient } from '@/lib/mcp/shared';
 
@@ -38,8 +40,12 @@ export const CREDENTIAL_REFUSED =
 export const REMOVED = 'You are no longer a member of this workspace, so this connection cannot act in it.';
 export const CONNECT_AGAIN = 'Connect OpenKuasa again from your AI tool.';
 export const FAILED = 'Your access could not be checked just now. Try again.';
+export const MFA_NOT_SUPPORTED =
+  "Sign-in connections don't work with two-step sign-in yet. Use an API key from Account → Developers instead.";
 
 const OTHER_WORKSPACE = 'your other workspace';
+/** The workspace a removed person can no longer read the name of. */
+const THAT_WORKSPACE = 'that workspace';
 const ROLES: readonly OrgRole[] = ['owner', 'admin', 'member', 'viewer'];
 /** One bearer token: no spaces, a sane length. */
 const TOKEN_SHAPE = /^[A-Za-z0-9._~+/=-]{1,4096}$/;
@@ -52,24 +58,18 @@ function bearerOf(request: Request): string | null {
   return match[1];
 }
 
-/** A JWT's claims, read only after the auth server has accepted the token. */
-function claimsOf(token: string): Record<string, unknown> | null {
-  const parts = token.split('.');
-  if (parts.length !== 3) return null;
-  try {
-    const claims: unknown = JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf8'));
-    return claims && typeof claims === 'object' && !Array.isArray(claims) ? (claims as Record<string, unknown>) : null;
-  } catch {
-    return null;
-  }
-}
-
 const logFailure = (operation: string, error: unknown) => sharedLogFailure('mcp-caller', operation, error);
 
 async function nameOf(supabase: SupabaseClient, orgId: string): Promise<string | null> {
   const { data, error } = await supabase.from('orgs').select('name').eq('id', orgId).maybeSingle();
   const name = (data as { name?: unknown } | null)?.name;
   return !error && typeof name === 'string' && name.trim() ? name : null;
+}
+
+/** What a sign-in connection whose person left its workspace is told; the name only when they can still read it. */
+async function removedFrom(supabase: SupabaseClient, orgId: string): Promise<string> {
+  const name = await nameOf(supabase, orgId).catch(() => null);
+  return `You are no longer a member of ${name ?? THAT_WORKSPACE}. Disconnect this connection in Account → Developers.`;
 }
 
 /** An API key: its person and workspace, as `resolveApiKey` checked them. */
@@ -122,14 +122,19 @@ async function bindOnFirstUse(
 /**
  * An OAuth access token: accepted by the auth server, its subject that user, issued to a named client, acting in the
  * workspace recorded for that client; null when nothing is recorded (bound on first use in `resolveCaller`).
+ * 'mfa' when the person uses a second factor and the token was not raised to aal2 (not supported yet).
  */
 async function fromOAuth(token: string, supabase: SupabaseClient) {
   const { data, error } = await supabase.auth.getUser(token);
   const userId = data?.user?.id;
   if (error || !userId) return null;
-  const claims = claimsOf(token);
+  // Read only after the auth server has accepted the token.
+  const claims = jwtClaims(token);
   const clientId = claims?.client_id;
   if (!claims || claims.sub !== userId || typeof clientId !== 'string' || !clientId) return null;
+  // The user the auth server returned carries their factors; a missing aal claim counts as below aal2.
+  const hasFactor = (data.user.factors ?? []).some((f) => f.status === 'verified');
+  if (hasFactor && claims.aal !== 'aal2') return 'mfa' as const;
   const orgId = await bindingOf(supabase, userId, clientId);
   return { credentialId: `oauth:${clientId}:${userId}`, userId, clientId, orgId, accessToken: token };
 }
@@ -147,6 +152,7 @@ export async function resolveCaller(request: Request, clientName: string): Promi
     const oauthClient = isKey ? null : userClient(token);
     const credential = oauthClient ? await fromOAuth(token, oauthClient) : await fromApiKey(token);
     if (!credential) return { ok: false, status: 401, message: CREDENTIAL_REFUSED };
+    if (credential === 'mfa') return { ok: false, status: 401, message: MFA_NOT_SUPPORTED };
     const { credentialId, userId, clientId, accessToken } = credential;
     const supabase = oauthClient ?? userClient(accessToken);
 
@@ -169,19 +175,20 @@ export async function resolveCaller(request: Request, clientName: string): Promi
       logFailure('read role', memberError);
       return { ok: false, status: 503, message: FAILED };
     }
-    if (!ROLES.includes(role as OrgRole)) return { ok: false, status: 401, message: REMOVED };
+    if (!ROLES.includes(role as OrgRole)) return { ok: false, status: 401, message: clientId ? await removedFrom(supabase, orgId) : REMOVED };
 
     // A member here but no current workspace cannot happen with consistent data; treat it as removed.
     if (!current) return { ok: false, status: 401, message: REMOVED };
 
     const orgName = await nameOf(supabase, orgId);
     if (current.orgId !== orgId) {
-      const other = await nameOf(supabase, current.orgId);
-      return {
-        ok: false,
-        status: 403,
-        message: `Switch back to ${orgName ?? OTHER_WORKSPACE} in OpenKuasa, or connect again for ${other ?? OTHER_WORKSPACE}.`,
-      };
+      const here = orgName ?? OTHER_WORKSPACE;
+      const other = (await nameOf(supabase, current.orgId)) ?? OTHER_WORKSPACE;
+      // A sign-in connection is moved by disconnecting it and connecting again; a key by making another.
+      const message = clientId
+        ? `This connection works in ${here}. Switch back to ${here} in OpenKuasa, or disconnect it in Account → Developers and connect again for ${other}.`
+        : `Switch back to ${here} in OpenKuasa, or connect again for ${other}.`;
+      return { ok: false, status: 403, message };
     }
 
     return {

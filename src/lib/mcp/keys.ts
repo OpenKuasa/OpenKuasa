@@ -19,6 +19,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { z } from 'zod';
 import { decryptApiKey, encryptApiKey } from '@/lib/ai/key-crypto';
+import { isOAuthClientToken } from '@/lib/auth/oauth-token';
 import { logFailure as sharedLogFailure, userClient } from '@/lib/mcp/shared';
 import { serviceClient } from '@/lib/supabase/service';
 
@@ -150,6 +151,11 @@ export async function createApiKey(
     const { data: who, error: whoError } = await supabase.auth.getUser();
     const user = who?.user;
     if (whoError || !user || user.id !== userId || !user.email) return { ok: false, error: KEY_NOT_ALLOWED };
+
+    // An AI tool's OAuth token is a full session, but only for /api/mcp: it never makes a key.
+    const { data: own, error: sessionError } = await supabase.auth.getSession();
+    const accessToken = own?.session?.access_token;
+    if (sessionError || !accessToken || isOAuthClientToken(accessToken)) return { ok: false, error: KEY_NOT_ALLOWED };
 
     const { data: member, error: memberError } = await supabase
       .from('org_members')

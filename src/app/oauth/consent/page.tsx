@@ -77,16 +77,21 @@ export default async function OAuthConsentPage({
   // The name the person set, else their email's first part, as the app shows them.
   const fullName = (profile as { full_name?: string | null } | null)?.full_name?.trim();
   const person = fullName || user.email?.split('@')[0] || 'you';
-  const client = details.client.name?.trim() || 'An AI tool';
+  // The name is whatever the tool calls itself, so it is shown in quotes, never as ours.
+  const clientName = details.client.name?.trim();
+  const client = clientName ? `“${clientName}”` : 'this AI tool';
   const returnsTo = hostOf(details.redirect_uri);
 
   return (
     <AuthShell>
       <div className="space-y-1.5 text-center">
-        <h1 className="text-2xl font-bold tracking-tight">{`Allow ${client} to access ${workspace} as ${person}?`}</h1>
+        <h1 className="text-2xl font-bold tracking-tight">{`Allow ${client} to sign in to OpenKuasa as ${person}?`}</h1>
         <p className="text-sm text-muted-foreground">
-          It can look things up and make changes in this workspace, as you.
+          It will be able to do anything you can do in OpenKuasa, as you, until you disconnect it in Account →
+          Developers.
         </p>
+        <p className="text-sm text-muted-foreground">{`Its AI tool works in ${workspace}.`}</p>
+        <p className="text-sm font-medium">Only allow this if you just started connecting an AI tool yourself.</p>
       </div>
 
       <dl className="divide-y rounded-lg border text-sm">
@@ -98,13 +103,13 @@ export default async function OAuthConsentPage({
           <dt className="text-muted-foreground">Signed in as</dt>
           <dd className="truncate font-medium">{user.email ?? person}</dd>
         </div>
-        {returnsTo ? (
-          <div className="flex items-center justify-between gap-4 px-4 py-2.5">
-            <dt className="text-muted-foreground">Sends you back to</dt>
-            <dd className="truncate font-medium">{returnsTo}</dd>
-          </div>
-        ) : null}
       </dl>
+
+      {returnsTo ? (
+        <p className="text-center text-sm">
+          Sends you back to <strong className="font-semibold break-all">{returnsTo}</strong>
+        </p>
+      ) : null}
 
       <ConsentForm authorizationId={authorizationId} orgId={current.orgId} />
     </AuthShell>
