@@ -396,6 +396,40 @@ describe('resolveCaller', () => {
     });
   });
 
+  test('a member with no current workspace is told they were removed, in the copy for their credential', async () => {
+    // Cannot happen with consistent data: the membership read finds a row, but the current-workspace read finds none.
+    vi.doMock('@/lib/auth/current-org', async (importOriginal) => ({
+      ...(await importOriginal<typeof import('@/lib/auth/current-org')>()),
+      currentOrgFor: async () => null,
+    }));
+    try {
+      vi.resetModules();
+      const { resolveCaller: resolve } = await import('@/lib/mcp/caller');
+      bind(ALICE, 'claude-desktop', ORG_A);
+      expect(await resolve(req(`Bearer ${oauthToken(ALICE)}`), 'Claude')).toEqual({
+        ok: false,
+        status: 401,
+        message: 'You are no longer a member of Rimba Ventures. Disconnect this connection in Account → Developers.',
+      });
+      // The name cannot be read: named plainly.
+      db.orgs.delete(ORG_A);
+      expect(await resolve(req(`Bearer ${oauthToken(ALICE)}`), 'Claude')).toEqual({
+        ok: false,
+        status: 401,
+        message: 'You are no longer a member of that workspace. Disconnect this connection in Account → Developers.',
+      });
+      // A key keeps the key copy.
+      keyResolvesTo(ALICE, ORG_A, 'alice-at-1');
+      expect(await resolve(req(`Bearer ${KEY}`), 'Claude')).toEqual({
+        ok: false,
+        status: 401,
+        message: 'You are no longer a member of this workspace, so this connection cannot act in it.',
+      });
+    } finally {
+      vi.doUnmock('@/lib/auth/current-org');
+    }
+  });
+
   test('an OAuth token below aal2 is refused for a person with a second factor; keys are unaffected', async () => {
     const mfa = {
       ok: false,

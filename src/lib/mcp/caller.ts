@@ -179,10 +179,10 @@ export async function resolveCaller(request: Request, clientName: string): Promi
       logFailure('read role', memberError);
       return { ok: false, status: 503, message: FAILED };
     }
-    if (!ROLES.includes(role as OrgRole)) return { ok: false, status: 401, message: clientId ? await removedFrom(supabase, orgId) : REMOVED };
-
     // A member here but no current workspace cannot happen with consistent data; treat it as removed.
-    if (!current) return { ok: false, status: 401, message: REMOVED };
+    if (!ROLES.includes(role as OrgRole) || !current) {
+      return { ok: false, status: 401, message: clientId ? await removedFrom(supabase, orgId) : REMOVED };
+    }
 
     const orgName = await nameOf(supabase, orgId);
     if (current.orgId !== orgId) {
