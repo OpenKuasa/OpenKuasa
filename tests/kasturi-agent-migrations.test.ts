@@ -5,8 +5,8 @@ import { describe, expect, test } from 'vitest';
 
 const read = (name: string) => readFileSync(join(process.cwd(), 'supabase/migrations', name), 'utf8');
 
-const focus = read('20261125140000_agent_focus.sql');
-const notes = read('20261125140100_crm_agent_notes.sql');
+const focus = read('20261125150000_agent_focus.sql');
+const notes = read('20261125150100_crm_agent_notes.sql');
 
 const fnBody = (sql: string, head: string) => {
   const start = sql.indexOf(head);
