@@ -2,16 +2,19 @@
 --
 -- When a person clicks Allow on the consent screen (/oauth/consent), the app
 -- records, with their own session, the workspace they had open for that OAuth
--- client. The MCP server reads that row on every call: no row means the
--- connection is not bound, and the person is asked to connect again.
+-- client. The MCP server reads that row on every call. When the auth server
+-- skipped the consent screen and there is no row, the server writes one, as
+-- the person, for the workspace they have open at first use.
 --
 -- Who can do what:
 --   * a signed-in person sees, adds and removes only their own rows, and adds
 --     one only for a workspace they belong to;
 --   * nobody updates a row: binding again is a delete and an insert;
 --   * the server (service role) may read and remove rows;
---   * leaving the workspace (an org_members row deleted) removes that
---     person's connections bound to it.
+--   * leaving a workspace keeps the row, still naming the workspace that was
+--     left, so the server answers "removed" rather than binding the
+--     connection to another workspace; deleting the workspace or the person
+--     removes it (foreign keys).
 --
 -- Deploy order: this migration first, then the code that uses it.
 
@@ -23,21 +26,6 @@ create table public.mcp_oauth_bindings (
   created_at timestamptz not null default now(),
   primary key (user_id, client_id)
 );
-
--- Leaving a workspace removes the person's connections bound to it, in the
--- same transaction. Nothing to do when the whole workspace is being deleted:
--- its rows go with it.
-create or replace function private.mcp_oauth_bindings_on_member_removed()
-returns trigger language plpgsql security definer set search_path = '' as $$
-begin
-  delete from public.mcp_oauth_bindings
-  where org_id = old.org_id and user_id = old.user_id
-    and exists (select 1 from public.orgs o where o.id = old.org_id);
-  return old;
-end; $$;
-revoke all on function private.mcp_oauth_bindings_on_member_removed() from public, anon, authenticated;
-create trigger mcp_oauth_bindings_on_member_removed after delete on public.org_members
-  for each row execute function private.mcp_oauth_bindings_on_member_removed();
 
 alter table public.mcp_oauth_bindings enable row level security;
 

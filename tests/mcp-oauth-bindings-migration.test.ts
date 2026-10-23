@@ -70,22 +70,13 @@ describe('mcp oauth bindings migration', () => {
     expect(flat.indexOf('revoke all on public.mcp_oauth_bindings')).toBeLessThan(flat.indexOf('grant select, insert, delete'));
   });
 
-  test('leaving a workspace removes the person\'s connections bound to it', () => {
-    const start = flat.indexOf('create or replace function private.mcp_oauth_bindings_on_member_removed()');
-    expect(start).toBeGreaterThan(-1);
-    const head = flat.slice(start, flat.indexOf('$$', start));
-    expect(head).toContain('returns trigger');
-    expect(head).toContain('security definer');
-    expect(head).toContain("set search_path = ''");
-    const body = flat.slice(start, flat.indexOf('$$;', flat.indexOf('$$', start) + 2));
-    expect(body).toContain(
-      'delete from public.mcp_oauth_bindings where org_id = old.org_id and user_id = old.user_id and exists (select 1 from public.orgs o where o.id = old.org_id);',
-    );
-    expect(body).toContain('return old;');
-    expect(flat).toContain(
-      'create trigger mcp_oauth_bindings_on_member_removed after delete on public.org_members for each row execute function private.mcp_oauth_bindings_on_member_removed();',
-    );
-    expect(flat).toContain('revoke all on function private.mcp_oauth_bindings_on_member_removed() from public, anon, authenticated;');
-    expect(flat.indexOf('create table public.mcp_oauth_bindings (')).toBeLessThan(start);
+  test('leaving a workspace never removes or moves a connection; only deleting the workspace or person does', () => {
+    // A removed person's row keeps naming the lost workspace, so the server answers "removed" instead of binding
+    // the connection again to another workspace they still belong to.
+    expect(flat).not.toMatch(/create trigger/);
+    expect(flat).not.toMatch(/create (or replace )?function/);
+    expect(flat).not.toContain('org_members for each row');
+    expect(flat).toContain('user_id uuid not null references auth.users(id) on delete cascade');
+    expect(flat).toContain('org_id uuid not null references public.orgs(id) on delete cascade');
   });
 });

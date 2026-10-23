@@ -16,7 +16,7 @@
 
 import 'server-only';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { currentOrgFor, type OrgRole } from '@/lib/auth/current-org';
+import { currentOrgFor, type CurrentOrg, type OrgRole } from '@/lib/auth/current-org';
 import { resolveApiKey } from '@/lib/mcp/keys';
 import { logFailure as sharedLogFailure, userClient } from '@/lib/mcp/shared';
 
@@ -79,7 +79,8 @@ async function fromApiKey(key: string) {
   return {
     credentialId: `key:${resolved.id}`,
     userId: resolved.userId,
-    orgId: resolved.orgId,
+    clientId: null,
+    orgId: resolved.orgId as string | null,
     accessToken: resolved.accessToken,
   };
 }
@@ -102,8 +103,12 @@ async function bindingOf(supabase: SupabaseClient, userId: string, clientId: str
  * person, the workspace they have open. Losing a race to another first use keeps the row that won. Null when there
  * is no workspace or the row cannot be written.
  */
-async function bindOnFirstUse(supabase: SupabaseClient, userId: string, clientId: string): Promise<string | null> {
-  const current = await currentOrgFor(supabase, userId);
+async function bindOnFirstUse(
+  supabase: SupabaseClient,
+  userId: string,
+  clientId: string,
+  current: CurrentOrg | null,
+): Promise<string | null> {
   if (!current) return null;
   const { error } = await supabase
     .from('mcp_oauth_bindings')
@@ -116,7 +121,7 @@ async function bindOnFirstUse(supabase: SupabaseClient, userId: string, clientId
 
 /**
  * An OAuth access token: accepted by the auth server, its subject that user, issued to a named client, acting in the
- * workspace recorded for that client (bound on first use when nothing is). Its workspace is null when unbindable.
+ * workspace recorded for that client; null when nothing is recorded (bound on first use in `resolveCaller`).
  */
 async function fromOAuth(token: string, supabase: SupabaseClient) {
   const { data, error } = await supabase.auth.getUser(token);
@@ -125,8 +130,8 @@ async function fromOAuth(token: string, supabase: SupabaseClient) {
   const claims = claimsOf(token);
   const clientId = claims?.client_id;
   if (!claims || claims.sub !== userId || typeof clientId !== 'string' || !clientId) return null;
-  const orgId = (await bindingOf(supabase, userId, clientId)) ?? (await bindOnFirstUse(supabase, userId, clientId));
-  return { credentialId: `oauth:${clientId}:${userId}`, userId, orgId, accessToken: token };
+  const orgId = await bindingOf(supabase, userId, clientId);
+  return { credentialId: `oauth:${clientId}:${userId}`, userId, clientId, orgId, accessToken: token };
 }
 
 /**
@@ -142,13 +147,16 @@ export async function resolveCaller(request: Request, clientName: string): Promi
     const oauthClient = isKey ? null : userClient(token);
     const credential = oauthClient ? await fromOAuth(token, oauthClient) : await fromApiKey(token);
     if (!credential) return { ok: false, status: 401, message: CREDENTIAL_REFUSED };
-    const { credentialId, userId, orgId, accessToken } = credential;
-    // An OAuth connection that could not be bound (no workspace, or the record could not be written).
-    if (!orgId) return { ok: false, status: 401, message: CONNECT_AGAIN };
+    const { credentialId, userId, clientId, accessToken } = credential;
     const supabase = oauthClient ?? userClient(accessToken);
 
     // The workspace the person has open, by the app's own rule (a read error throws: 503 below).
     const current = await currentOrgFor(supabase, userId);
+
+    // An OAuth connection with nothing recorded binds to that workspace now; a recorded one never moves.
+    const orgId = credential.orgId ?? (clientId ? await bindOnFirstUse(supabase, userId, clientId, current) : null);
+    // Could not be bound (no workspace, or the record could not be written).
+    if (!orgId) return { ok: false, status: 401, message: CONNECT_AGAIN };
 
     const { data: member, error: memberError } = await supabase
       .from('org_members')

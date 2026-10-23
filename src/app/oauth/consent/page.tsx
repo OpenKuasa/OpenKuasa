@@ -85,7 +85,7 @@ export default async function OAuthConsentPage({
       <div className="space-y-1.5 text-center">
         <h1 className="text-2xl font-bold tracking-tight">{`Allow ${client} to access ${workspace} as ${person}?`}</h1>
         <p className="text-sm text-muted-foreground">
-          {`It can look things up and, with your OK in ${client}, make changes in this workspace.`}
+          It can look things up and make changes in this workspace, as you.
         </p>
       </div>
 

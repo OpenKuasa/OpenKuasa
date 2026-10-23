@@ -3,7 +3,6 @@
 import { redirect } from 'next/navigation';
 import { currentOrgFor } from '@/lib/auth/current-org';
 import { logFailure } from '@/lib/mcp/shared';
-import { createClient } from '@/lib/supabase/server';
 import {
   EXPIRED,
   FAILED,
@@ -13,7 +12,6 @@ import {
   WORKSPACE_CHANGED,
   answeringPerson,
   authorizationIdOf,
-  consentPath,
 } from './consent';
 
 export type ConsentState = { error?: string } | undefined;
@@ -52,7 +50,7 @@ export async function allowAction(_prev: ConsentState, formData: FormData): Prom
   // The person must be allowing the workspace the screen showed them.
   if (formData.get('org_id') !== orgId) return { error: WORKSPACE_CHANGED };
 
-  // One row per person and client: binding again replaces the old one.
+  // One row per person and client. Replaced before approving on purpose: clicking Allow chose this workspace.
   const clientId = details.client.id;
   const { error: deleteError } = await supabase
     .from('mcp_oauth_bindings')
@@ -83,11 +81,11 @@ export async function denyAction(_prev: ConsentState, formData: FormData): Promi
   const authorizationId = authorizationIdOf(formData.get('authorization_id'));
   if (!authorizationId) return { error: NOT_VALID };
 
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) redirect(`/login?next=${encodeURIComponent(consentPath(authorizationId))}`);
+  // The same gate as Allow: signed in, not the demo, second factor done.
+  const gate = await answeringPerson(authorizationId);
+  if (gate.kind === 'redirect') redirect(gate.to);
+  if (gate.kind === 'refuse') return { error: gate.message };
+  const { supabase } = gate;
 
   const { data: denied, error } = await supabase.auth.oauth.denyAuthorization(authorizationId, {
     skipBrowserRedirect: true,

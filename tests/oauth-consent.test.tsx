@@ -194,7 +194,7 @@ describe('consent page', () => {
     const html = await renderPage();
     const shown = text(html);
     expect(shown).toContain('Allow Claude to access Rimba Ventures as smoke?');
-    expect(shown).toContain('It can look things up and, with your OK in Claude, make changes in this workspace.');
+    expect(shown).toContain('It can look things up and make changes in this workspace, as you.');
     expect(shown).toContain('Allow');
     expect(shown).toContain("Don't allow");
     expect(html).toContain(`value="${AUTH_ID}"`);
@@ -352,6 +352,22 @@ describe('consent actions', () => {
     mocks.getMfaStatus.mockResolvedValue({ verified: false, challengeRequired: false, factors: [], pendingFactors: [] });
     session({ user: { id: ALICE, email: '', is_anonymous: true } });
     expect(await allowAction(undefined, allowForm())).toEqual({
+      error: "The demo can't connect to AI tools. Sign in with your own OpenKuasa account.",
+    });
+    expect(calls).toEqual([]);
+  });
+
+  test('Don\'t allow passes the same gate as Allow: the code prompt when one is owed, demo guests refused', async () => {
+    session();
+    mocks.getMfaStatus.mockResolvedValue({ verified: false, challengeRequired: true, factors: [{ id: 'f1', friendlyName: null }], pendingFactors: [] });
+    expect(await redirectOf(() => denyAction(undefined, form({ authorization_id: AUTH_ID })))).toBe(
+      `/mfa/verify?next=${encodeURIComponent(CONSENT_PATH)}`,
+    );
+    expect(calls).toEqual([]);
+
+    mocks.getMfaStatus.mockResolvedValue({ verified: false, challengeRequired: false, factors: [], pendingFactors: [] });
+    session({ user: { id: ALICE, email: '', is_anonymous: true } });
+    expect(await denyAction(undefined, form({ authorization_id: AUTH_ID }))).toEqual({
       error: "The demo can't connect to AI tools. Sign in with your own OpenKuasa account.",
     });
     expect(calls).toEqual([]);

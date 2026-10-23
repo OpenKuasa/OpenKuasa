@@ -354,14 +354,29 @@ describe('resolveCaller', () => {
     expect(await resolveCaller(req(`Bearer ${token}`), 'Claude')).toMatchObject({ ok: true, caller: { orgId: ORG_B, orgName: 'Kopi Co' } });
   });
 
-  test('an OAuth connection whose person has left its workspace is removed', async () => {
+  test('an OAuth connection whose person has left its workspace is removed, never moved to another one', async () => {
+    // Bound to A; Alice is removed from A but still belongs to B. Leaving keeps the binding row (only deleting the
+    // workspace or the person removes it), so it still names A.
     bind(ALICE, 'claude-desktop', ORG_A);
     db.members.delete(memberKey(ORG_A, ALICE));
-    expect(await resolveCaller(req(`Bearer ${oauthToken(ALICE)}`), 'Claude')).toEqual({
-      ok: false,
-      status: 401,
-      message: 'You are no longer a member of this workspace, so this connection cannot act in it.',
-    });
+    db.profiles.set(ALICE, ORG_B);
+    const removed = { ok: false, status: 401, message: 'You are no longer a member of this workspace, so this connection cannot act in it.' };
+    expect(await resolveCaller(req(`Bearer ${oauthToken(ALICE)}`), 'Claude')).toEqual(removed);
+    expect(await resolveCaller(req(`Bearer ${oauthToken(ALICE)}`), 'Claude')).toEqual(removed);
+    expect(inserts).toEqual([]);
+    expect(db.bindings.get(`${ALICE}:claude-desktop`)).toBe(ORG_A);
+  });
+
+  test('first-use binding never happens when the connection already has a row', async () => {
+    // Bound to A, B open: switch back, not re-bound to B.
+    bind(ALICE, 'claude-desktop', ORG_A);
+    db.profiles.set(ALICE, ORG_B);
+    expect(await resolveCaller(req(`Bearer ${oauthToken(ALICE)}`), 'Claude')).toMatchObject({ ok: false, status: 403 });
+    // Bound to A, A open: acts in A.
+    db.profiles.set(ALICE, ORG_A);
+    expect(await resolveCaller(req(`Bearer ${oauthToken(ALICE)}`), 'Claude')).toMatchObject({ ok: true, caller: { orgId: ORG_A } });
+    expect(inserts).toEqual([]);
+    expect(db.bindings.get(`${ALICE}:claude-desktop`)).toBe(ORG_A);
   });
 
   test('a key whose person has no membership left is removed, not asked to switch', async () => {
