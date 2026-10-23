@@ -1,6 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { z } from 'zod';
 import { CrmContactFormError } from '@/lib/crm/contacts';
+import { klDay } from '@/lib/crm/deal-stats';
 import { createFollowUp, parseDueDate, type CrmFollowUpInsert } from '@/lib/crm/follow-ups';
 import type { CapResult } from '@/lib/reach/capabilities';
 
@@ -27,23 +28,34 @@ export const crmAgentNoteInput = z
   .object({
     dealId: z.string().uuid().optional(),
     contactId: z.string().uuid().optional(),
-    body: z.string().trim().min(1).max(1000),
+    // Never trimmed: crm_add_agent_note matches the approved proposal's exact text.
+    body: z
+      .string()
+      .min(1)
+      .max(1000)
+      .refine((s) => s.trim().length > 0, 'Write a note'),
   })
   .refine((v) => (v.dealId === undefined) !== (v.contactId === undefined), {
     message: 'Give either a deal or a contact, not both',
   });
 
-/** Adds a follow-up task for a contact, reusing the same insert the chat tool and screen use. */
+/**
+ * Adds a follow-up task for a contact, reusing the same insert the chat tool and screen use.
+ * A proposed due day that has already come (the suggestion waited) moves to the next
+ * Kuala Lumpur day, so approving never creates a task that is already overdue.
+ */
 export async function crmCreateFollowUp(
   ctx: CrmAgentWriteContext,
   input: z.infer<typeof crmFollowUpInput>,
 ): Promise<CapResult<null>> {
+  const tomorrow = klDay(new Date(Date.now() + 86_400_000));
+  const dueDay = input.dueDay < tomorrow ? tomorrow : input.dueDay;
   const payload: CrmFollowUpInsert = {
     org_id: ctx.orgId,
     contact_id: input.contactId,
     type: 'task',
     title: input.title,
-    due_at: `${input.dueDay}T00:00:00Z`,
+    due_at: `${dueDay}T00:00:00Z`,
     owner_user_id: ctx.userId,
   };
   try {
