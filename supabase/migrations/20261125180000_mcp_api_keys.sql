@@ -15,7 +15,9 @@
 --     `session_secret` (column grants), and the `mcp_api_keys_public` view
 --     leaves both out;
 --   * the same split may revoke, by setting `revoked_at`, and nothing else.
---     A revoke cannot be undone.
+--     A revoke cannot be undone;
+--   * leaving the workspace (an org_members row deleted) revokes that
+--     person's keys in it.
 --
 -- Deploy order: this migration first, then the code that uses it.
 
@@ -66,6 +68,22 @@ create trigger mcp_api_keys_guard before update on public.mcp_api_keys
   for each row execute function private.mcp_api_keys_guard();
 
 revoke all on function private.mcp_api_keys_guard() from public, anon, authenticated;
+
+-- Leaving a workspace revokes the person's keys there, in the same
+-- transaction, and drops their sessions' refresh tokens: a key never outlives
+-- its person's membership (the guard allows this, as for any first revoke).
+-- Nothing to do when the whole workspace is being deleted: its keys go with it.
+create or replace function private.mcp_api_keys_on_member_removed()
+returns trigger language plpgsql security definer set search_path = '' as $$
+begin
+  update public.mcp_api_keys set revoked_at = now(), session_secret = null
+  where org_id = old.org_id and user_id = old.user_id and revoked_at is null
+    and exists (select 1 from public.orgs o where o.id = old.org_id);
+  return old;
+end; $$;
+revoke all on function private.mcp_api_keys_on_member_removed() from public, anon, authenticated;
+create trigger mcp_api_keys_revoke_on_member_removed after delete on public.org_members
+  for each row execute function private.mcp_api_keys_on_member_removed();
 
 alter table public.mcp_api_keys enable row level security;
 

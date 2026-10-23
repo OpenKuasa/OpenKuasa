@@ -10,7 +10,7 @@
 
 import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js';
 import { resolveCaller } from '@/lib/mcp/caller';
-import { createMcpServer } from '@/lib/mcp/server';
+import { createMcpServer, memoryRateLimiter } from '@/lib/mcp/server';
 import { logFailure } from '@/lib/mcp/shared';
 import { originFromHeaders } from '@/lib/reach/form-submissions';
 
@@ -22,14 +22,19 @@ export const maxDuration = 60;
 const MAX_BODY_BYTES = 4 * 1024 * 1024;
 const DEFAULT_CLIENT = 'MCP client';
 const MAX_NAMES = 1000;
+const TOO_MANY_REQUESTS = 'Too many requests just now. Wait a minute and try again.';
+
+/** Process-wide: every request a credential sends, at most 120 a minute (tool calls have their own, tighter limit). */
+const requests = memoryRateLimiter({ callsPerMinute: 120 });
 
 /** Process-wide: credential id → the name its client gave at initialize. The oldest is dropped past the cap. */
 const names = new Map<string, string>();
 
-/** At most 60 printable characters, or null when nothing printable is left. */
+/** At most 60 printable characters (code points, so an emoji is never cut in half), or null when none are left. */
 function cleanName(raw: unknown): string | null {
   if (typeof raw !== 'string') return null;
-  const name = raw.replace(/\p{C}+/gu, '').replace(/\s+/g, ' ').trim().slice(0, 60).trim();
+  const printable = raw.replace(/\p{C}+/gu, '').replace(/\s+/g, ' ').trim();
+  const name = Array.from(printable).slice(0, 60).join('').trim();
   return name || null;
 }
 
@@ -93,6 +98,10 @@ async function handle(request: Request): Promise<Response> {
       resolved.message,
       resolved.status === 401 ? { 'WWW-Authenticate': `Bearer resource_metadata="${metadata}"` } : {},
     );
+  }
+
+  if (!requests.take(resolved.caller.credentialId, 'read')) {
+    return jsonRpcError(429, -32002, TOO_MANY_REQUESTS, { 'Retry-After': '60' });
   }
 
   let parsedBody: unknown;

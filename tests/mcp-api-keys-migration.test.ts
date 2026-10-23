@@ -99,4 +99,24 @@ describe('mcp api keys migration', () => {
     expect(flat).toMatch(/create trigger mcp_api_keys_guard before update on public\.mcp_api_keys for each row execute function private\.mcp_api_keys_guard\(\);/);
     expect(flat).toContain('revoke all on function private.mcp_api_keys_guard() from public, anon, authenticated;');
   });
+
+  test('leaving the workspace revokes the person\'s keys there and drops their sessions', () => {
+    const start = flat.indexOf('create or replace function private.mcp_api_keys_on_member_removed()');
+    expect(start).toBeGreaterThan(-1);
+    const head = flat.slice(start, flat.indexOf('$$', start));
+    expect(head).toContain('returns trigger');
+    expect(head).toContain('security definer');
+    expect(head).toContain("set search_path = ''");
+    const body = flat.slice(start, flat.indexOf('$$;', flat.indexOf('$$', start) + 2));
+    expect(body).toContain(
+      'update public.mcp_api_keys set revoked_at = now(), session_secret = null where org_id = old.org_id and user_id = old.user_id and revoked_at is null',
+    );
+    expect(body).toContain('return old;');
+    expect(flat).toContain(
+      'create trigger mcp_api_keys_revoke_on_member_removed after delete on public.org_members for each row execute function private.mcp_api_keys_on_member_removed();',
+    );
+    expect(flat).toContain('revoke all on function private.mcp_api_keys_on_member_removed() from public, anon, authenticated;');
+    // The table exists before the trigger that writes to it.
+    expect(flat.indexOf('create table public.mcp_api_keys (')).toBeLessThan(start);
+  });
 });

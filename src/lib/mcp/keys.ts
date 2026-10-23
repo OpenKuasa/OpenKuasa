@@ -35,6 +35,8 @@ const BYTE_LIMIT = 248;
 const REFRESH_MARGIN_MS = 60 * 1000;
 /** `last_used_at` is written at most this often per key. */
 const TOUCH_EVERY_MS = 60 * 1000;
+/** Waits before the second and third try at storing a rotated refresh token. */
+const SAVE_RETRY_MS = [100, 300];
 
 export const KEY_NOT_ALLOWED = 'You can only make a key for yourself, in a workspace you belong to.';
 export const KEY_NAME_INVALID = 'Give the key a name of 1 to 60 characters.';
@@ -59,6 +61,8 @@ type KeyRow = {
 };
 type Session = { access_token: string; refresh_token: string; expires_at?: number; expires_in?: number; user?: { id?: string } | null };
 type Cached = { userId: string; accessToken: string; expiresAt: number };
+/** A rotated refresh token that could not be stored yet, and the stored one it is to replace. */
+type Pending = { sealed: string; replaces: string };
 
 /** Process-wide: key id → its current access token. Checked against the row on every use. */
 const cache = new Map<string, Cached>();
@@ -66,6 +70,8 @@ const cache = new Map<string, Cached>();
 const inflight = new Map<string, Promise<Cached | null>>();
 /** Process-wide: key id → when this server last wrote `last_used_at`. */
 const touched = new Map<string, number>();
+/** Process-wide: key id → its newest refresh token while the database could not take it. Stored on the next use. */
+const pending = new Map<string, Pending>();
 
 const ROW_COLUMNS = 'id, org_id, user_id, session_secret, revoked_at, last_used_at';
 
@@ -215,63 +221,164 @@ export async function createApiKey(
   }
 }
 
+/** The row; null when it is gone; undefined when it could not be read. */
+async function readRow(service: SupabaseClient, id: string): Promise<KeyRow | null | undefined> {
+  try {
+    const { data, error } = await service.from(TABLE).select(ROW_COLUMNS).eq('id', id).maybeSingle();
+    if (error) return undefined;
+    return (data as KeyRow | null) ?? null;
+  } catch {
+    return undefined;
+  }
+}
+
 async function loadById(service: SupabaseClient, id: string): Promise<KeyRow | null> {
-  const { data, error } = await service.from(TABLE).select(ROW_COLUMNS).eq('id', id).maybeSingle();
-  return error || !data ? null : (data as KeyRow);
+  return (await readRow(service, id)) ?? null;
+}
+
+const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+const isDead = (row: KeyRow | null | undefined) => row === null || (!!row && (!!row.revoked_at || !row.session_secret));
+
+/**
+ * Stores `next` in place of `replaces`, trying up to three times while the database errors. 'saved'; 'changed'
+ * when no error came back but the row no longer held `replaces` (revoked, or rotated elsewhere); 'failed'.
+ */
+async function save(service: SupabaseClient, id: string, next: string, replaces: string): Promise<'saved' | 'changed' | 'failed'> {
+  let last: unknown = null;
+  for (let attempt = 0; attempt <= SAVE_RETRY_MS.length; attempt += 1) {
+    if (attempt > 0) await wait(SAVE_RETRY_MS[attempt - 1]);
+    try {
+      const { data, error } = await service
+        .from(TABLE)
+        .update({ session_secret: next })
+        .eq('id', id)
+        .eq('session_secret', replaces)
+        .is('revoked_at', null)
+        .select('id');
+      if (!error) return data && data.length === 1 ? 'saved' : 'changed';
+      last = error;
+    } catch (error) {
+      last = error;
+    }
+  }
+  logFailure('store refreshed session', last);
+  return 'failed';
+}
+
+/** A fresh session from a refresh token. A call that got no answer is tried once more with the same token. */
+async function refreshWith(refreshToken: string): Promise<Session | 'refused' | 'lost'> {
+  let last: unknown = null;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      const { data, error } = await anonClient().auth.refreshSession({ refresh_token: refreshToken });
+      const session = data?.session as Session | null | undefined;
+      if (!error && session?.access_token && session.refresh_token) return session;
+      if (error && (error as { name?: string }).name !== 'AuthRetryableFetchError') return 'refused';
+      last = error ?? new Error('no session');
+    } catch (error) {
+      last = error;
+    }
+  }
+  logFailure('refresh', last);
+  return 'lost';
+}
+
+/** Ends the key's cached session and forgets the key on this server. */
+async function drop(id: string): Promise<void> {
+  const cached = cache.get(id);
+  forget(id);
+  if (cached) await endSession(cached.accessToken);
 }
 
 /**
- * Turns the stored refresh token into a fresh session and stores the rotated refresh token before handing the
- * access token out. When another server rotated it first ("Already Used"), reads the newer one and tries once more.
+ * Stores a refresh token this server is holding for the key, if any. Returns what the row holds and the token to
+ * refresh with next, or null when the key is revoked or gone (its session is then ended).
+ */
+async function settle(service: SupabaseClient, row: KeyRow): Promise<{ stored: string; current: string } | null> {
+  const stored = row.session_secret as string;
+  const held = pending.get(row.id);
+  if (!held) return { stored, current: stored };
+  const outcome = await save(service, row.id, held.sealed, held.replaces);
+  if (outcome === 'saved') {
+    pending.delete(row.id);
+    return { stored: held.sealed, current: held.sealed };
+  }
+  // Still failing: the row keeps the used token, so refresh with the held one.
+  if (outcome === 'failed') return { stored: held.replaces, current: held.sealed };
+  const now = await readRow(service, row.id);
+  if (now === undefined) return { stored: held.replaces, current: held.sealed };
+  if (isDead(now)) {
+    await drop(row.id);
+    return null;
+  }
+  // Stored meanwhile, by this server or another: carry on from what the row holds.
+  pending.delete(row.id);
+  const secret = now!.session_secret as string;
+  return { stored: secret, current: secret };
+}
+
+/**
+ * Turns the refresh token into a fresh session and stores the rotated refresh token before handing the access
+ * token out. When another server rotated it first ("Already Used"), reads the newer one and tries once more.
+ * When the store keeps failing the new session goes on and its refresh token is held for the next use, unless a
+ * re-read shows the key revoked or gone.
  */
 async function refresh(service: SupabaseClient, row: KeyRow): Promise<Cached | null> {
-  let sealed = row.session_secret;
-  for (let attempt = 0; attempt < 2 && sealed; attempt += 1) {
-    const refreshToken = unseal(sealed, row.org_id);
+  const start = await settle(service, row);
+  if (!start) return null;
+  let { stored, current } = start;
+  for (let attempt = 0; attempt < 2 && current; attempt += 1) {
+    const refreshToken = unseal(current, row.org_id);
     if (!refreshToken) return null;
-    const { data, error } = await anonClient().auth.refreshSession({ refresh_token: refreshToken });
-    const session = data?.session as Session | null | undefined;
-    if (!error && session?.access_token && session.refresh_token) {
+    const session = await refreshWith(refreshToken);
+    // No answer twice: what is stored (or held) is left as it was for the next call.
+    if (session === 'lost') return null;
+    if (session !== 'refused') {
       if (session.user?.id !== row.user_id) return null;
-      const { data: saved, error: saveError } = await service
-        .from(TABLE)
-        .update({ session_secret: seal(session.refresh_token, row.org_id) })
-        .eq('id', row.id)
-        .eq('session_secret', sealed)
-        .is('revoked_at', null)
-        .select('id');
-      if (saveError) {
-        logFailure('store refreshed session', saveError);
-        await endSession(session.access_token);
-        return null;
-      }
-      if (!saved || saved.length !== 1) {
-        // Not stored: revoked meanwhile, or another server stored a newer token first. Only the latter may go on;
-        // otherwise the session just opened is ended, not left to run out.
-        const now = await loadById(service, row.id);
-        if (!now || now.revoked_at || !now.session_secret) {
+      const next = seal(session.refresh_token, row.org_id);
+      const outcome = await save(service, row.id, next, stored);
+      if (outcome === 'saved') {
+        pending.delete(row.id);
+      } else {
+        // Not stored. Revoked meanwhile: the session just opened is ended, not left to run out. Otherwise it goes
+        // on: another server stored a newer token first, or the store failed and this token is held for later.
+        const now = await readRow(service, row.id);
+        if (isDead(now)) {
+          forget(row.id);
           await endSession(session.access_token);
           return null;
         }
+        if (outcome === 'failed' || now === undefined) pending.set(row.id, { sealed: next, replaces: stored });
+        else pending.delete(row.id);
       }
-      const next = { userId: row.user_id, accessToken: session.access_token, expiresAt: expiryOf(session) };
-      cache.set(row.id, next);
-      return next;
+      const fresh = { userId: row.user_id, accessToken: session.access_token, expiresAt: expiryOf(session) };
+      cache.set(row.id, fresh);
+      return fresh;
     }
+    pending.delete(row.id);
     const now = await loadById(service, row.id);
-    if (!now || now.revoked_at || now.user_id !== row.user_id || now.session_secret === sealed) return null;
-    sealed = now.session_secret;
+    if (!now || now.revoked_at || now.user_id !== row.user_id || now.session_secret === stored) return null;
+    stored = current = now.session_secret as string;
   }
   return null;
 }
 
-/** The key's access token: the cached one while it has more than a minute left, else one refresh shared by all callers. */
+/** The cached token, once any refresh token held for the key has been stored (null when the key is gone). */
+async function keep(service: SupabaseClient, row: KeyRow, cached: Cached): Promise<Cached | null> {
+  return (await settle(service, row)) ? cached : null;
+}
+
+/**
+ * The key's access token: the cached one while it has more than a minute left, else one refresh shared by all
+ * callers. A refresh token held back by a failed store is stored first, one try per key at a time.
+ */
 async function accessTokenFor(service: SupabaseClient, row: KeyRow): Promise<Cached | null> {
   const cached = cache.get(row.id);
-  if (cached && cached.userId === row.user_id && cached.expiresAt - REFRESH_MARGIN_MS > Date.now()) return cached;
+  const fresh = cached && cached.userId === row.user_id && cached.expiresAt - REFRESH_MARGIN_MS > Date.now() ? cached : null;
+  if (fresh && !pending.has(row.id)) return fresh;
   let running = inflight.get(row.id);
   if (!running) {
-    running = refresh(service, row)
+    running = (fresh ? keep(service, row, fresh) : refresh(service, row))
       .catch((error: unknown) => {
         logFailure('refresh', error);
         return null;
@@ -298,6 +405,7 @@ async function touch(service: SupabaseClient, row: KeyRow): Promise<void> {
 function forget(id: string): void {
   cache.delete(id);
   touched.delete(id);
+  pending.delete(id);
 }
 
 /**
@@ -351,13 +459,16 @@ export async function revokeApiKey(supabase: SupabaseClient, id: string): Promis
   // Revoked: from here on every server refuses the key. What follows only ends its session early.
   await inflight.get(id)?.catch(() => null);
   const cached = cache.get(id);
+  const held = pending.get(id);
   forget(id);
   try {
     const service = serviceClient();
     const row = await loadById(service, id);
     let accessToken = cached && cached.expiresAt > Date.now() ? cached.accessToken : null;
-    if (!accessToken && row?.session_secret) {
-      const refreshToken = unseal(row.session_secret, row.org_id);
+    // A token this server held back is newer than the stored one, which it has already used.
+    const sealed = held?.sealed ?? row?.session_secret;
+    if (!accessToken && row && sealed) {
+      const refreshToken = unseal(sealed, row.org_id);
       if (refreshToken) {
         const { data } = await anonClient().auth.refreshSession({ refresh_token: refreshToken });
         accessToken = data?.session?.access_token ?? null;

@@ -130,7 +130,47 @@ describe('/api/mcp', () => {
     expect(name).toBe('createCrmDeal');
     expect(args).toEqual({ title: 'Big order' });
     expect(confirm).toBe('tok-1');
-    expect(mocks.logMcpChange).toHaveBeenCalledWith(SUPABASE, { operation: 'createCrmDeal', target: 'Big order', client: 'claude-code' });
+    expect(mocks.logMcpChange).toHaveBeenCalledWith(SUPABASE, {
+      org: caller.orgId,
+      operation: 'createCrmDeal',
+      target: 'Big order',
+      client: 'claude-code',
+    });
+  });
+
+  test('a long client name is cut on whole characters, never mid-emoji', async () => {
+    signIn();
+    await POST(
+      rpc('initialize', {
+        protocolVersion: '2025-06-18',
+        capabilities: {},
+        clientInfo: { name: `${'a'.repeat(59)}\u{1F600}bbb`, version: '1' },
+      }),
+    );
+    mocks.runChange.mockImplementation(async (_o, _s, _c, _n, _a, _t, deps) => {
+      await deps.log({ operation: 'createCrmDeal', target: 'x' });
+      return { ok: true, result: { ok: true } };
+    });
+    await POST(call('openkuasa_change', { operation: 'createCrmDeal', arguments: {} }));
+    const client = mocks.logMcpChange.mock.calls[0][1].client as string;
+    expect(Array.from(client)).toHaveLength(60);
+    expect(client.endsWith('\u{1F600}')).toBe(true);
+    expect(client).toBe(client.toWellFormed());
+  });
+
+  test('more than 120 requests a minute on one credential get a 429', async () => {
+    signIn();
+    for (let i = 0; i < 120; i += 1) expect((await POST(rpc('tools/list'))).status).toBe(200);
+    const request = rpc('tools/list');
+    const response = await POST(request);
+    expect(response.status).toBe(429);
+    expect(response.headers.get('retry-after')).toBe('60');
+    const body = (await response.json()) as { error?: { message?: string } };
+    expect(body.error?.message).toBe('Too many requests just now. Wait a minute and try again.');
+    expect(request.bodyUsed).toBe(false);
+    // Another credential is not held back.
+    signIn();
+    expect((await POST(rpc('tools/list'))).status).toBe(200);
   });
 
   test('without an initialize the client is named by its User-Agent', async () => {
@@ -302,6 +342,11 @@ describe('/api/mcp', () => {
     )) as { instructions?: string };
     expect(result.instructions).toMatch(/race, religion, gender, age, marital status, pregnancy, disability or nationality/);
     expect(result.instructions).toMatch(/confirm/);
+    // A failed result is never presented as done.
+    expect(result.instructions).toMatch(/ok: false did not work: say so and why; never present it as done/);
+    // CVs one at a time, only when asked about that candidate.
+    expect(result.instructions).toMatch(/Read one CV when the person asks about that candidate/);
+    expect(result.instructions).toMatch(/Never read CVs to browse or compare several candidates/);
     expect((result.instructions ?? '').length).toBeLessThanOrEqual(1200);
   });
 });

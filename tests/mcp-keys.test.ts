@@ -23,6 +23,8 @@ const auth = {
   verifyCalls: [] as string[],
   goodCode: '123456',
   onRefresh: null as null | (() => void),
+  /** Refresh calls that get no answer (a network loss before the auth server saw them). */
+  lostRefreshes: 0,
 };
 
 /** The database: keys, members (role by org and user). */
@@ -30,6 +32,8 @@ const db = {
   keys: [] as Row[],
   members: new Map<string, string>(),
   svcUpdates: [] as Row[],
+  /** Service writes of a session secret that fail (a timeout), before any row is touched. */
+  failSaves: 0,
 };
 const memberKey = (org: string, user: string) => `${org}:${user}`;
 
@@ -49,7 +53,12 @@ function issue(userId: string, aal: string, session = ++auth.sessions) {
 }
 
 /** A tiny PostgREST-like builder over an array. `visible` stands in for RLS. */
-function table(rows: () => Row[], visible: (row: Row) => boolean, onUpdate?: (patch: Row) => void) {
+function table(
+  rows: () => Row[],
+  visible: (row: Row) => boolean,
+  onUpdate?: (patch: Row) => void,
+  fails?: (patch: Row) => boolean,
+) {
   let op: 'select' | 'insert' | 'update' = 'select';
   let payload: Row = {};
   let mode: 'many' | 'single' | 'maybe' = 'many';
@@ -60,6 +69,7 @@ function table(rows: () => Row[], visible: (row: Row) => boolean, onUpdate?: (pa
       rows().push(row);
       return { data: mode === 'many' ? [row] : row, error: null };
     }
+    if (op === 'update' && fails?.(payload)) return { data: null, error: { code: '57014', message: 'canceling statement due to statement timeout' } };
     const hit = rows().filter((r) => visible(r) && filters.every(([c, v]) => (r[c] ?? null) === v));
     if (op === 'update') {
       onUpdate?.(payload);
@@ -91,7 +101,12 @@ const memberRows = (viewer: string | null) => () =>
 const svc = {
   from: vi.fn((name: string) => {
     if (name !== 'mcp_api_keys') throw new Error(`service client used for ${name}`);
-    return table(() => db.keys, () => true, (patch) => db.svcUpdates.push(patch));
+    return table(
+      () => db.keys,
+      () => true,
+      (patch) => db.svcUpdates.push(patch),
+      (patch) => typeof patch.session_secret === 'string' && db.failSaves > 0 && (db.failSaves -= 1) >= 0,
+    );
   }),
   auth: {
     admin: {
@@ -135,6 +150,10 @@ vi.mock('@supabase/supabase-js', () => ({
         },
         refreshSession: async ({ refresh_token }: { refresh_token: string }) => {
           auth.refreshCalls += 1;
+          if (auth.lostRefreshes > 0) {
+            auth.lostRefreshes -= 1;
+            return { data: { session: null, user: null }, error: Object.assign(new Error('fetch failed'), { name: 'AuthRetryableFetchError', status: 0 }) };
+          }
           const r = auth.refresh.get(refresh_token);
           if (!r || r.used) return { data: { session: null }, error: { message: 'Invalid Refresh Token: Already Used' } };
           r.used = true;
@@ -202,7 +221,9 @@ beforeEach(() => {
   auth.signOuts = [];
   auth.verifyCalls = [];
   auth.onRefresh = null;
+  auth.lostRefreshes = 0;
   db.keys = [];
+  db.failSaves = 0;
   db.members.clear();
   db.svcUpdates = [];
   created.length = 0;
@@ -438,6 +459,107 @@ describe('resolveApiKey', () => {
     expect(scope).toBe('local');
     expect(auth.access.get(jwt)?.ended).toBe(true);
     expect([...auth.refresh.values()].every((r) => r.used)).toBe(true);
+  });
+
+  const storedRefresh = () => decryptApiKey(String(db.keys[0].session_secret), ORG, process.env, 'mcp-refresh-token')!;
+  const expire = () => vi.setSystemTime(Date.now() + 3600 * 1000);
+
+  test('a save that fails twice is retried, and the key goes on working', async () => {
+    const { createApiKey, resolveApiKey } = await load();
+    const made = await createApiKey(personClient(ALICE), { orgId: ORG, userId: ALICE, name: 'k' });
+    if (!made.ok) throw new Error(made.error);
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+    expire();
+    db.failSaves = 2;
+    const got = await resolveApiKey(made.key);
+    expect(got.ok).toBe(true);
+    expect(db.failSaves).toBe(0);
+    expect(auth.signOuts).toHaveLength(0);
+    // The rotated token was stored on the third try.
+    expect(auth.refresh.get(storedRefresh())?.used).toBe(false);
+    expire();
+    expect((await resolveApiKey(made.key)).ok).toBe(true);
+    expect(logged).not.toHaveBeenCalled();
+  });
+
+  test('a save that keeps failing keeps the new session in memory, and the next call stores it', async () => {
+    const { createApiKey, resolveApiKey } = await load();
+    const made = await createApiKey(personClient(ALICE), { orgId: ORG, userId: ALICE, name: 'k' });
+    if (!made.ok) throw new Error(made.error);
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const before = storedRefresh();
+    expire();
+    db.failSaves = 3;
+    const got = await resolveApiKey(made.key);
+    // This call still works, on the new session, which is not ended.
+    expect(got.ok).toBe(true);
+    expect(auth.signOuts).toHaveLength(0);
+    expect(got.ok && auth.access.get(got.accessToken)?.ended).toBe(false);
+    // Nothing new is stored yet: the row still holds the used token.
+    expect(storedRefresh()).toBe(before);
+    expect(auth.refresh.get(before)?.used).toBe(true);
+
+    // The next call stores the token it kept, and works.
+    const next = await resolveApiKey(made.key);
+    expect(next.ok).toBe(true);
+    expect(storedRefresh()).not.toBe(before);
+    expect(auth.refresh.get(storedRefresh())?.used).toBe(false);
+    // And the key refreshes from it once the token runs out.
+    expire();
+    const later = await resolveApiKey(made.key);
+    expect(later.ok).toBe(true);
+    expect(later.ok && next.ok && later.accessToken).not.toBe(next.ok && next.accessToken);
+  });
+
+  test('a kept token is used for the next refresh while the store is still failing', async () => {
+    const { createApiKey, resolveApiKey } = await load();
+    const made = await createApiKey(personClient(ALICE), { orgId: ORG, userId: ALICE, name: 'k' });
+    if (!made.ok) throw new Error(made.error);
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    expire();
+    db.failSaves = 3;
+    expect((await resolveApiKey(made.key)).ok).toBe(true);
+    // Expired again before any save worked: the refresh runs on the kept token, not the used stored one.
+    expire();
+    db.failSaves = 3;
+    const refreshes = auth.refreshCalls;
+    expect((await resolveApiKey(made.key)).ok).toBe(true);
+    expect(auth.refreshCalls - refreshes).toBe(1);
+    // Once the store works, the newest token is the one stored.
+    expect((await resolveApiKey(made.key)).ok).toBe(true);
+    expect(auth.refresh.get(storedRefresh())?.used).toBe(false);
+  });
+
+  test('a failing save on a key revoked meanwhile still ends the new session', async () => {
+    const { createApiKey, resolveApiKey } = await load();
+    const made = await createApiKey(personClient(ALICE), { orgId: ORG, userId: ALICE, name: 'k' });
+    if (!made.ok) throw new Error(made.error);
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    expire();
+    db.failSaves = 3;
+    auth.onRefresh = () => {
+      Object.assign(db.keys[0], { revoked_at: new Date().toISOString(), session_secret: null });
+    };
+    expect(await resolveApiKey(made.key)).toEqual({ ok: false });
+    expect(auth.signOuts).toHaveLength(1);
+    expect(auth.access.get(auth.signOuts[0][0])?.ended).toBe(true);
+  });
+
+  test('a refresh that gets no answer is tried once more with the same token', async () => {
+    const { createApiKey, resolveApiKey } = await load();
+    const made = await createApiKey(personClient(ALICE), { orgId: ORG, userId: ALICE, name: 'k' });
+    if (!made.ok) throw new Error(made.error);
+    expire();
+    auth.lostRefreshes = 1;
+    expect((await resolveApiKey(made.key)).ok).toBe(true);
+    expect(auth.refreshCalls).toBe(2);
+    expect(auth.refresh.get(storedRefresh())?.used).toBe(false);
+    // Lost twice: refused this time, but the stored token is untouched and the next call works.
+    expire();
+    auth.lostRefreshes = 2;
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    expect(await resolveApiKey(made.key)).toEqual({ ok: false });
+    expect((await resolveApiKey(made.key)).ok).toBe(true);
   });
 
   test('updates last_used_at at most once a minute', async () => {
