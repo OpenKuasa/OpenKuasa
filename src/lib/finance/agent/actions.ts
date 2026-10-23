@@ -32,6 +32,7 @@ export const financeAgentNoteInput = z
       .refine((s) => s.trim().length > 0, 'Write a note'),
     target: z.string().min(1).max(100),
     stage: z.string().min(1).max(40),
+    minAmount: z.number().min(0).max(10000000).optional(),
   })
   .refine(
     (v) =>
@@ -63,12 +64,22 @@ const owed = (row: Record<string, unknown>, open: string[]) =>
   open.includes(String(row.display_status)) && Number(row.balance_myr) > 0;
 
 /** Whether the note's target still matches the check that raised it (spec §5, "no longer applies"). */
-async function stillApplies(ctx: FinanceAgentWriteContext, checkKey: string, input: FinanceAgentNoteInput): Promise<Check> {
+async function stillApplies(
+  ctx: FinanceAgentWriteContext,
+  checkKey: string,
+  input: FinanceAgentNoteInput,
+  proposedAt: string,
+): Promise<Check> {
   const id = input.entityId;
   switch (checkKey) {
     case 'invoice_overdue':
-      return readOne(ctx, 'finance_invoice_totals', 'display_status,balance_myr', id as string, (r) =>
-        owed(r, ['sent', 'overdue']),
+      return readOne(
+        ctx,
+        'finance_invoice_totals',
+        'display_status,balance_myr',
+        id as string,
+        // Part-paid below the check's minimum no longer matches either.
+        (r) => owed(r, ['sent', 'overdue']) && Number(r.balance_myr) >= (input.minAmount ?? 0),
       );
     case 'bill_due_soon':
       return readOne(ctx, 'supplier_bill_totals', 'display_status,balance_myr', id as string, (r) =>
@@ -78,9 +89,10 @@ async function stillApplies(ctx: FinanceAgentWriteContext, checkKey: string, inp
       return readOne(
         ctx,
         input.entityType === 'finance_invoice' ? 'finance_invoices' : 'supplier_bills',
-        'status',
+        'status,updated_at',
         id as string,
-        (r) => r.status === 'draft',
+        // Touched since the suggestion was made: it is no longer stale.
+        (r) => r.status === 'draft' && !(Date.parse(String(r.updated_at)) > Date.parse(proposedAt)),
       );
     case 'expense_waiting':
       return readOne(ctx, 'finance_expenses', 'status', id as string, (r) => r.status === 'pending');
@@ -142,17 +154,18 @@ export async function financeCreateAgentNote(
 
   const proposal = await ctx.client
     .from('agent_proposals')
-    .select('check_key')
+    .select('check_key,created_at')
     .eq('org_id', ctx.orgId)
     .eq('id', ctx.proposalId)
     .maybeSingle();
-  const checkKey = (proposal.data as { check_key: string | null } | null)?.check_key;
-  if (proposal.error || !checkKey) {
+  const row = proposal.data as { check_key: string | null; created_at: string } | null;
+  const checkKey = row?.check_key;
+  if (proposal.error || !row || !checkKey) {
     console.error('[finance-agent] proposal not read:', proposal.error?.code);
     return { ok: false, error: NOT_ADDED };
   }
 
-  const applies = await stillApplies(ctx, checkKey, input);
+  const applies = await stillApplies(ctx, checkKey, input, row.created_at);
   if (applies === 'stale') return { ok: false, error: FINANCE_NO_LONGER_APPLIES, stale: true };
   if (applies === 'unreadable') return { ok: false, error: NOT_ADDED };
 

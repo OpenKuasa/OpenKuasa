@@ -83,6 +83,7 @@ describe('scanFinance', () => {
         body: `INV-0001 to Ming Hardware is 14 days overdue: RM 1,240.00 unpaid.${AS_OF}`,
         target: A,
         stage: '14',
+        minAmount: 0,
       });
       expect(got[0].body).toBe(`INV-0003 is 56 days overdue: RM 5.00 unpaid.${AS_OF}`);
       for (const c of scanFinance(r, NOW)) {
@@ -102,6 +103,11 @@ describe('scanFinance', () => {
         ],
       });
       expect(scanFinance(r, NOW)).toEqual([]);
+    });
+
+    it('carries the minimum amount so approval can tell the balance fell below it', () => {
+      const r = raw({ checks: check(14, 1000), invoices: [{ id: A, invoiceNo: 'INV-1', customer: 'X', dueDate: '2026-09-01', balance: 1500 }] });
+      expect(inputs(r)[0].minAmount).toBe(1000);
     });
 
     it('uses the ringgit balance it was given for a foreign-currency invoice', () => {
@@ -205,11 +211,11 @@ describe('scanFinance', () => {
     const r = raw({
       checks: [{ key: 'bank_unmatched', params: { days: 14 } }],
       bankLines: [
-        { accountId: A, account: 'Main Bank', lineDate: '2026-09-20', amount: 100 }, // 33 days
-        { accountId: A, account: 'Main Bank', lineDate: '2026-10-05', amount: 50.25 }, // 18 days
-        { accountId: A, account: 'Main Bank', lineDate: '2026-10-20', amount: 999 }, // too new
-        { accountId: B, account: 'Petty', lineDate: '2026-10-09', amount: 7 }, // 14 days
-        { accountId: C, account: 'New', lineDate: '2026-10-10', amount: 7 }, // 13 days
+        { accountId: A, account: 'Main Bank', currency: 'MYR', lineDate: '2026-09-20', amount: 100 }, // 33 days
+        { accountId: A, account: 'Main Bank', currency: 'MYR', lineDate: '2026-10-05', amount: 50.25 }, // 18 days
+        { accountId: A, account: 'Main Bank', currency: 'MYR', lineDate: '2026-10-20', amount: 999 }, // too new
+        { accountId: B, account: 'Petty', currency: 'MYR', lineDate: '2026-10-09', amount: 7 }, // 14 days
+        { accountId: C, account: 'New', currency: 'MYR', lineDate: '2026-10-10', amount: 7 }, // 13 days
       ],
     });
     const got = inputs(r);
@@ -224,6 +230,19 @@ describe('scanFinance', () => {
       body: `Main Bank has 2 statement lines older than 14 days with nothing matched (RM 150.25).${AS_OF}`,
     });
     expect(got[1].body).toBe(`Petty has 1 statement line older than 14 days with nothing matched (RM 7.00).${AS_OF}`);
+  });
+
+  it('bank_unmatched: a foreign-currency account totals in its own currency, not RM', () => {
+    const r = raw({
+      checks: [{ key: 'bank_unmatched', params: { days: 14 } }],
+      bankLines: [
+        { accountId: A, account: 'USD Account', currency: 'USD', lineDate: '2026-09-20', amount: 1000 },
+        { accountId: A, account: 'USD Account', currency: 'USD', lineDate: '2026-09-21', amount: 250.5 },
+      ],
+    });
+    expect(inputs(r)[0].body).toBe(
+      `USD Account has 2 statement lines older than 14 days with nothing matched (USD 1,250.50).${AS_OF}`,
+    );
   });
 
   describe('sst_period_closing', () => {
@@ -285,7 +304,7 @@ describe('scanFinance', () => {
       expenses: [{ id: C, amount: 1, vendor: null, createdAt: '2026-10-01T00:00:00Z' }],
       quotations: [{ id: A, quotationNo: null, customer: null, validUntil: '2026-10-30' }],
       drafts: [{ kind: 'bill', id: B, party: null, updatedAt: '2026-10-01T00:00:00Z' }],
-      bankLines: [{ accountId: C, account: 'Main', lineDate: '2026-10-01', amount: 1 }],
+      bankLines: [{ accountId: C, account: 'Main', currency: 'MYR', lineDate: '2026-10-01', amount: 1 }],
       sst: { periodStartMonth: 1, taxes: ['sales'], filed: [] },
     });
     const all = scanFinance(r, NOW);

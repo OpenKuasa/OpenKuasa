@@ -134,7 +134,7 @@ begin
       ('finance_expenses', 'org_id,id,status,amount,vendor_id,vendor_name,expense_date,created_at'),
       ('finance_quotations', 'org_id,id,quotation_no,customer_id,status,valid_until'),
       ('finance_statement_lines', 'org_id,id,account_id,line_date,money_in,money_out,transaction_id'),
-      ('finance_accounts', 'org_id,id,name,active'),
+      ('finance_accounts', 'org_id,id,name,active,currency'),
       ('finance_contacts', 'org_id,id,name'),
       ('finance_sst_settings', 'org_id,period_start_month,service_tax_no,sales_tax_no'),
       ('finance_sst_returns', 'org_id,tax_type,period_start'),

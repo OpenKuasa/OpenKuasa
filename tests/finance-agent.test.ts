@@ -126,7 +126,7 @@ const GRANTED: Record<string, string[]> = {
   finance_expenses: ['org_id', 'id', 'status', 'amount', 'vendor_id', 'vendor_name', 'expense_date', 'created_at'],
   finance_quotations: ['org_id', 'id', 'quotation_no', 'customer_id', 'status', 'valid_until'],
   finance_statement_lines: ['org_id', 'id', 'account_id', 'line_date', 'money_in', 'money_out', 'transaction_id'],
-  finance_accounts: ['org_id', 'id', 'name', 'active'],
+  finance_accounts: ['org_id', 'id', 'name', 'active', 'currency'],
   finance_contacts: ['org_id', 'id', 'name'],
   finance_sst_settings: ['org_id', 'period_start_month', 'service_tax_no', 'sales_tax_no'],
   finance_sst_returns: ['org_id', 'tax_type', 'period_start'],
@@ -210,12 +210,14 @@ describe('buildFinanceAgentContext', () => {
         { id: 'e2', amount: 3, vendor_id: null, vendor_name: 'Kedai', created_at: '2026-10-01T00:00:00Z' },
       ],
       finance_accounts: [
-        { id: 'a1', name: 'Main Bank', active: true },
-        { id: 'a2', name: 'Old', active: false },
+        { id: 'a1', name: 'Main Bank', active: true, currency: 'MYR' },
+        { id: 'a2', name: 'Old', active: false, currency: 'MYR' },
+        { id: 'a3', name: 'USD Account', active: true, currency: 'USD' },
       ],
       finance_statement_lines: [
         { id: 'l1', account_id: 'a1', line_date: '2026-09-01', money_in: '0', money_out: '12.5' },
         { id: 'l2', account_id: 'a2', line_date: '2026-09-01', money_in: '5', money_out: '0' },
+        { id: 'l3', account_id: 'a3', line_date: '2026-09-02', money_in: '100', money_out: '0' },
       ],
       finance_sst_settings: { period_start_month: 3, service_tax_no: ' ', sales_tax_no: 'B16-1' },
       finance_sst_returns: [{ tax_type: 'sales', period_start: '2026-07-01' }],
@@ -227,7 +229,10 @@ describe('buildFinanceAgentContext', () => {
       ['Grab', 10.5],
       ['Kedai', 3],
     ]);
-    expect(raw.bankLines).toEqual([{ accountId: 'a1', account: 'Main Bank', lineDate: '2026-09-01', amount: 12.5 }]);
+    expect(raw.bankLines).toEqual([
+      { accountId: 'a1', account: 'Main Bank', currency: 'MYR', lineDate: '2026-09-01', amount: 12.5 },
+      { accountId: 'a3', account: 'USD Account', currency: 'USD', lineDate: '2026-09-02', amount: 100 },
+    ]);
     expect(raw.sst).toEqual({ periodStartMonth: 3, taxes: ['sales'], filed: [{ taxType: 'sales', periodStart: '2026-07-01' }] });
     // Counts and the read-back only: no names, no ids.
     expect(context).toContain('Unpaid invoices: 1.');

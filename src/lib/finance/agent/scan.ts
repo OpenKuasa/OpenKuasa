@@ -1,6 +1,6 @@
 import type { Candidate } from '@/lib/agents/definition';
 import type { FinanceAgentRaw, FinanceAgentTaxType } from '@/lib/finance/agent/context';
-import { rm } from '@/lib/finance/format';
+import { money, rm } from '@/lib/finance/format';
 import { sstPeriodFor, sstPeriodLabel } from '@/lib/finance/sst';
 import { formatDate, todayInMalaysia } from '@/lib/people/dates';
 
@@ -26,6 +26,8 @@ export type FinanceNoteInput = {
   target: string;
   /** When it is raised again: a doubling bucket, `due_soon`/`overdue`, or a date (spec §4.2). */
   stage: string;
+  /** invoice_overdue only: the check's minimum unpaid amount, so approval can tell it fell below. */
+  minAmount?: number;
 };
 
 const DAY_MS = 86_400_000;
@@ -104,6 +106,7 @@ export function scanFinance(raw: FinanceAgentRaw, now: Date): Candidate[] {
             body: `${label}${to} is ${late} days overdue: ${rm(i.balance)} unpaid.`,
             target: i.id,
             stage: String(stage),
+            minAmount,
           },
           `${label}${to} — ${late} days overdue`,
         );
@@ -200,7 +203,7 @@ export function scanFinance(raw: FinanceAgentRaw, now: Date): Candidate[] {
       }
     } else if (check.key === 'bank_unmatched') {
       const cutoff = addDays(today, -days);
-      const byAccount = new Map<string, { account: string; count: number; total: number; oldest: string }>();
+      const byAccount = new Map<string, { account: string; currency: string; count: number; total: number; oldest: string }>();
       for (const line of raw.bankLines) {
         if (!isDay(line.lineDate) || line.lineDate > cutoff) continue;
         const seen = byAccount.get(line.accountId);
@@ -209,7 +212,13 @@ export function scanFinance(raw: FinanceAgentRaw, now: Date): Candidate[] {
           seen.total += line.amount;
           if (line.lineDate < seen.oldest) seen.oldest = line.lineDate;
         } else {
-          byAccount.set(line.accountId, { account: line.account, count: 1, total: line.amount, oldest: line.lineDate });
+          byAccount.set(line.accountId, {
+            account: line.account,
+            currency: line.currency,
+            count: 1,
+            total: line.amount,
+            oldest: line.lineDate,
+          });
         }
       }
       const rows = [...byAccount.entries()].sort((a, b) => a[1].oldest.localeCompare(b[1].oldest));
@@ -222,7 +231,7 @@ export function scanFinance(raw: FinanceAgentRaw, now: Date): Candidate[] {
             entityType: 'finance_bank_account',
             entityId: accountId,
             entityLabel: cut(a.account),
-            body: `${cut(a.account)} has ${lines} older than ${days} days with nothing matched (${rm(Math.round(a.total * 100) / 100)}).`,
+            body: `${cut(a.account)} has ${lines} older than ${days} days with nothing matched (${money(Math.round(a.total * 100) / 100, a.currency)}).`,
             target: accountId,
             stage: String(doublingStage(age, days)),
           },

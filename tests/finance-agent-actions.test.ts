@@ -52,7 +52,8 @@ const invoiceNote: FinanceAgentNoteInput = {
   target: A,
   stage: '14',
 };
-const proposal = (check_key: string): Reply => ({ data: { check_key }, error: null });
+const PROPOSED_AT = '2026-10-23T04:00:00.000Z';
+const proposal = (check_key: string): Reply => ({ data: { check_key, created_at: PROPOSED_AT }, error: null });
 
 describe('financeAgentNoteInput', () => {
   it('accepts a document note and an SST period note', () => {
@@ -110,6 +111,34 @@ describe('financeCreateAgentNote', () => {
     expect(rpc).not.toHaveBeenCalled();
   });
 
+  it('an invoice part-paid below the check minimum no longer applies', async () => {
+    const input = { ...invoiceNote, minAmount: 1000 };
+    const below = fake({
+      agent_proposals: proposal('invoice_overdue'),
+      finance_invoice_totals: { data: { display_status: 'overdue', balance_myr: 999.99 }, error: null },
+    });
+    expect(await financeCreateAgentNote(below.ctx, input)).toEqual(stale);
+    const still = fake({
+      agent_proposals: proposal('invoice_overdue'),
+      finance_invoice_totals: { data: { display_status: 'overdue', balance_myr: 1000 }, error: null },
+    });
+    expect((await financeCreateAgentNote(still.ctx, input)).ok).toBe(true);
+  });
+
+  it('a draft touched after the suggestion was made no longer applies', async () => {
+    const input = { ...invoiceNote, entityType: 'finance_invoice' } as FinanceAgentNoteInput;
+    const touched = fake({
+      agent_proposals: proposal('draft_stale'),
+      finance_invoices: { data: { status: 'draft', updated_at: '2026-10-23T05:00:00Z' }, error: null },
+    });
+    expect(await financeCreateAgentNote(touched.ctx, input)).toEqual(stale);
+    const untouched = fake({
+      agent_proposals: proposal('draft_stale'),
+      finance_invoices: { data: { status: 'draft', updated_at: '2026-10-01T05:00:00Z' }, error: null },
+    });
+    expect((await financeCreateAgentNote(untouched.ctx, input)).ok).toBe(true);
+  });
+
   it('a document that is gone no longer applies', async () => {
     const { ctx, rpc } = fake({ agent_proposals: proposal('invoice_overdue') });
     expect(await financeCreateAgentNote(ctx, invoiceNote)).toEqual(stale);
@@ -118,8 +147,8 @@ describe('financeCreateAgentNote', () => {
 
   it.each([
     ['bill_due_soon', 'finance_supplier_bill', 'supplier_bill_totals', { display_status: 'paid', balance_myr: 0 }, { display_status: 'pending', balance_myr: 3 }],
-    ['draft_stale', 'finance_invoice', 'finance_invoices', { status: 'posted' }, { status: 'draft' }],
-    ['draft_stale', 'finance_supplier_bill', 'supplier_bills', { status: 'void' }, { status: 'draft' }],
+    ['draft_stale', 'finance_invoice', 'finance_invoices', { status: 'posted' }, { status: 'draft', updated_at: '2026-10-01T00:00:00Z' }],
+    ['draft_stale', 'finance_supplier_bill', 'supplier_bills', { status: 'void' }, { status: 'draft', updated_at: '2026-10-01T00:00:00Z' }],
     ['expense_waiting', 'finance_expense', 'finance_expenses', { status: 'approved' }, { status: 'pending' }],
     ['quotation_expiring', 'finance_quotation', 'finance_quotations', { status: 'accepted' }, { status: 'sent' }],
     ['quotation_expiring', 'finance_quotation', 'finance_quotations', { status: 'declined' }, { status: 'sent' }],

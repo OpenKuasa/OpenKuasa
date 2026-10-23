@@ -2,6 +2,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { readBack, validatePlan, type FocusPlan } from '@/lib/agents/focus/plan';
 import { FINANCE_FOCUS } from '@/lib/agents/types';
 import { FINANCE_FOCUS_MENU } from '@/lib/finance/agent/checks';
+import { BASE_CURRENCY } from '@/lib/finance/currencies';
 
 /** An SST tax type a workspace can be registered for. */
 export type FinanceAgentTaxType = 'service' | 'sales';
@@ -24,8 +25,8 @@ export type FinanceAgentRaw = {
   expenses: { id: string; amount: number; vendor: string | null; createdAt: string }[];
   /** Quotations sent and not yet answered. */
   quotations: { id: string; quotationNo: string | null; customer: string | null; validUntil: string | null }[];
-  /** Imported statement lines on active accounts with nothing matched; `amount` is money in or out. */
-  bankLines: { accountId: string; account: string; lineDate: string; amount: number }[];
+  /** Imported statement lines on active accounts with nothing matched; `amount` is money in or out, in the account's `currency`. */
+  bankLines: { accountId: string; account: string; currency: string; lineDate: string; amount: number }[];
   /** Null when the workspace has no SST settings or no registration number. */
   sst: {
     periodStartMonth: number;
@@ -159,7 +160,7 @@ export async function buildFinanceAgentContext(
       readAll((from, to) =>
         service
           .from('finance_accounts')
-          .select('id,name,active')
+          .select('id,name,active,currency')
           .eq('org_id', orgId)
           .order('id', { ascending: true })
           .range(from, to),
@@ -210,7 +211,9 @@ export async function buildFinanceAgentContext(
   const contacts = new Map(contactRows.map((c) => [String(c.id), str(c.name)]));
   const nameOf = (id: unknown) => (typeof id === 'string' ? (contacts.get(id) ?? null) : null);
   const activeAccounts = new Map(
-    accountRows.filter((a) => a.active === true).map((a) => [String(a.id), str(a.name) ?? 'Bank account']),
+    accountRows
+      .filter((a) => a.active === true)
+      .map((a) => [String(a.id), { name: str(a.name) ?? 'Bank account', currency: str(a.currency) ?? BASE_CURRENCY }]),
   );
 
   const raw: FinanceAgentRaw = {
@@ -260,7 +263,8 @@ export async function buildFinanceAgentContext(
       .filter((r) => activeAccounts.has(String(r.account_id)))
       .map((r) => ({
         accountId: String(r.account_id),
-        account: activeAccounts.get(String(r.account_id)) as string,
+        account: activeAccounts.get(String(r.account_id))!.name,
+        currency: activeAccounts.get(String(r.account_id))!.currency,
         lineDate: String(r.line_date),
         amount: num(r.money_in) + num(r.money_out),
       })),
