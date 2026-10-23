@@ -70,8 +70,8 @@ function CodeBlock({ code }: { code: string }) {
   );
 }
 
-/** "Set up": the server address and how to add it to each AI tool. */
-export function McpSetupCard({ serverUrl }: { serverUrl: string }) {
+/** "Set up": the server address and how to add it to each AI tool. `signIn` false while sign-in connections are off. */
+export function McpSetupCard({ serverUrl, signIn = true }: { serverUrl: string; signIn?: boolean }) {
   return (
     <BentoCard
       title="Set up"
@@ -87,10 +87,14 @@ export function McpSetupCard({ serverUrl }: { serverUrl: string }) {
 
         <div className="space-y-1.5">
           <p className="font-medium">Claude Desktop and claude.ai</p>
-          <p className="text-muted-foreground">
-            No key needed. In Settings → Connectors, choose Add custom connector, paste the server address, then sign
-            in with OpenKuasa and allow it for this workspace.
-          </p>
+          {signIn ? (
+            <p className="text-muted-foreground">
+              No key needed. In Settings → Connectors, choose Add custom connector, paste the server address, then sign
+              in with OpenKuasa and allow it for this workspace.
+            </p>
+          ) : (
+            <p className="text-muted-foreground">Coming soon.</p>
+          )}
         </div>
 
         {mcpSnippets(serverUrl).map((snippet) => (

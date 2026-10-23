@@ -171,6 +171,7 @@ beforeEach(() => {
   calls = [];
   vi.clearAllMocks();
   mocks.hasSupabaseEnv.mockReturnValue(true);
+  vi.stubEnv('MCP_SIGN_IN_ENABLED', 'true');
   mocks.getMfaStatus.mockResolvedValue({ verified: false, challengeRequired: false, factors: [], pendingFactors: [] });
 });
 
@@ -271,6 +272,44 @@ describe('the Developers page', () => {
     const html = await page();
     expect(html).toContain('Couldn&#x27;t load');
     expect(html).toContain('Your API keys');
+  });
+
+  test('with sign-in switched off, connected apps and the Claude Desktop setup say Coming soon; keys are unchanged', async () => {
+    vi.stubEnv('MCP_SIGN_IN_ENABLED', '');
+    mocks.getViewer.mockResolvedValue(viewer('member'));
+    const client = session({
+      grants: {
+        data: [{ client: { id: CLIENT, name: 'Claude', uri: 'https://claude.ai', logo_uri: '' }, scopes: ['openid'], granted_at: '2026-10-21T08:00:00.000Z' }],
+        error: null,
+      },
+      bindings: [{ user_id: ALICE, client_id: CLIENT, org_id: ORG_B }],
+      keys: [keyRow(KEY_ALICE, ALICE, 'Laptop Cursor')],
+    });
+    const html = await page();
+    expect(client.auth.oauth.listGrants).not.toHaveBeenCalled();
+    const apps = html.slice(html.indexOf('Connected apps'), html.indexOf('Set up'));
+    expect(apps).toContain('Coming soon');
+    expect(apps).not.toContain('Disconnect');
+    expect(apps).not.toContain('Kopi Co');
+    const setup = html.slice(html.indexOf('Set up'), html.indexOf('Webhooks'));
+    const desktop = setup.slice(setup.indexOf('Claude Desktop and claude.ai'), setup.indexOf('Claude Code'));
+    expect(desktop).toContain('Coming soon');
+    expect(setup).not.toContain('Add custom connector');
+    expect(setup).toContain('claude mcp add --transport http openkuasa https://openkuasa.com/api/mcp');
+    expect(setup).toContain('mcp.json');
+    expect(setup).toContain('config.toml');
+    expect(html).toContain('Laptop Cursor');
+    expect(html).toContain('Create key');
+  });
+
+  test('switched on, connected apps are read and listed', async () => {
+    vi.stubEnv('MCP_SIGN_IN_ENABLED', 'true');
+    mocks.getViewer.mockResolvedValue(viewer('member'));
+    const client = session();
+    const html = await page();
+    expect(client.auth.oauth.listGrants).toHaveBeenCalled();
+    expect(html).toContain('No apps connected yet.');
+    expect(html).toContain('Add custom connector');
   });
 
   test('the demo is read-only: no key creation, no disconnect', async () => {

@@ -19,6 +19,7 @@ import 'server-only';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { currentOrgFor, type CurrentOrg, type OrgRole } from '@/lib/auth/current-org';
 import { jwtClaims } from '@/lib/auth/oauth-token';
+import { signInEnabled } from '@/lib/mcp/flags';
 import { resolveApiKey } from '@/lib/mcp/keys';
 import { logFailure as sharedLogFailure, userClient } from '@/lib/mcp/shared';
 
@@ -40,6 +41,7 @@ export const CREDENTIAL_REFUSED =
 export const REMOVED = 'You are no longer a member of this workspace, so this connection cannot act in it.';
 export const CONNECT_AGAIN = 'Connect OpenKuasa again from your AI tool.';
 export const FAILED = 'Your access could not be checked just now. Try again.';
+export const SIGN_IN_OFF = "Sign-in connections aren't available yet. Use an API key from Account → Developers.";
 export const MFA_NOT_SUPPORTED =
   "Sign-in connections don't work with two-step sign-in yet. Use an API key from Account → Developers instead.";
 
@@ -149,6 +151,8 @@ export async function resolveCaller(request: Request, clientName: string): Promi
   if (!token) return { ok: false, status: 401, message: SIGN_IN };
   try {
     const isKey = token.startsWith('okk_');
+    // Sign-in connections stay off until switched on: only keys are accepted, and nothing else is looked up.
+    if (!isKey && !signInEnabled()) return { ok: false, status: 401, message: SIGN_IN_OFF };
     const oauthClient = isKey ? null : userClient(token);
     const credential = oauthClient ? await fromOAuth(token, oauthClient) : await fromApiKey(token);
     if (!credential) return { ok: false, status: 401, message: CREDENTIAL_REFUSED };

@@ -55,8 +55,19 @@ function DisconnectButton({ clientId, name }: { clientId: string; name: string }
   );
 }
 
-/** "Connected apps": the person's sign-in connections. `apps` is null when they could not be read. */
-export function ConnectedAppsCard({ apps, readOnly }: { apps: ConnectedApp[] | null; readOnly: boolean }) {
+/**
+ * "Connected apps": the person's sign-in connections. `apps` is null when they could not be read. `comingSoon` while
+ * sign-in connections are switched off.
+ */
+export function ConnectedAppsCard({
+  apps,
+  readOnly,
+  comingSoon = false,
+}: {
+  apps: ConnectedApp[] | null;
+  readOnly: boolean;
+  comingSoon?: boolean;
+}) {
   return (
     <BentoCard
       title="Connected apps"
@@ -64,7 +75,9 @@ export function ConnectedAppsCard({ apps, readOnly }: { apps: ConnectedApp[] | n
       icon={Plug}
       className="col-span-2 md:col-span-12"
     >
-      {readOnly ? (
+      {comingSoon ? (
+        <p className="text-sm text-muted-foreground">Coming soon.</p>
+      ) : readOnly ? (
         <ReadOnlyNotice>The demo workspace is read-only. Sign up to connect AI tools.</ReadOnlyNotice>
       ) : apps === null ? (
         <p className="grid min-h-16 place-items-center text-sm text-muted-foreground">Couldn&apos;t load</p>

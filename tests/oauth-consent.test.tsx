@@ -167,6 +167,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   vi.stubEnv('NEXT_PUBLIC_SUPABASE_URL', 'https://sb.test');
   vi.stubEnv('NEXT_PUBLIC_SUPABASE_ANON_KEY', 'anon-key');
+  vi.stubEnv('MCP_SIGN_IN_ENABLED', 'true');
   calls = [];
   mocks.currentOrgFor.mockResolvedValue({ orgId: ORG_A, role: 'member' });
   mocks.getMfaStatus.mockResolvedValue({ verified: false, challengeRequired: false, factors: [], pendingFactors: [] });
@@ -290,6 +291,41 @@ describe('consent page', () => {
     const shown = text(await renderPage());
     expect(shown).toContain('Open a workspace in OpenKuasa first, then connect again from your AI tool.');
     expect(shown).not.toContain('Allow “Claude”');
+  });
+});
+
+describe('with sign-in switched off', () => {
+  const OFF = "Connecting AI tools by signing in isn't available yet. Make an API key in Account → Developers instead.";
+
+  test('the page says so plainly, with a link and no Allow or Don\'t allow', async () => {
+    vi.stubEnv('MCP_SIGN_IN_ENABLED', '');
+    session();
+    for (const params of [{ authorization_id: AUTH_ID }, {}]) {
+      const html = await renderPage(params);
+      const shown = text(html);
+      expect(shown).toContain(OFF);
+      expect(html).toContain('href="/account/developers"');
+      expect(shown).not.toContain('Allow');
+      expect(html).not.toContain(`value="${AUTH_ID}"`);
+    }
+    expect(calls).toEqual([]);
+    expect(mocks.createClient).not.toHaveBeenCalled();
+  });
+
+  test('Allow and Don\'t allow refuse without asking the auth server', async () => {
+    vi.stubEnv('MCP_SIGN_IN_ENABLED', 'false');
+    session();
+    const fields = form({ authorization_id: AUTH_ID, org_id: ORG_A });
+    expect(await allowAction(undefined, fields)).toEqual({ error: OFF });
+    expect(await denyAction(undefined, fields)).toEqual({ error: OFF });
+    expect(calls).toEqual([]);
+    expect(mocks.createClient).not.toHaveBeenCalled();
+  });
+
+  test('switched on, the screen asks as before', async () => {
+    vi.stubEnv('MCP_SIGN_IN_ENABLED', 'true');
+    session();
+    expect(text(await renderPage())).toContain('Allow “Claude” to sign in to OpenKuasa as smoke?');
   });
 });
 

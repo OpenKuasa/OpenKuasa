@@ -154,6 +154,7 @@ beforeEach(async () => {
   vi.stubEnv('NEXT_PUBLIC_SUPABASE_URL', 'https://sb.test');
   vi.stubEnv('NEXT_PUBLIC_SUPABASE_ANON_KEY', 'anon-key');
   vi.stubEnv('SUPABASE_SERVICE_ROLE_KEY', SERVICE_KEY);
+  vi.stubEnv('MCP_SIGN_IN_ENABLED', 'true');
   db.profiles.clear();
   db.members.clear();
   db.joined.clear();
@@ -446,6 +447,29 @@ describe('resolveCaller', () => {
       status: 401,
       message: 'You are no longer a member of this workspace, so this connection cannot act in it.',
     });
+  });
+
+  test('with sign-in switched off, any bearer that is not a key is refused before the auth server is asked', async () => {
+    const off = { ok: false, status: 401, message: "Sign-in connections aren't available yet. Use an API key from Account → Developers." };
+    bind(ALICE, 'claude-desktop', ORG_A);
+    for (const value of ['', 'false', 'TRUE', '1', ' true']) {
+      vi.stubEnv('MCP_SIGN_IN_ENABLED', value);
+      expect(await resolveCaller(req(`Bearer ${oauthToken(ALICE)}`), 'Claude')).toEqual(off);
+      expect(await resolveCaller(req('Bearer not-a-jwt'), 'Claude')).toEqual(off);
+    }
+    expect(getUserCalls).toEqual([]);
+    expect(created).toEqual([]);
+    expect(inserts).toEqual([]);
+
+    // Keys work as before.
+    keyResolvesTo(ALICE, ORG_A, 'alice-at-1');
+    expect(await resolveCaller(req(`Bearer ${KEY}`), 'Claude')).toMatchObject({ ok: true, caller: { orgId: ORG_A } });
+    // No bearer at all still asks to sign in or use a key.
+    expect(await resolveCaller(req(), 'Claude')).toEqual({ ok: false, status: 401, message: 'Sign in to OpenKuasa or use an API key.' });
+
+    // Switched on: the OAuth token is checked and acts as before.
+    vi.stubEnv('MCP_SIGN_IN_ENABLED', 'true');
+    expect(await resolveCaller(req(`Bearer ${oauthToken(ALICE)}`), 'Claude')).toMatchObject({ ok: true, caller: { orgId: ORG_A } });
   });
 
   test('no or bad bearer gives 401', async () => {

@@ -2,6 +2,7 @@
 
 import { redirect } from 'next/navigation';
 import { currentOrgFor } from '@/lib/auth/current-org';
+import { signInEnabled } from '@/lib/mcp/flags';
 import { logFailure } from '@/lib/mcp/shared';
 import {
   EXPIRED,
@@ -9,6 +10,7 @@ import {
   NOT_VALID,
   NO_WORKSPACE,
   OTHER_ACCOUNT,
+  SIGN_IN_OFF,
   WORKSPACE_CHANGED,
   answeringPerson,
   authorizationIdOf,
@@ -24,6 +26,7 @@ const log = (operation: string, error: unknown) => logFailure('oauth-consent', o
  * The client and the workspace come from the auth server and the database, never from the form.
  */
 export async function allowAction(_prev: ConsentState, formData: FormData): Promise<ConsentState> {
+  if (!signInEnabled()) return { error: SIGN_IN_OFF };
   const authorizationId = authorizationIdOf(formData.get('authorization_id'));
   if (!authorizationId) return { error: NOT_VALID };
 
@@ -78,6 +81,7 @@ export async function allowAction(_prev: ConsentState, formData: FormData): Prom
 
 /** Don't allow: tell the auth server no and go back to the client, which hears the request was denied. */
 export async function denyAction(_prev: ConsentState, formData: FormData): Promise<ConsentState> {
+  if (!signInEnabled()) return { error: SIGN_IN_OFF };
   const authorizationId = authorizationIdOf(formData.get('authorization_id'));
   if (!authorizationId) return { error: NOT_VALID };
 

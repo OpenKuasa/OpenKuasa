@@ -9,6 +9,7 @@ import { originFromHeaders } from '@/lib/account/invites';
 import { getMfaStatus } from '@/lib/auth/mfa';
 import { can } from '@/lib/auth/permissions';
 import { getViewer, hasSupabaseEnv, type Viewer } from '@/lib/auth/viewer';
+import { signInEnabled } from '@/lib/mcp/flags';
 import { logFailure } from '@/lib/mcp/shared';
 import { createClient } from '@/lib/supabase/server';
 
@@ -99,6 +100,8 @@ export default async function DevelopersPage() {
   const live = hasSupabaseEnv() && !viewer.isDemo;
   const serverUrl = `${originFromHeaders(await headers()).replace(/\/+$/, '')}/api/mcp`;
   const seesWorkspace = live && can(viewer.role, 'manage-developers');
+  // Sign-in connections stay off until switched on: no grants are read and the card says Coming soon.
+  const signIn = signInEnabled();
 
   let keys: KeyListing[] | null = [];
   let apps: ConnectedApp[] | null = [];
@@ -107,7 +110,7 @@ export default async function DevelopersPage() {
     const supabase = await createClient();
     [keys, apps, needsCode] = await Promise.all([
       loadKeys(supabase, viewer),
-      loadApps(supabase, viewer),
+      signIn ? loadApps(supabase, viewer) : Promise.resolve([]),
       // A person with an authenticator gives its code when making a key; `getViewer` already made this session aal2.
       getMfaStatus(supabase).then((status) => status.factors.length > 0),
     ]);
@@ -129,8 +132,8 @@ export default async function DevelopersPage() {
           readOnly={!live}
         />
         {seesWorkspace ? <WorkspaceKeysCard keys={keys} /> : null}
-        <ConnectedAppsCard apps={apps} readOnly={!live} />
-        <McpSetupCard serverUrl={serverUrl} />
+        <ConnectedAppsCard apps={apps} readOnly={!live} comingSoon={!signIn} />
+        <McpSetupCard serverUrl={serverUrl} signIn={signIn} />
         <BentoCard
           title="Webhooks"
           subtitle="Send workspace events to your own systems"

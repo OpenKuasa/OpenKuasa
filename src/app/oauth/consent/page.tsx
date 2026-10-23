@@ -5,9 +5,19 @@ import { AuthShell } from '@/components/auth/auth-shell';
 import { Button } from '@/components/ui/button';
 import { currentOrgFor } from '@/lib/auth/current-org';
 import { hasSupabaseEnv } from '@/lib/auth/preview-mode';
+import { signInEnabled } from '@/lib/mcp/flags';
 import { logFailure } from '@/lib/mcp/shared';
 import { ConsentForm } from './consent-form';
-import { EXPIRED, FAILED, NOT_VALID, NO_WORKSPACE, OTHER_ACCOUNT, answeringPerson, authorizationIdOf } from './consent';
+import {
+  EXPIRED,
+  FAILED,
+  NOT_VALID,
+  NO_WORKSPACE,
+  OTHER_ACCOUNT,
+  SIGN_IN_OFF,
+  answeringPerson,
+  authorizationIdOf,
+} from './consent';
 
 export const metadata: Metadata = {
   title: 'Connect an AI tool · OpenKuasa',
@@ -22,6 +32,21 @@ function Refused({ message }: { message: string }) {
       </div>
       <Button asChild variant="outline" className="w-full" size="lg">
         <Link href="/command">Go to OpenKuasa</Link>
+      </Button>
+    </AuthShell>
+  );
+}
+
+/** Sign-in connections are switched off: say so, and point to API keys. */
+function SignInOff() {
+  return (
+    <AuthShell>
+      <div className="space-y-1.5 text-center">
+        <h1 className="text-3xl font-bold tracking-tight">Not available yet</h1>
+        <p className="text-sm text-muted-foreground">{SIGN_IN_OFF}</p>
+      </div>
+      <Button asChild className="w-full" size="lg">
+        <Link href="/account/developers">Go to Account → Developers</Link>
       </Button>
     </AuthShell>
   );
@@ -46,6 +71,7 @@ export default async function OAuthConsentPage({
 }: {
   searchParams: Promise<{ authorization_id?: string | string[] }>;
 }) {
+  if (!signInEnabled()) return <SignInOff />;
   const authorizationId = authorizationIdOf((await searchParams).authorization_id);
   if (!authorizationId || !hasSupabaseEnv()) return <Refused message={NOT_VALID} />;
 

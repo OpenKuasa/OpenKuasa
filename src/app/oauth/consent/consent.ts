@@ -15,6 +15,8 @@ export const DEMO = "The demo can't connect to AI tools. Sign in with your own O
 export const NO_WORKSPACE = 'Open a workspace in OpenKuasa first, then connect again from your AI tool.';
 export const WORKSPACE_CHANGED = 'Your open workspace changed. Reload this page to see which workspace you are allowing.';
 export const FAILED = 'Could not connect just now. Try again.';
+export const SIGN_IN_OFF =
+  "Connecting AI tools by signing in isn't available yet. Make an API key in Account → Developers instead.";
 
 /** The auth server's request id goes into its URL path: letters, digits, `-` and `_` only. */
 const AUTHORIZATION_ID = /^[A-Za-z0-9_-]{1,200}$/;

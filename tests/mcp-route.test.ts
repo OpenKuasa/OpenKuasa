@@ -288,6 +288,19 @@ describe('/api/mcp', () => {
     expect(body.error?.message).toBe('Sign in to OpenKuasa or use an API key.');
   });
 
+  test('with sign-in switched off, the refusal of a sign-in token is still a 401 with resource_metadata', async () => {
+    vi.stubEnv('MCP_SIGN_IN_ENABLED', '');
+    const off = "Sign-in connections aren't available yet. Use an API key from Account → Developers.";
+    mocks.resolveCaller.mockResolvedValue({ ok: false, status: 401, message: off });
+    const response = await POST(rpc('tools/list'));
+    expect(response.status).toBe(401);
+    expect(response.headers.get('www-authenticate')).toBe(
+      'Bearer resource_metadata="https://openkuasa.com/.well-known/oauth-protected-resource"',
+    );
+    expect(((await response.json()) as { error?: { message?: string } }).error?.message).toBe(off);
+    vi.unstubAllEnvs();
+  });
+
   test('403 and 503 pass through with their message and no token', async () => {
     for (const status of [403, 503] as const) {
       mocks.resolveCaller.mockResolvedValue({ ok: false, status, message: 'Switch back to Rimba in OpenKuasa.' });
@@ -355,10 +368,13 @@ describe('/.well-known/oauth-protected-resource', () => {
   test('names this endpoint and the Supabase auth server', async () => {
     const before = process.env.NEXT_PUBLIC_SUPABASE_URL;
     process.env.NEXT_PUBLIC_SUPABASE_URL = 'https://abc.supabase.co';
+    // It answers whether or not sign-in connections are switched on.
+    vi.stubEnv('MCP_SIGN_IN_ENABLED', '');
     const response = await wellKnown.GET(
       new Request('https://openkuasa.com/.well-known/oauth-protected-resource', { headers: { host: 'openkuasa.com' } }),
     );
     process.env.NEXT_PUBLIC_SUPABASE_URL = before;
+    vi.unstubAllEnvs();
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({
       resource: 'https://openkuasa.com/api/mcp',
