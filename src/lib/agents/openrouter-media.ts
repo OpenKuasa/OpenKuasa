@@ -29,7 +29,7 @@ export type VideoCheck = {
 
 /** Fallback slugs; override via env so self-hosters can swap models. */
 const SEARCH_MODEL = () => process.env.OPENKUASA_MODEL_AGENT_SEARCH?.trim() || 'perplexity/sonar';
-const DIGEST_MODEL = () =>
+export const DIGEST_MODEL = () =>
   process.env.OPENKUASA_MODEL_AGENT_DIGEST?.trim() || 'anthropic/claude-sonnet-4.5';
 const IMAGE_MODEL = () =>
   process.env.OPENKUASA_MODEL_AGENT_IMAGE?.trim() || 'google/gemini-2.5-flash-image';
@@ -49,7 +49,7 @@ function costFromMetadata(meta: unknown): number | null {
   return usdToCents(openrouter?.usage?.cost ?? openrouter?.cost);
 }
 
-async function complete(apiKey: string, modelId: string, prompt: string): Promise<DigestResult> {
+export async function complete(apiKey: string, modelId: string, prompt: string): Promise<DigestResult> {
   const { text, providerMetadata } = await generateText({
     model: provider(apiKey)(modelId),
     prompt,
