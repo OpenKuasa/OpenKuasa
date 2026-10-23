@@ -1,4 +1,4 @@
-import { readdirSync } from 'node:fs';
+import { existsSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { beforeEach, describe, expect, test, vi } from 'vitest';
 import { NextRequest, NextResponse } from 'next/server';
@@ -75,6 +75,53 @@ describe('which paths the proxy runs on', () => {
     expect(images.length).toBeGreaterThan(0);
     for (const path of [...images, '/_next/static/chunks/app.js', '/_next/static/media/font.woff2', '/_next/image', '/icon.svg']) {
       expect(runs(path), path).toBe(false);
+    }
+  });
+
+  /**
+   * The exact names the matcher skips, read out of its literal (Next reads `config` statically, so the list cannot
+   * be a shared constant): each `|` alternative of the lookahead, `(?:a|b)` groups expanded, Next's own `_next/`
+   * paths left out.
+   */
+  function skippedNames(): string[] {
+    const source = config.matcher[0];
+    const body = /^\/\(\(\?!(.*)\)\.\*\)$/.exec(source)?.[1];
+    if (!body) throw new Error(`unexpected matcher shape: ${source}`);
+    const alternatives: string[] = [];
+    let depth = 0;
+    let current = '';
+    for (const char of body) {
+      if (char === '(') depth += 1;
+      if (char === ')') depth -= 1;
+      if (char === '|' && depth === 0) {
+        alternatives.push(current);
+        current = '';
+      } else current += char;
+    }
+    alternatives.push(current);
+    return alternatives
+      .filter((alt) => !alt.startsWith('_next/'))
+      .flatMap((alt) => {
+        expect(alt.endsWith('$'), `${alt} must be anchored with $`).toBe(true);
+        const exact = alt.slice(0, -1);
+        const group = /^(.*)\(\?:([^()]*)\)(.*)$/.exec(exact);
+        const names = group ? group[2].split('|').map((inner) => `${group[1]}${inner}${group[3]}`) : [exact];
+        return names.map((name) => {
+          const plain = name.replace(/\\\./g, '.');
+          expect(plain, `${name} must be a plain file name`).toMatch(/^[\w./-]+$/);
+          return plain;
+        });
+      });
+  }
+
+  test('every file the matcher skips still exists, so no route can answer its path unproxied', () => {
+    const names = skippedNames();
+    expect(names).toContain('icon.svg');
+    expect(names).toContain('landing/command.jpg');
+    for (const name of names) {
+      // The parse matches what the matcher really skips.
+      expect(runs(`/${name}`), name).toBe(false);
+      expect(existsSync(join('public', name)) || existsSync(join('src/app', name)), `${name} is skipped but missing`).toBe(true);
     }
   });
 });
