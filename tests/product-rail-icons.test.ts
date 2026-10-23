@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs';
+import * as lucide from 'lucide-react';
 import { describe, expect, it } from 'vitest';
 
 /**
@@ -15,6 +16,10 @@ describe('product rail icons', () => {
     const source = readFileSync('src/components/app/product-rail.tsx', 'utf8');
     const icons = [...source.matchAll(/\bicon=\{(\w+)\}/g)].map((m) => m[1]);
     expect(icons.length).toBeGreaterThan(0);
-    for (const icon of icons) expect(mapKeys, `${icon} is not in the animated-icon map`).toContain(icon);
+    // The map is keyed by the icon's displayName, which is not always its export name.
+    for (const icon of icons) {
+      const name = (lucide as unknown as Record<string, { displayName?: string } | undefined>)[icon]?.displayName ?? icon;
+      expect(mapKeys, `${icon} is not in the animated-icon map`).toContain(name);
+    }
   });
 });

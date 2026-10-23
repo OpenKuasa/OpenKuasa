@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs';
+import * as lucide from 'lucide-react';
 import { describe, expect, it } from 'vitest';
 
 /**
@@ -48,6 +49,14 @@ const EXPECTED: Record<string, { cards: number; withIcon: number }> = {
   'components/finance/sst-figures-card': { cards: 1, withIcon: 1 },
   'components/finance/sst-periods-card': { cards: 1, withIcon: 1 },
   'components/finance/sst-settings-card': { cards: 1, withIcon: 1 },
+  // Every product's Settings screen, and the Workspace card they all open with.
+  'components/settings/workspace-card': { cards: 1, withIcon: 1 },
+  'screens/finance/settings': { cards: 7, withIcon: 7 },
+  'screens/people/settings': { cards: 3, withIcon: 3 },
+  'screens/hire/settings': { cards: 1, withIcon: 1 },
+  'screens/reach/ad-settings': { cards: 2, withIcon: 2 },
+  'components/reach/ad-settings-form': { cards: 2, withIcon: 2 },
+  'screens/crm/settings-view': { cards: 5, withIcon: 5 },
 };
 
 describe.each(Object.keys(EXPECTED))('the icons %s gives its cards', (file) => {
@@ -62,6 +71,10 @@ describe.each(Object.keys(EXPECTED))('the icons %s gives its cards', (file) => {
   });
   it('are all in the animated icon map', () => {
     expect(names.length).toBeGreaterThan(0);
-    for (const name of names) expect(mapKeys.has(name), name).toBe(true);
+    // The map is keyed by the icon's displayName, which is not always its export name (Building2 is BuildingComplex).
+    for (const name of names) {
+      const icon = (lucide as unknown as Record<string, { displayName?: string } | undefined>)[name];
+      expect(mapKeys.has(icon?.displayName ?? name), name).toBe(true);
+    }
   });
 });
