@@ -19,7 +19,7 @@ const USER = '44444444-4444-4444-8444-444444444444';
 
 describe('registry', () => {
   it('holds both agents and finds the crm one by product', () => {
-    expect([...AGENTS.keys()]).toEqual(['weekly-studio', 'crm-focus']);
+    expect([...AGENTS.keys()]).toEqual(['weekly-studio', 'crm-focus', 'finance-focus']);
     expect([...AGENT_KEYS]).toEqual([...AGENTS.keys()]);
     expect(agentForProduct('crm', AGENTS)).toBe(crmAgent);
     expect(agentForProduct('reach', AGENTS)).toBe(reachAgent);

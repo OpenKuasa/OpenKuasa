@@ -20,7 +20,11 @@ import {
 } from './forms';
 
 export type ReachWriteContext = { client: SupabaseClient; orgId: string };
-export type CapResult<T> = { ok: true; data: T } | { ok: false; error: string };
+/**
+ * A capability's answer. `stale` (set only by Bendahara's agent note) means the target no longer
+ * matches what the suggestion was about: the apply path dismisses the proposal instead of failing it.
+ */
+export type CapResult<T> = { ok: true; data: T } | { ok: false; error: string; stale?: true };
 
 const channel = z.enum(['whatsapp', 'facebook', 'instagram', 'tiktok']);
 const campaignStatus = z.enum(['active', 'paused']);

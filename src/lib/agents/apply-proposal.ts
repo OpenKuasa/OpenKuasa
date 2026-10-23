@@ -2,7 +2,7 @@ import { errorCodeOf } from '@/lib/ai/call-log';
 import { actionsFor, type AgentRegistry } from '@/lib/agents/definition';
 import { AGENTS } from '@/lib/agents/registry';
 
-export type ApplyResult = { ok: true; result: unknown } | { ok: false; error: string };
+export type ApplyResult = { ok: true; result: unknown } | { ok: false; error: string; stale?: true };
 
 /**
  * Re-validate a persisted proposal's input and run its capability under `ctx` (the OWNER's
@@ -30,5 +30,7 @@ export async function runProposalAction(
     console.error('[agent-proposals] apply capability threw', errorCodeOf(e));
     return { ok: false, error: 'That change could not be applied.' };
   }
-  return res.ok ? { ok: true, result: res.data } : { ok: false, error: res.error };
+  if (res.ok) return { ok: true, result: res.data };
+  // A capability that found its target no longer matches says so; the caller dismisses the row.
+  return res.stale ? { ok: false, error: res.error, stale: true } : { ok: false, error: res.error };
 }

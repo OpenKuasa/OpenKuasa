@@ -107,6 +107,11 @@ export type AgentDefinition = {
   actions: Record<string, Entry>;
   /** Builds the owner-session write-context the apply path runs the capability under. */
   buildWriteContext(client: SupabaseClient, orgId: string, userId: string): unknown;
+  /**
+   * When true, the apply path adds the claimed proposal's id to the write-context as
+   * `proposalId` (Bendahara's note RPC reads the note from the approved proposal itself).
+   */
+  writeContextTakesProposal?: boolean;
   /** Optional web-search step; its text feeds the digest and the proposer's `trend`. */
   research?: { prompt(context: string): string };
   /** Optional digest step; when absent the run skips it and finishes without `digest_md`. */

@@ -1,10 +1,10 @@
 import { z } from 'zod';
-import { CRM_FOCUS, WEEKLY_STUDIO } from '@/lib/agents/types';
+import { CRM_FOCUS, FINANCE_FOCUS, WEEKLY_STUDIO } from '@/lib/agents/types';
 
 // A leaf module on purpose. The registry cannot be imported here: registry -> reach-agent
 // -> reach/reports -> ai/tools -> reach/schedule-capabilities (which needs this schema at
 // module load) is a runtime import cycle. tests/agent-config.test.ts asserts this list
 // equals [...AGENTS.keys()], so adding an agent to the registry without listing it here
 // fails the test.
-export const AGENT_KEYS: readonly [string, ...string[]] = [WEEKLY_STUDIO, CRM_FOCUS];
+export const AGENT_KEYS: readonly [string, ...string[]] = [WEEKLY_STUDIO, CRM_FOCUS, FINANCE_FOCUS];
 export const agentKeySchema = z.enum(AGENT_KEYS);

@@ -1,5 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { runProposalAction } from '@/lib/agents/apply-proposal';
+import { runProposalAction, type ApplyResult } from '@/lib/agents/apply-proposal';
 import { agentForProduct, type AgentRegistry } from '@/lib/agents/definition';
 import { AGENTS } from '@/lib/agents/registry';
 
@@ -15,6 +15,14 @@ export function screensToRefresh(
 }
 
 const HANDLED = 'That suggestion has already been handled.';
+
+/**
+ * Where a claimed proposal goes when its action says the target no longer matches (`stale`):
+ * dismissed, like a person's rejection, so the proposer's cooldown keeps it from coming back.
+ * The proposal guard (v5) allows approved -> rejected only with `result.stale = true`, and only
+ * status and result may change.
+ */
+const STALE_STATUS = 'rejected';
 
 /**
  * Approve a queued proposal, claim-first: atomically flip pending -> approved (pending and
@@ -44,16 +52,32 @@ export async function approveProposal(
   const product = claimed.product as string;
   const def = agentForProduct(product, registry);
   const screenPath = def?.ui.screenPath;
+  const writeContext = (d: NonNullable<typeof def>) => {
+    const ctx = d.buildWriteContext(client, orgId, userId);
+    return d.writeContextTakesProposal ? { ...(ctx as object), proposalId: id } : ctx;
+  };
   const applied = def
     ? await runProposalAction(
         product,
-        def.buildWriteContext(client, orgId, userId),
+        writeContext(def),
         claimed.action as string,
         claimed.input,
         registry,
       )
-    : ({ ok: false, error: 'No agent handles this suggestion.' } as const);
+    : ({ ok: false, error: 'No agent handles this suggestion.' } as ApplyResult);
 
+  if (!applied.ok && applied.stale) {
+    // Only status and result change: who decided it, and when, stay as the claim wrote them.
+    const result = { error: applied.error, stale: true } as never;
+    const { error } = await client
+      .from('agent_proposals')
+      .update({ status: STALE_STATUS, result })
+      .eq('id', id)
+      .eq('org_id', orgId);
+    // Never leave a row approved that applied nothing: if the dismissal is refused, mark it failed.
+    if (error) await client.from('agent_proposals').update({ status: 'failed', result }).eq('id', id).eq('org_id', orgId);
+    return { ok: false, error: applied.error, screenPath };
+  }
   if (!applied.ok) {
     await client
       .from('agent_proposals')
