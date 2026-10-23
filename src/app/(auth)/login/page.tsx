@@ -4,6 +4,7 @@ import { Logo } from '@/components/brand/logo';
 import { DemoButton } from '@/components/auth/demo-button';
 import { GoogleNotEnabledButton } from '@/components/auth/google-not-enabled-button';
 import { LoginForm } from '@/components/auth/login-form';
+import { safeAppPath } from '@/lib/security/safe-path';
 
 export const metadata: Metadata = {
   title: 'Sign in · OpenKuasa',
@@ -18,10 +19,12 @@ const NOTICES: Record<string, string> = {
 export default async function LoginPage({
   searchParams,
 }: {
-  searchParams: Promise<{ notice?: string }>;
+  searchParams: Promise<{ notice?: string; next?: string | string[] }>;
 }) {
-  const { notice } = await searchParams;
+  const { notice, next } = await searchParams;
   const message = notice ? NOTICES[notice] : undefined;
+  // Where to return once signed in, e.g. the consent screen an AI tool sent the person to.
+  const returnTo = safeAppPath(next);
 
   return (
     <div className="flex min-h-dvh w-full">
@@ -63,7 +66,7 @@ export default async function LoginPage({
               </div>
             </div>
 
-            <LoginForm />
+            <LoginForm next={returnTo} />
 
             {process.env.NEXT_PUBLIC_DEMO_ENABLED === '1' ? (
               <DemoButton />

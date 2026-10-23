@@ -7,7 +7,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { signInAction, type AuthState } from '@/app/(auth)/actions';
 
-export function LoginForm() {
+export function LoginForm({ next = null }: { next?: string | null }) {
   const [state, formAction, pending] = useActionState<AuthState, FormData>(
     signInAction,
     undefined,
@@ -15,6 +15,7 @@ export function LoginForm() {
 
   return (
     <form className="space-y-4" action={formAction}>
+      {next ? <input type="hidden" name="next" value={next} /> : null}
       <div className="space-y-2">
         <Label htmlFor="email">Email / Username</Label>
         <Input

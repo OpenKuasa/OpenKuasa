@@ -14,6 +14,8 @@ const db = {
   /** When each membership began: `${org}:${user}` → a sortable created_at. */
   joined: new Map<string, string>(),
   orgs: new Map<string, string>(),
+  /** OAuth connections: `${user}:${client}` → the workspace the person allowed it in. */
+  bindings: new Map<string, string>(),
 };
 const memberKey = (org: string, user: string) => `${org}:${user}`;
 /** Tables whose reads fail, with an error that carries a token in its message. */
@@ -42,6 +44,12 @@ function rowsFor(viewer: string | null, name: string): Record<string, unknown>[]
   if (name === 'org_members') {
     return [...db.members]
       .map(([k, role]) => ({ org_id: k.split(':')[0], user_id: k.split(':')[1], role, created_at: db.joined.get(k) ?? '' }))
+      .filter((r) => r.user_id === viewer);
+  }
+  if (name === 'mcp_oauth_bindings') {
+    // RLS: a person reads only their own connections.
+    return [...db.bindings]
+      .map(([k, org]) => ({ user_id: k.split(':')[0], client_id: k.split(':').slice(1).join(':'), org_id: org }))
       .filter((r) => r.user_id === viewer);
   }
   if (name === 'orgs') {
@@ -126,6 +134,7 @@ beforeEach(async () => {
   db.members.clear();
   db.joined.clear();
   db.orgs.clear();
+  db.bindings.clear();
   tokens.clear();
   failing.clear();
   getUserCalls.length = 0;
@@ -142,6 +151,11 @@ beforeEach(async () => {
 function join(org: string, user: string, role: string, at: string) {
   db.members.set(memberKey(org, user), role);
   db.joined.set(memberKey(org, user), at);
+}
+
+/** The person allowed this client in this workspace on the consent screen. */
+function bind(user: string, client: string, org: string) {
+  db.bindings.set(`${user}:${client}`, org);
 }
 
 function keyResolvesTo(userId: string, orgId: string, accessToken: string) {
@@ -166,7 +180,8 @@ describe('resolveCaller', () => {
     expect(out).toMatchObject({ ok: false, status: 401 });
   });
 
-  test('an OAuth token is checked with the auth server and bound to the workspace of its first use', async () => {
+  test('an OAuth token is checked with the auth server and acts in the workspace its connection is bound to', async () => {
+    bind(ALICE, 'claude-desktop', ORG_A);
     const token = oauthToken(ALICE);
     const out = await resolveCaller(req(`Bearer ${token}`), 'Cursor');
     expect(getUserCalls).toContain(token);
@@ -174,6 +189,27 @@ describe('resolveCaller', () => {
       ok: true,
       caller: { userId: ALICE, orgId: ORG_A, orgName: 'Rimba Ventures', role: 'member', credentialId: `oauth:claude-desktop:${ALICE}`, clientName: 'Cursor' },
     });
+
+    // Bound to B (the workspace open when Alice allowed it), and B is open now: it acts in B.
+    db.profiles.set(ALICE, ORG_B);
+    bind(ALICE, 'cursor', ORG_B);
+    expect(await resolveCaller(req(`Bearer ${oauthToken(ALICE, { client_id: 'cursor' })}`), 'Cursor')).toMatchObject({
+      ok: true,
+      caller: { orgId: ORG_B, orgName: 'Kopi Co', role: 'admin', credentialId: `oauth:cursor:${ALICE}` },
+    });
+  });
+
+  test('an OAuth token with no connection on record is told to connect again', async () => {
+    const expected = { ok: false, status: 401, message: 'Connect OpenKuasa again from your AI tool.' };
+    expect(await resolveCaller(req(`Bearer ${oauthToken(ALICE)}`), 'Claude')).toEqual(expected);
+
+    // Another client's connection, or another person's, is not this one.
+    bind(ALICE, 'cursor', ORG_A);
+    bind(BOB, 'claude-desktop', ORG_A);
+    expect(await resolveCaller(req(`Bearer ${oauthToken(ALICE)}`), 'Claude')).toEqual(expected);
+
+    // Nothing is learned from use: the next call is refused the same way.
+    expect(await resolveCaller(req(`Bearer ${oauthToken(ALICE)}`), 'Claude')).toEqual(expected);
   });
 
   test('refuses when current workspace differs from the credential\'s', async () => {
@@ -182,8 +218,9 @@ describe('resolveCaller', () => {
     const out = await resolveCaller(req(`Bearer ${KEY}`), 'Claude');
     expect(out).toEqual({ ok: false, status: 403, message: 'Switch back to Rimba Ventures in OpenKuasa, or connect again for Kopi Co.' });
 
-    // OAuth: bound to A at first use, then the person switches to B.
+    // OAuth: allowed in A, then the person switches to B.
     db.profiles.set(ALICE, ORG_A);
+    bind(ALICE, 'claude-desktop', ORG_A);
     const token = oauthToken(ALICE);
     expect((await resolveCaller(req(`Bearer ${token}`), 'Claude')).ok).toBe(true);
     db.profiles.set(ALICE, ORG_B);
@@ -192,7 +229,7 @@ describe('resolveCaller', () => {
       status: 403,
       message: 'Switch back to Rimba Ventures in OpenKuasa, or connect again for Kopi Co.',
     });
-    // A new token from the same client keeps the binding: it is the same credential.
+    // A new token from the same client keeps the binding: it is the same connection.
     expect(await resolveCaller(req(`Bearer ${oauthToken(ALICE)}`), 'Claude')).toMatchObject({ ok: false, status: 403 });
   });
 
@@ -223,8 +260,9 @@ describe('resolveCaller', () => {
     db.profiles.set(ALICE, '33333333-3333-4333-8333-333333333333');
     expect(await resolveCaller(req(`Bearer ${KEY}`), 'Claude')).toMatchObject({ ok: true, caller: { orgId: ORG_A } });
 
-    // OAuth first use with nothing recorded binds to the earliest membership.
+    // An OAuth connection bound to A works the same way.
     db.profiles.set(ALICE, null);
+    bind(ALICE, 'claude-desktop', ORG_A);
     const token = oauthToken(ALICE);
     expect(await resolveCaller(req(`Bearer ${token}`), 'Claude')).toMatchObject({ ok: true, caller: { orgId: ORG_A } });
   });
@@ -242,19 +280,25 @@ describe('resolveCaller', () => {
       message: 'Switch back to Rimba Ventures in OpenKuasa, or connect again for Kopi Co.',
     });
 
-    // OAuth first use binds to that earliest workspace, B.
-    const token = oauthToken(ALICE);
+    // An OAuth connection bound to A is refused the same way; one bound to B works.
+    bind(ALICE, 'claude-desktop', ORG_A);
+    expect(await resolveCaller(req(`Bearer ${oauthToken(ALICE)}`), 'Claude')).toEqual({
+      ok: false,
+      status: 403,
+      message: 'Switch back to Rimba Ventures in OpenKuasa, or connect again for Kopi Co.',
+    });
+    bind(ALICE, 'cursor', ORG_B);
+    const token = oauthToken(ALICE, { client_id: 'cursor' });
     expect(await resolveCaller(req(`Bearer ${token}`), 'Claude')).toMatchObject({ ok: true, caller: { orgId: ORG_B, orgName: 'Kopi Co' } });
   });
 
-  test('OAuth first use with no membership anywhere has nothing to bind to', async () => {
-    db.members.clear();
-    db.joined.clear();
-    db.profiles.set(ALICE, null);
-    expect(await resolveCaller(req(`Bearer ${oauthToken(ALICE, { client_id: 'cursor' })}`), 'Cursor')).toEqual({
+  test('an OAuth connection whose person has left its workspace is removed', async () => {
+    bind(ALICE, 'claude-desktop', ORG_A);
+    db.members.delete(memberKey(ORG_A, ALICE));
+    expect(await resolveCaller(req(`Bearer ${oauthToken(ALICE)}`), 'Claude')).toEqual({
       ok: false,
-      status: 403,
-      message: 'Open a workspace in OpenKuasa, then try again.',
+      status: 401,
+      message: 'You are no longer a member of this workspace, so this connection cannot act in it.',
     });
   });
 
@@ -301,6 +345,7 @@ describe('resolveCaller', () => {
     const second = await resolveCaller(req(`Bearer ${KEY}`), 'Claude');
     expect(second).toMatchObject({ ok: true, caller: { role: 'viewer' } });
 
+    bind(ALICE, 'claude-desktop', ORG_A);
     const token = oauthToken(ALICE);
     expect(await resolveCaller(req(`Bearer ${token}`), 'Claude')).toMatchObject({ ok: true, caller: { role: 'viewer' } });
     db.members.delete(memberKey(ORG_A, ALICE));
@@ -314,7 +359,13 @@ describe('resolveCaller', () => {
       keyResolvesTo(ALICE, ORG_A, 'alice-at-1');
       failing.add('org_members');
       expect(await resolveCaller(req(`Bearer ${KEY}`), 'Claude')).toEqual(failed);
+      bind(ALICE, 'claude-desktop', ORG_A);
       const token = oauthToken(ALICE);
+      expect(await resolveCaller(req(`Bearer ${token}`), 'Claude')).toEqual(failed);
+
+      // An unreadable connection record is a 503 too, not "connect again".
+      failing.clear();
+      failing.add('mcp_oauth_bindings');
       expect(await resolveCaller(req(`Bearer ${token}`), 'Claude')).toEqual(failed);
 
       failing.clear();
@@ -337,6 +388,7 @@ describe('resolveCaller', () => {
     keyResolvesTo(ALICE, ORG_A, 'alice-at-1');
     const out = await resolveCaller(req(`Bearer ${KEY}`), 'Claude');
     expect(out.ok).toBe(true);
+    bind(ALICE, 'claude-desktop', ORG_A);
     const token = oauthToken(ALICE);
     expect((await resolveCaller(req(`Bearer ${token}`), 'Claude')).ok).toBe(true);
 

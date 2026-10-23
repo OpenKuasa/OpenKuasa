@@ -6,7 +6,7 @@ import { z } from 'zod';
 import { createClient } from '@/lib/supabase/server';
 import { REMEMBER_COOKIE } from '@/lib/supabase/remember';
 import { recordEvent } from '@/lib/events';
-import { MFA_VERIFY_PATH, getMfaStatus } from '@/lib/auth/mfa';
+import { getMfaStatus, mfaVerifyHref } from '@/lib/auth/mfa';
 import {
   RECOVERY_COOKIE,
   isRecoveryMarkerValid,
@@ -14,6 +14,7 @@ import {
 import { endOtherSessions } from '@/lib/auth/sessions';
 import { createWorkspaceError, workspaceNameSchema } from '@/lib/auth/workspace-name';
 import { demoLimited, passwordResetLimited, signInLimited, signUpLimited } from '@/lib/security/limits';
+import { safeAppPath } from '@/lib/security/safe-path';
 
 // Persist the "remember me" choice so token refreshes (in the proxy) keep the
 // same cookie lifetime. A session cookie itself clears on browser close.
@@ -71,6 +72,8 @@ export async function signInAction(
   const email = String(formData.get('email') ?? '').trim();
   const password = String(formData.get('password') ?? '');
   const remember = formData.get('remember') === 'on';
+  // Where to go once signed in, e.g. back to the consent screen of an AI tool.
+  const next = safeAppPath(formData.get('next'));
   const values = { email };
 
   const parsed = signInSchema.safeParse({ email, password });
@@ -91,10 +94,10 @@ export async function signInAction(
   // With an authenticator enrolled the password is only half of signing in;
   // 'Signed in' is recorded once the code is verified (see mfa/actions.ts).
   const { challengeRequired } = await getMfaStatus(supabase);
-  if (challengeRequired) redirect(MFA_VERIFY_PATH);
+  if (challengeRequired) redirect(mfaVerifyHref(next ?? undefined));
 
   await recordEvent(supabase, { action: 'Signed in', category: 'auth' });
-  redirect('/command');
+  redirect(next ?? '/command');
 }
 
 const SIGN_UP_NOTICE =

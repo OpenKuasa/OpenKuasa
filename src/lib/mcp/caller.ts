@@ -3,7 +3,8 @@
  *
  * Two credentials are accepted. A personal API key (`okk_…`), which `resolveApiKey` checks and exchanges for the
  * person's access token, bound to the key's workspace. Or a Supabase OAuth 2.1 access token, checked with the auth
- * server on every call and bound to the workspace the person had open when the client first used it.
+ * server on every call and bound to the workspace the person allowed it in on the consent screen (`/oauth/consent`
+ * writes that row in `mcp_oauth_bindings`; no row means the connection is not bound).
  *
  * Every call then reads, as the person: their role in the credential's workspace (none means removed), and the
  * workspace they now have open; a different one is refused rather than acted on behind their back.
@@ -34,16 +35,13 @@ export const SIGN_IN = 'Sign in to OpenKuasa or use an API key.';
 export const CREDENTIAL_REFUSED =
   'That API key or sign-in is not valid any more. Sign in to OpenKuasa again, or make a new API key.';
 export const REMOVED = 'You are no longer a member of this workspace, so this connection cannot act in it.';
-export const NO_WORKSPACE = 'Open a workspace in OpenKuasa, then try again.';
+export const CONNECT_AGAIN = 'Connect OpenKuasa again from your AI tool.';
 export const FAILED = 'Your access could not be checked just now. Try again.';
 
 const OTHER_WORKSPACE = 'your other workspace';
 const ROLES: readonly OrgRole[] = ['owner', 'admin', 'member', 'viewer'];
 /** One bearer token: no spaces, a sane length. */
 const TOKEN_SHAPE = /^[A-Za-z0-9._~+/=-]{1,4096}$/;
-
-/** Process-wide: OAuth credential id → the workspace it was bound to at first use. Lost on restart, re-learned. */
-const bound = new Map<string, string>();
 
 function bearerOf(request: Request): string | null {
   const header = request.headers.get('authorization');
@@ -80,12 +78,15 @@ async function fromApiKey(key: string) {
   return {
     credentialId: `key:${resolved.id}`,
     userId: resolved.userId,
-    orgId: resolved.orgId as string | null,
+    orgId: resolved.orgId,
     accessToken: resolved.accessToken,
   };
 }
 
-/** An OAuth access token: accepted by the auth server, its subject that user, issued to a named client. */
+/**
+ * An OAuth access token: accepted by the auth server, its subject that user, issued to a named client. Its workspace
+ * is the one the person allowed this client in, read as them; null when there is none on record.
+ */
 async function fromOAuth(token: string, supabase: SupabaseClient) {
   const { data, error } = await supabase.auth.getUser(token);
   const userId = data?.user?.id;
@@ -93,8 +94,21 @@ async function fromOAuth(token: string, supabase: SupabaseClient) {
   const claims = claimsOf(token);
   const clientId = claims?.client_id;
   if (!claims || claims.sub !== userId || typeof clientId !== 'string' || !clientId) return null;
-  const credentialId = `oauth:${clientId}:${userId}`;
-  return { credentialId, userId, orgId: bound.get(credentialId) ?? null, accessToken: token };
+  const { data: binding, error: bindingError } = await supabase
+    .from('mcp_oauth_bindings')
+    .select('org_id')
+    .eq('user_id', userId)
+    .eq('client_id', clientId)
+    .maybeSingle();
+  // A read error throws: 503 below, not "connect again".
+  if (bindingError) throw bindingError;
+  const orgId = (binding as { org_id?: unknown } | null)?.org_id;
+  return {
+    credentialId: `oauth:${clientId}:${userId}`,
+    userId,
+    orgId: typeof orgId === 'string' && orgId ? orgId : null,
+    accessToken: token,
+  };
 }
 
 /**
@@ -110,18 +124,13 @@ export async function resolveCaller(request: Request, clientName: string): Promi
     const oauthClient = isKey ? null : userClient(token);
     const credential = oauthClient ? await fromOAuth(token, oauthClient) : await fromApiKey(token);
     if (!credential) return { ok: false, status: 401, message: CREDENTIAL_REFUSED };
-    const { credentialId, userId, accessToken } = credential;
+    const { credentialId, userId, orgId, accessToken } = credential;
+    // An OAuth connection with no workspace on record: the person allows it again on the consent screen.
+    if (!orgId) return { ok: false, status: 401, message: CONNECT_AGAIN };
     const supabase = oauthClient ?? userClient(accessToken);
 
     // The workspace the person has open, by the app's own rule (a read error throws: 503 below).
     const current = await currentOrgFor(supabase, userId);
-
-    let orgId = credential.orgId;
-    if (!orgId) {
-      // An OAuth credential's first use on this server: it takes the workspace the person has open.
-      if (!current) return { ok: false, status: 403, message: NO_WORKSPACE };
-      orgId = current.orgId;
-    }
 
     const { data: member, error: memberError } = await supabase
       .from('org_members')
@@ -149,7 +158,6 @@ export async function resolveCaller(request: Request, clientName: string): Promi
       };
     }
 
-    if (!isKey && !bound.has(credentialId)) bound.set(credentialId, orgId);
     return {
       ok: true,
       caller: { supabase, userId, orgId, orgName: orgName ?? 'your workspace', role: role as OrgRole, credentialId, clientName },
