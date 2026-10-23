@@ -14,7 +14,7 @@
 
 import 'server-only';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import type { OrgRole } from '@/lib/auth/current-org';
+import { currentOrgFor, type OrgRole } from '@/lib/auth/current-org';
 import { resolveApiKey } from '@/lib/mcp/keys';
 import { logFailure as sharedLogFailure, userClient } from '@/lib/mcp/shared';
 
@@ -67,13 +67,6 @@ function claimsOf(token: string): Record<string, unknown> | null {
 
 const logFailure = (operation: string, error: unknown) => sharedLogFailure('mcp-caller', operation, error);
 
-async function currentOrgOf(supabase: SupabaseClient, userId: string): Promise<{ ok: true; orgId: string | null } | { ok: false }> {
-  const { data, error } = await supabase.from('profiles').select('current_org_id').eq('user_id', userId).maybeSingle();
-  if (error) return { ok: false };
-  const orgId = (data as { current_org_id?: unknown } | null)?.current_org_id;
-  return { ok: true, orgId: typeof orgId === 'string' && orgId ? orgId : null };
-}
-
 async function nameOf(supabase: SupabaseClient, orgId: string): Promise<string | null> {
   const { data, error } = await supabase.from('orgs').select('name').eq('id', orgId).maybeSingle();
   const name = (data as { name?: unknown } | null)?.name;
@@ -120,13 +113,13 @@ export async function resolveCaller(request: Request, clientName: string): Promi
     const { credentialId, userId, accessToken } = credential;
     const supabase = oauthClient ?? userClient(accessToken);
 
-    const current = await currentOrgOf(supabase, userId);
-    if (!current.ok) return { ok: false, status: 503, message: FAILED };
+    // The workspace the person has open, by the app's own rule (a read error throws: 503 below).
+    const current = await currentOrgFor(supabase, userId);
 
     let orgId = credential.orgId;
     if (!orgId) {
       // An OAuth credential's first use on this server: it takes the workspace the person has open.
-      if (!current.orgId) return { ok: false, status: 403, message: NO_WORKSPACE };
+      if (!current) return { ok: false, status: 403, message: NO_WORKSPACE };
       orgId = current.orgId;
     }
 
@@ -143,12 +136,10 @@ export async function resolveCaller(request: Request, clientName: string): Promi
     }
     if (!ROLES.includes(role as OrgRole)) return { ok: false, status: 401, message: REMOVED };
 
+    // A member here but no current workspace cannot happen with consistent data; treat it as removed.
+    if (!current) return { ok: false, status: 401, message: REMOVED };
+
     const orgName = await nameOf(supabase, orgId);
-    // No workspace open: the database's own idea of the current workspace is empty too, so reads would come back
-    // part working and part silently empty. Refused until the person opens the credential's workspace.
-    if (!current.orgId) {
-      return { ok: false, status: 403, message: `Open OpenKuasa and switch to ${orgName ?? 'your workspace'}, then try again.` };
-    }
     if (current.orgId !== orgId) {
       const other = await nameOf(supabase, current.orgId);
       return {
