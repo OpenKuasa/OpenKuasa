@@ -1,7 +1,7 @@
 -- Agent notes on Kasturi records.
 --
--- The CRM agent proposes notes; an owner or admin approves them; the approved note is
--- written to the deal or contact. A note says who wrote it in `source`: 'user' (the
+-- The CRM agent proposes notes; anyone who can edit the workspace's data approves
+-- them; the approved note is written to the deal or contact. A note says who wrote it in `source`: 'user' (the
 -- default) or 'agent'.
 --
 -- What is guaranteed about a note with source = 'agent':
@@ -25,6 +25,39 @@ alter table public.crm_notes
 
 create unique index crm_notes_agent_proposal_id_key
   on public.crm_notes (agent_proposal_id) where agent_proposal_id is not null;
+
+-- ---------------------------------------------------------------------------
+-- Proposal guard v4. Every v3 rule (20261025090000) is kept as it was, plus one:
+-- once a proposal has left pending, who decided it and when are frozen. Without
+-- this, a writer could re-stamp an approved row (approved -> approved is allowed for
+-- the result annotation) with their own decided_by or a fresh decided_at, and then
+-- take over or re-use the approval for an agent note. The app sets these two columns
+-- only on the claim from pending (decide-proposal.ts approve/dismiss, and the expiry
+-- sweep in runner.ts), which this still allows.
+-- ---------------------------------------------------------------------------
+create or replace function private.agent_proposals_guard()
+returns trigger language plpgsql set search_path = '' as $$
+begin
+  if old.status = 'pending' then
+    if new.status not in ('approved','rejected','expired','failed') then
+      raise exception 'invalid decision' using errcode = 'AGP01';
+    end if;
+  elsif old.status = 'approved' and new.status in ('approved','failed') then
+    null; -- annotate the claimed row (result) or correct a failed apply
+  else
+    raise exception 'this proposal is already handled' using errcode = 'AGP01';
+  end if;
+  if old.status <> 'pending'
+     and (new.decided_at is distinct from old.decided_at
+          or new.decided_by is distinct from old.decided_by) then
+    raise exception 'who decided a proposal, and when, cannot change' using errcode = 'AGP01';
+  end if;
+  if (to_jsonb(new) - 'status' - 'result' - 'decided_at' - 'decided_by')
+     is distinct from (to_jsonb(old) - 'status' - 'result' - 'decided_at' - 'decided_by') then
+    raise exception 'only the decision may change' using errcode = 'AGP01';
+  end if;
+  return new;
+end $$;
 
 -- ---------------------------------------------------------------------------
 -- Guard: agent notes come only from crm_add_agent_note and are never edited.
@@ -115,8 +148,9 @@ begin
      and p.decided_by = auth.uid()
      and p.decided_at > now() - interval '10 minutes'
      and p.input->>'body' = p_body
-     and (p.input->>'dealId')::uuid is not distinct from p_deal_id
-     and (p.input->>'contactId')::uuid is not distinct from p_contact_id
+     -- compared as text, so one malformed input elsewhere cannot fail every call
+     and p.input->>'dealId' is not distinct from p_deal_id::text
+     and p.input->>'contactId' is not distinct from p_contact_id::text
      and not exists (select 1 from public.crm_notes n where n.agent_proposal_id = p.id)
    order by p.decided_at desc
    limit 1

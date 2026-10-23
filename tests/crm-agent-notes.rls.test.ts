@@ -210,6 +210,28 @@ testWithSupabase('an agent note cannot be edited or lose its author, but can be 
   expect(del.data ?? []).toHaveLength(1);
 });
 
+testWithSupabase('who approved a proposal, and when, cannot be re-stamped after the decision', async () => {
+  const body = 'Re-stamp me.';
+  // Approved in the other user's name (the owner's workspace, owner's deal).
+  const proposalId = await seedApproval(owner.orgId, other.userId, { dealId: owner.dealId }, body);
+  const before = await service!.from('agent_proposals').select('decided_at,decided_by').eq('id', proposalId).single();
+  expect(before.error, before.error?.message).toBeNull();
+
+  const takeOver = await owner.c.from('agent_proposals').update({ decided_by: owner.userId }).eq('id', proposalId);
+  expect(takeOver.error?.code).toBe('AGP01');
+  const refresh = await owner.c
+    .from('agent_proposals')
+    .update({ decided_at: new Date(Date.now() + 1000).toISOString() })
+    .eq('id', proposalId);
+  expect(refresh.error?.code).toBe('AGP01');
+
+  const after = await service!.from('agent_proposals').select('decided_at,decided_by').eq('id', proposalId).single();
+  expect(after.data).toEqual(before.data);
+  // and the owner still cannot use the other user's approval
+  const use = await addAgentNote(owner.c, { dealId: owner.dealId }, body);
+  expect(use.error?.code).toBe('42501');
+});
+
 testWithSupabase('crm_add_agent_note on another workspace’s deal is refused', async () => {
   const body = 'Not yours.';
   // Even with an approval in the owner's workspace in the other user's name.

@@ -82,8 +82,8 @@ describe('crm agent notes migration', () => {
       'p.decided_by = auth.uid()',
       "p.decided_at > now() - interval '10 minutes'",
       "p.input->>'body' = p_body",
-      "(p.input->>'dealId')::uuid is not distinct from p_deal_id",
-      "(p.input->>'contactId')::uuid is not distinct from p_contact_id",
+      "p.input->>'dealId' is not distinct from p_deal_id::text",
+      "p.input->>'contactId' is not distinct from p_contact_id::text",
       'not exists (select 1 from public.crm_notes n where n.agent_proposal_id = p.id)',
       'order by p.decided_at desc',
       'for update of p',
@@ -97,6 +97,34 @@ describe('crm agent notes migration', () => {
     expect(body).toContain(
       "values (v_org, p_deal_id, p_contact_id, p_body, 'agent', auth.uid(), v_proposal)",
     );
+  });
+
+  test('proposal guard v4 keeps the v3 rules and freezes who decided and when', () => {
+    const v3 = fnBody(
+      read('20261025090000_agent_proposals_guard_v3.sql'),
+      'create or replace function private.agent_proposals_guard()',
+    );
+    const v4 = fnBody(notes, 'create or replace function private.agent_proposals_guard()');
+    expect(v4).toContain("returns trigger language plpgsql set search_path = '' as $$");
+    // every v3 rule, verbatim
+    for (const rule of [
+      "if old.status = 'pending' then",
+      "if new.status not in ('approved','rejected','expired','failed') then",
+      "raise exception 'invalid decision' using errcode = 'AGP01';",
+      "elsif old.status = 'approved' and new.status in ('approved','failed') then",
+      "raise exception 'this proposal is already handled' using errcode = 'AGP01';",
+      "if (to_jsonb(new) - 'status' - 'result' - 'decided_at' - 'decided_by')",
+      "is distinct from (to_jsonb(old) - 'status' - 'result' - 'decided_at' - 'decided_by') then",
+      "raise exception 'only the decision may change' using errcode = 'AGP01';",
+    ]) {
+      expect(v3).toContain(rule);
+      expect(v4).toContain(rule);
+    }
+    expect(v4).toMatch(
+      /if old\.status <> 'pending'\s+and \(new\.decided_at is distinct from old\.decided_at\s+or new\.decided_by is distinct from old\.decided_by\) then/,
+    );
+    // the trigger itself is unchanged; only the function is replaced
+    expect(notes).not.toMatch(/create trigger agent_proposals_guard/);
   });
 
   test('only authenticated may execute crm_add_agent_note', () => {
