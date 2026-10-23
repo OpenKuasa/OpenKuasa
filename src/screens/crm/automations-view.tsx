@@ -94,7 +94,7 @@ function AutomationFormCard({
   onSaved: () => void;
   onClose: () => void;
 }) {
-  const { formAction, pending, error } = useCrmForm(action, onSaved);
+  const { onSubmit, pending, error } = useCrmForm(action, onSaved);
   // Held here so the form shows only what the chosen trigger and action need,
   // and a rejected save keeps what was typed.
   const [name, setName] = useState(editing?.name ?? '');
@@ -116,7 +116,7 @@ function AutomationFormCard({
       icon={editing ? FileText : Plus}
       className="col-span-2 md:col-span-12"
     >
-      <form action={formAction} className="grid gap-4 md:grid-cols-12">
+      <form onSubmit={onSubmit} className="grid gap-4 md:grid-cols-12">
         {editing ? <input type="hidden" name="automationId" value={editing.id} /> : null}
         <div className="space-y-1.5 md:col-span-12">
           <Label htmlFor="automation-name">Name</Label>

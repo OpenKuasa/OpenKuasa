@@ -1,12 +1,18 @@
 'use client';
 
-import { useActionState } from 'react';
+import { startTransition, useActionState, type FormEvent } from 'react';
 import type { CrmFormAction, CrmFormState } from '@/lib/crm/form-state';
 
 /**
  * Runs a form action and calls `onDone` once it has succeeded, so the caller
  * can close whatever the form was shown in. `onDone` is given the id of what
  * the action made, when it hands one back.
+ *
+ * Pass `formAction` to `<form action>` for a form of plain fields. A form whose
+ * checkboxes or selects are held in state uses `onSubmit` instead: after
+ * `<form action>` finishes, React resets the form, which puts each such checkbox
+ * back to its value when the page loaded and each select to its first option,
+ * while the state, and so what was saved, says otherwise.
  */
 export function useCrmForm(action: CrmFormAction, onDone?: (id?: string) => void) {
   const [state, formAction, pending] = useActionState<CrmFormState, FormData>(
@@ -20,7 +26,14 @@ export function useCrmForm(action: CrmFormAction, onDone?: (id?: string) => void
   // An old message is not shown while the next attempt is still running.
   const error = state && !state.ok && !pending ? state.error : null;
   const values = state && !state.ok ? state.values : null;
-  return { formAction, pending, error, values };
+  // Sends the same form data, including the pressed button, without the reset.
+  const onSubmit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const submitter = (event.nativeEvent as SubmitEvent).submitter;
+    const formData = new FormData(event.currentTarget, submitter);
+    startTransition(() => formAction(formData));
+  };
+  return { formAction, onSubmit, pending, error, values };
 }
 
 /** A native select styled like the inputs it sits beside in a form. */

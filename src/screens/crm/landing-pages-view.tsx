@@ -126,7 +126,7 @@ function PageFormCard({
   onSaved: () => void;
   onClose: () => void;
 }) {
-  const { formAction, pending, error } = useCrmForm(action, onSaved);
+  const { onSubmit, pending, error } = useCrmForm(action, onSaved);
   // Held here so the preview follows what is typed, and a rejected save keeps it.
   const [draft, setDraft] = useState<Draft>(editing ? toDraft(editing) : EMPTY);
   const set = (key: keyof Draft) => (event: { target: { value: string } }) =>
@@ -145,7 +145,7 @@ function PageFormCard({
       className="col-span-2 md:col-span-12"
     >
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_260px]">
-        <form action={formAction} className="grid content-start gap-3 md:grid-cols-12">
+        <form onSubmit={onSubmit} className="grid content-start gap-3 md:grid-cols-12">
           {editing ? <input type="hidden" name="pageId" value={editing.id} /> : null}
           <div className="space-y-1.5 md:col-span-6">
             <Label htmlFor="page-name">Name</Label>

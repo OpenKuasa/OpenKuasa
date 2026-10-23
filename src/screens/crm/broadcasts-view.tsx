@@ -378,7 +378,7 @@ function BroadcastFormCard({
   onSaved: () => void;
   onClose: () => void;
 }) {
-  const { formAction, pending, error } = useCrmForm(action, onSaved);
+  const { onSubmit, pending, error } = useCrmForm(action, onSaved);
   // Held here so the recipient count follows the choices, and a rejected save keeps them.
   const [name, setName] = useState(editing?.name ?? '');
   const [subject, setSubject] = useState(editing?.subject ?? '');
@@ -415,7 +415,7 @@ function BroadcastFormCard({
       icon={editing ? FileText : Plus}
       className="col-span-2 md:col-span-12"
     >
-      <form action={formAction} className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_300px]">
+      <form onSubmit={onSubmit} className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_300px]">
         {editing ? <input type="hidden" name="broadcastId" value={editing.id} /> : null}
         <div className="grid content-start gap-3">
           <div className="space-y-1.5">

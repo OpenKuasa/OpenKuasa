@@ -68,7 +68,7 @@ function Muted({ children }: { children: React.ReactNode }) {
 function SettingsForm({ settings, action }: { settings: ChatbotSettings; action?: CrmFormAction }) {
   const [saved, setSaved] = useState(false);
   // A missing action means the person can only read: the form is shown, not sent.
-  const { formAction, pending, error } = useCrmForm(action ?? (async () => undefined), () => setSaved(true));
+  const { onSubmit, pending, error } = useCrmForm(action ?? (async () => undefined), () => setSaved(true));
   // Held here so a rejected save keeps what was typed.
   const [botName, setBotName] = useState(settings.botName);
   const [tone, setTone] = useState<string>(settings.tone);
@@ -81,7 +81,7 @@ function SettingsForm({ settings, action }: { settings: ChatbotSettings; action?
   };
 
   return (
-    <form action={action ? formAction : undefined} className="grid gap-4 sm:grid-cols-2">
+    <form onSubmit={action ? onSubmit : undefined} className="grid gap-4 sm:grid-cols-2">
       <fieldset disabled={!action} className="contents">
         <div className="space-y-1.5">
           <Label htmlFor="bot-name">Bot name</Label>

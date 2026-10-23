@@ -178,11 +178,11 @@ function Saved({ pending, error, saved }: { pending: boolean; error: string | nu
 function RulesForm({ settings, action }: { settings: CrmSettings; action?: CrmFormAction }) {
   const [saved, setSaved] = useState(false);
   // A missing action means the person can only read: the form is shown, not sent.
-  const { formAction, pending, error } = useCrmForm(action ?? (async () => undefined), () => setSaved(true));
+  const { onSubmit, pending, error } = useCrmForm(action ?? (async () => undefined), () => setSaved(true));
   const [requireLostReason, setRequireLostReason] = useState(settings.requireLostReason);
 
   return (
-    <form action={action ? formAction : undefined} className="space-y-3">
+    <form onSubmit={action ? onSubmit : undefined} className="space-y-3">
       <label className="flex items-start gap-2 text-sm">
         <input
           type="checkbox"
@@ -225,11 +225,11 @@ function NotificationsForm({
   action?: CrmFormAction;
 }) {
   const [saved, setSaved] = useState(false);
-  const { formAction, pending, error } = useCrmForm(action ?? (async () => undefined), () => setSaved(true));
+  const { onSubmit, pending, error } = useCrmForm(action ?? (async () => undefined), () => setSaved(true));
   const [choice, setChoice] = useState({ new_leads: notifications.new_leads, deal_stages: notifications.deal_stages });
 
   return (
-    <form action={action ? formAction : undefined} className="space-y-3">
+    <form onSubmit={action ? onSubmit : undefined} className="space-y-3">
       {notifications.inAppOn ? null : (
         <p className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs">
           You have switched all in-app notifications off, so these will not reach you until you switch them back on
