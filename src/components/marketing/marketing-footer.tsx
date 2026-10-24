@@ -28,7 +28,6 @@ const COLUMNS: Col[] = [
       { label: 'Payroll', href: '/people/payroll' },
       { label: 'e-Invoice LHDN', href: '/finance/e-invoice' },
       { label: 'Ask Sari', href: '/command' },
-      { label: 'Marketplace Apps', href: '#marketplace' },
     ],
   },
   {

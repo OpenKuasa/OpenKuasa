@@ -12,7 +12,6 @@ import {
 export const NAV_LINKS: { label: string; href: string }[] = [
   { label: 'Home', href: '/' },
   { label: 'Pricing', href: '/pricing' },
-  { label: 'Marketplace Apps', href: '#marketplace' },
   { label: 'Tutorials & Docs', href: '/account/docs' },
   { label: 'Contact Support', href: '/account/support' },
 ];
