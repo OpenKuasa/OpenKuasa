@@ -9,7 +9,7 @@ The OpenKuasa assistants run on your own OpenRouter account. You add one key for
 
 ## Why you need a key
 
-Without a key, each person gets 3 free questions a week, across all the assistants. When they are used up, chat stops until you add a key.
+Without a key, each person gets 3 free questions a week, across all the assistants. They come back each week. When they are used up, chat stops until next week, or until you add a key.
 
 With a key, chat is billed to your OpenRouter account. We do not put a limit on it. Set a spending limit on the key in OpenRouter if you want one.
 
@@ -26,7 +26,7 @@ Only workspace owners and admins can add, change or remove the key. If you are a
 
 ## Add it to OpenKuasa
 
-1. Open your account and go to **AI key**.
+1. Open the account menu (your name, top right), pick any account page, then choose **AI key** under **Apps** in the side menu. Or go straight to [AI key](/account/ai).
 2. Paste the key into **OpenRouter API key**.
 3. Click **Save key**.
 
