@@ -126,9 +126,12 @@ describe('staticSecurityHeaders', () => {
     expect(headers.get('X-Frame-Options')).toBe('DENY');
     expect(headers.get('Content-Security-Policy')).toBe(BASELINE_CSP);
     const permissions = headers.get('Permissions-Policy') ?? '';
-    for (const feature of ['camera', 'microphone', 'geolocation', 'payment']) {
+    for (const feature of ['camera', 'microphone', 'payment']) {
       expect(permissions).toContain(`${feature}=()`);
     }
+    // Deliberate, owner-approved relaxation: opt-in weather uses device location.
+    expect(permissions).toContain('geolocation=(self)');
+    expect(permissions).not.toContain('geolocation=()');
   });
 
   it('sends HSTS in production only, without preload', () => {

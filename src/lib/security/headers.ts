@@ -24,7 +24,7 @@ const HSTS = 'max-age=31536000';
 const PERMISSIONS_POLICY = [
   'accelerometer=()',
   'camera=()',
-  'geolocation=()',
+  'geolocation=(self)',
   'gyroscope=()',
   'magnetometer=()',
   'microphone=()',
