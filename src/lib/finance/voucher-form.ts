@@ -515,7 +515,7 @@ export function voucherQuestion(kind: Exclude<VoucherAction, 'edit'>, row: Payme
       ...(row.documents ? [{ text: ` for ${row.documents}` }] : []),
       { text: `, dated ${displayDate(row.txn_date)}, from ` },
       { text: row.account_name, strong: true },
-      { text: '? It is then To be paid, exactly as it stands: it cannot be changed after this, only paid or deleted.' },
+      { text: '? Once approved it is ready to pay, exactly as it stands: it cannot be changed after this, only paid or deleted.' },
     ];
   }
   if (kind === 'reject') {
