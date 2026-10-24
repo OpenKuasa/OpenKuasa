@@ -1,7 +1,7 @@
 import type { TimeOfDay } from './time-of-day';
 import type { WeatherCondition, WeatherResult } from './types';
 
-/** Every condition, in one place (the weather route and client both read this). */
+/** Every condition, in one place (the client hook reads it to validate the route's reply). */
 export const WEATHER_CONDITIONS: readonly WeatherCondition[] = [
   'clear',
   'cloudy',

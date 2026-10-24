@@ -73,7 +73,7 @@ describe('readProductCounts', () => {
     });
     expect(await readProductCounts(c, 'hire')).toEqual({ interviewsToday: 2, applicationsWaiting: 5 });
     expect(await readProductCounts(c, 'crm')).toEqual({ followUpsDue: 3, appointmentsToday: 1 });
-    expect(await readProductCounts(c, 'reach')).toEqual({ newLeads: 6 });
+    expect(await readProductCounts(c, 'reach')).toEqual({ newLeads: 6, appointmentsToday: 1 });
   });
 });
 

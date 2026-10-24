@@ -177,6 +177,8 @@ function overdueAge(days: number): string {
 /* ------------------------------------------------------------------ */
 
 export default async function OverviewScreen() {
+  // Started first so the greeting loads alongside the screen's own reads.
+  const greetingPromise = loadServerGreeting('finance');
   const supabase = await createClient();
   const {
     data: { user },
@@ -223,7 +225,7 @@ export default async function OverviewScreen() {
       <BentoGrid>
         {/* Ask-Bendahara hero */}
         <BentoCard tone="primary" className="col-span-2 md:col-span-12">
-          <AskBendaharaHero prompts={PROMPTS} isDemo={isDemo} greeting={await loadServerGreeting('finance')} />
+          <AskBendaharaHero prompts={PROMPTS} isDemo={isDemo} greeting={await greetingPromise} />
         </BentoCard>
 
         {/* KPI row */}

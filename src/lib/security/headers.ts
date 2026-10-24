@@ -18,8 +18,10 @@ export const BASELINE_CSP =
 const HSTS = 'max-age=31536000';
 
 /**
- * Browser features no screen uses. The chat's microphone button is not wired
- * to the microphone; allow `microphone=(self)` here when it is.
+ * Browser features the app does not use, except geolocation, which stays
+ * allowed for this origin because the greeting's opt-in weather asks for it
+ * (only on a click). The chat's microphone button is not wired to the
+ * microphone; allow `microphone=(self)` here when it is.
  */
 const PERMISSIONS_POLICY = [
   'accelerometer=()',

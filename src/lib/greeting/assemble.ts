@@ -74,8 +74,10 @@ export function composeHeading(parts: HeadingParts): string {
   const name = firstName?.trim() || null;
   const opening = lead.endsWith('?') ? greet(lead, name) : name ? `${lead}, ${name}` : lead;
 
+  // A question already ends the sentence; do not add a full stop after it.
+  const joiner = opening.endsWith('?') ? ' ' : '. ';
   const candidates = [
-    ...(weatherPhrase ? [`${opening}. ${weatherPhrase}`] : []),
+    ...(weatherPhrase ? [`${opening}${joiner}${weatherPhrase}`] : []),
     `${opening} ${emoji}`,
     opening,
   ];

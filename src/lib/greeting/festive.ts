@@ -68,9 +68,9 @@ export function festiveOn(
   return null;
 }
 
-/** The nearest major festival on or within `days` days after `date`, else null. */
+/** The nearest major festival within `days` days after `date` (today excluded), else null. */
 export function festivalWithin(date: string, days: number): Festival | null {
   const end = addDays(date, days);
-  const next = MAJOR.find((day) => day >= date && day <= end);
+  const next = MAJOR.find((day) => day > date && day <= end);
   return next ? FESTIVALS[next] : null;
 }

@@ -91,6 +91,8 @@ function Muted({ children }: { children: React.ReactNode }) {
 /* ------------------------------------------------------------------ */
 
 export default async function OverviewScreen() {
+  // Started first so the greeting loads alongside the screen's own reads.
+  const greetingPromise = loadServerGreeting('reach');
   const supabase = await createClient();
   const {
     data: { user },
@@ -127,7 +129,7 @@ export default async function OverviewScreen() {
       <BentoGrid>
         {/* Ask-Jebat hero */}
         <BentoCard tone="primary" className="col-span-2 md:col-span-12">
-          <AskJebatHero prompts={PROMPTS} isDemo={isDemo} greeting={await loadServerGreeting('reach')} />
+          <AskJebatHero prompts={PROMPTS} isDemo={isDemo} greeting={await greetingPromise} />
         </BentoCard>
 
         {/* KPI row — only leads has a weekly series; the rest are headline-only */}

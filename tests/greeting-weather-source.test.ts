@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { __resetWeatherCacheForTest, fetchWeather } from '../src/lib/greeting/weather-source';
 
 const json = (body: unknown) => ({ ok: true, json: async () => body }) as Response;
@@ -17,6 +17,7 @@ const rainy = { current: { weather_code: 61, temperature_2m: 27 } };
 
 describe('fetchWeather', () => {
   beforeEach(() => __resetWeatherCacheForTest());
+  afterEach(() => vi.restoreAllMocks());
 
   it('reads coords, reverse-geocodes, and caches', async () => {
     const fetchImpl = stub({ forecast: rainy, reverse: { city: 'Shah Alam' } });
@@ -45,6 +46,14 @@ describe('fetchWeather', () => {
     const forecastUrl = String(fetchImpl.mock.calls.map((c) => String(c[0])).find((u) => u.startsWith('https://api.open-meteo.com/')));
     expect(forecastUrl).toContain('latitude=5.41');
     expect(forecastUrl).toContain('longitude=100.33');
+  });
+
+  it('returns null when no geocode result is in Malaysia', async () => {
+    const fetchImpl = stub({
+      geocode: { results: [{ country_code: 'US', name: 'Georgetown', latitude: 38.9, longitude: -77 }] },
+      forecast: rainy,
+    });
+    expect(await fetchWeather({ city: 'Georgetown' }, { fetchImpl })).toBeNull();
   });
 
   it('returns null for no geocode results', async () => {

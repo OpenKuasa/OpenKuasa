@@ -56,6 +56,8 @@ const initials = (name: string) =>
 /* ------------------------------------------------------------------ */
 
 export default async function OverviewScreen() {
+  // Started first so the greeting loads alongside the screen's own reads.
+  const greetingPromise = loadServerGreeting('people');
   const { model, viewer, chatDemo, hasWorkspace } = await loadPeople('overview', buildPeopleOverviewModel);
   const headcount = model?.totals.headcount ?? 0;
   const noStaff = headcount === 0;
@@ -81,7 +83,7 @@ export default async function OverviewScreen() {
       <BentoGrid>
         {/* Ask-Lekiu hero */}
         <BentoCard tone="primary" className="col-span-2 md:col-span-12">
-          <AskLekiuHero prompts={PROMPTS} isDemo={chatDemo} greeting={await loadServerGreeting('people')} />
+          <AskLekiuHero prompts={PROMPTS} isDemo={chatDemo} greeting={await greetingPromise} />
         </BentoCard>
 
         {notLinked ? (

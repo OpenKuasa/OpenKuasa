@@ -3,7 +3,9 @@ import {
   clearStoredLocation,
   locationChoice,
   readStoredLocation,
+  removeStoredLocation,
   roundCoord,
+  subscribeLocationChoice,
   writeStoredLocation,
 } from '@/lib/greeting/location-store';
 
@@ -43,6 +45,29 @@ describe('greeting location store', () => {
     expect(locationChoice()).toBe('city');
   });
 
+  it('keeps an explicit city pick apart from a permission refusal', () => {
+    g.localStorage = fakeStorage();
+    writeStoredLocation(3.14, 101.52);
+    removeStoredLocation();
+    expect(readStoredLocation()).toBeNull();
+    expect(locationChoice()).toBe('unset');
+    clearStoredLocation();
+    expect(locationChoice()).toBe('city');
+  });
+
+  it('notifies subscribers on same-tab changes', () => {
+    g.localStorage = fakeStorage();
+    let calls = 0;
+    const off = subscribeLocationChoice(() => (calls += 1));
+    writeStoredLocation(1, 2);
+    clearStoredLocation();
+    removeStoredLocation();
+    expect(calls).toBe(3);
+    off();
+    writeStoredLocation(1, 2);
+    expect(calls).toBe(3);
+  });
+
   it('never throws when storage is missing or throws', () => {
     expect(readStoredLocation()).toBeNull();
     expect(locationChoice()).toBe('unset');
@@ -57,5 +82,6 @@ describe('greeting location store', () => {
     expect(locationChoice()).toBe('unset');
     expect(() => writeStoredLocation(1, 2)).not.toThrow();
     expect(() => clearStoredLocation()).not.toThrow();
+    expect(() => removeStoredLocation()).not.toThrow();
   });
 });

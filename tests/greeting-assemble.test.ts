@@ -27,6 +27,14 @@ describe('composeHeading', () => {
       composeHeading({ lead: 'Still at it?', firstName: 'Aisyah', emoji: '🌙', weatherPhrase: null }),
     ).toBe('Still at it, Aisyah? 🌙');
     expect(
+      composeHeading({
+        lead: 'Still at it?',
+        firstName: 'Aisyah',
+        emoji: '🌙',
+        weatherPhrase: 'Rainy Monday ☔',
+      }),
+    ).toBe('Still at it, Aisyah? Rainy Monday ☔');
+    expect(
       composeHeading({ lead: 'Still at it?', firstName: null, emoji: '🌙', weatherPhrase: null }),
     ).toBe('Still at it? 🌙');
   });

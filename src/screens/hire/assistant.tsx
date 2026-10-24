@@ -56,6 +56,8 @@ const initials = (name: string) =>
 /* ------------------------------------------------------------------ */
 
 export default async function OverviewScreen() {
+  // Started first so the greeting loads alongside the screen's own reads.
+  const greetingPromise = loadServerGreeting('hire');
   const { model, isDemo } = await loadHire('overview', buildHireOverviewModel);
   const applications = model?.totals.applications ?? 0;
   const noApplications = applications === 0;
@@ -79,7 +81,7 @@ export default async function OverviewScreen() {
       <BentoGrid>
         {/* Ask-Lekir hero */}
         <BentoCard tone="primary" className="col-span-2 md:col-span-12">
-          <AskLekirHero prompts={PROMPTS} isDemo={isDemo} greeting={await loadServerGreeting('hire')} />
+          <AskLekirHero prompts={PROMPTS} isDemo={isDemo} greeting={await greetingPromise} />
         </BentoCard>
 
         {/* KPI row: headline figures only, the tables hold no history to chart */}

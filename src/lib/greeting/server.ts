@@ -9,13 +9,18 @@ import type { NudgeCounts, ServerGreeting, Surface } from './types';
 type Holiday = { date: string; name: string };
 
 const TUAH_COUNTS_TIMEOUT_MS = 1500;
+const PRODUCT_COUNTS_TIMEOUT_MS = 800;
 
 async function readCounts(ctx: CountsCtx, surface: Surface): Promise<NudgeCounts> {
   try {
     if (surface === 'tuah') {
       return await withTimeout<NudgeCounts>(readAllCounts(ctx), TUAH_COUNTS_TIMEOUT_MS, {});
     }
-    return await readProductCounts(ctx, surface);
+    return await withTimeout<NudgeCounts>(
+      readProductCounts(ctx, surface),
+      PRODUCT_COUNTS_TIMEOUT_MS,
+      {},
+    );
   } catch {
     return {};
   }

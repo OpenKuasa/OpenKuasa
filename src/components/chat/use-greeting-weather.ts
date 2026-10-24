@@ -1,11 +1,13 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, useSyncExternalStore } from 'react';
 import { hourInMalaysia, todayInMalaysia, weekdayName } from '@/lib/people/dates';
 import {
   clearStoredLocation,
   locationChoice,
   readStoredLocation,
+  removeStoredLocation,
+  subscribeLocationChoice,
   writeStoredLocation,
   type LocationChoice,
 } from '@/lib/greeting/location-store';
@@ -13,6 +15,8 @@ import { timeOfDayPhrase } from '@/lib/greeting/time-of-day';
 import { WEATHER_CONDITIONS, weatherPhrase } from '@/lib/greeting/weather';
 
 const TIMEOUT_MS = 1500;
+
+const serverChoice = (): 'loading' => 'loading';
 
 type WeatherBody = { condition?: unknown; hot?: unknown; place?: unknown };
 
@@ -42,8 +46,9 @@ async function fetchPhrase(
 
 /**
  * The greeting's opt-in weather remark. Hydration-safe: the first render is
- * always "no phrase, choice unset"; browser storage is read in an effect. It
- * never prompts for location on its own and never holds the greeting up.
+ * always "no phrase, choice loading" (the server snapshot); the saved choice is
+ * read from browser storage only after hydration. It never prompts for
+ * location on its own and never holds the greeting up.
  */
 export function useGreetingWeather(opts: { enabled: boolean }): {
   phrase: string | null;
@@ -55,13 +60,16 @@ export function useGreetingWeather(opts: { enabled: boolean }): {
 } {
   const { enabled } = opts;
   const [phrase, setPhrase] = useState<string | null>(null);
-  const [choice, setChoice] = useState<LocationChoice | 'loading'>('loading');
+  const choice = useSyncExternalStore<LocationChoice | 'loading'>(
+    subscribeLocationChoice,
+    locationChoice,
+    serverChoice,
+  );
   // Bumped to refetch after the person changes their choice.
   const [version, setVersion] = useState(0);
 
   useEffect(() => {
     if (!enabled) return;
-    setChoice(locationChoice());
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
     fetchPhrase(readStoredLocation(), controller.signal)
@@ -88,10 +96,7 @@ export function useGreetingWeather(opts: { enabled: boolean }): {
         },
         (err) => {
           // Only a real refusal is remembered; a timeout or no-signal can be retried.
-          if (err.code === err.PERMISSION_DENIED) {
-            clearStoredLocation();
-            setChoice('city');
-          }
+          if (err.code === err.PERMISSION_DENIED) clearStoredLocation();
         },
         { timeout: 8000, maximumAge: 600000 },
       );
@@ -101,8 +106,7 @@ export function useGreetingWeather(opts: { enabled: boolean }): {
   }, []);
 
   const useCityInstead = useCallback(() => {
-    clearStoredLocation();
-    setChoice('city');
+    removeStoredLocation();
     setVersion((v) => v + 1);
   }, []);
 

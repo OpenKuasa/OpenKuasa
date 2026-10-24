@@ -91,6 +91,15 @@ async function readHire(ctx: CountsCtx, day: Day): Promise<NudgeCounts> {
   return compact({ interviewsToday: interviews, applicationsWaiting: waiting });
 }
 
+/** Today's (KL) appointments that are still on; shared by the CRM and Reach readers. */
+const appointmentsToday = (ctx: CountsCtx, day: Day) =>
+  head(() =>
+    count(ctx, 'appointments')
+      .neq('status', 'cancelled')
+      .gte('scheduled_at', day.start)
+      .lt('scheduled_at', day.end),
+  );
+
 async function readCrm(ctx: CountsCtx, day: Day): Promise<NudgeCounts> {
   const [followUps, appointments] = await Promise.all([
     head(() =>
@@ -100,16 +109,17 @@ async function readCrm(ctx: CountsCtx, day: Day): Promise<NudgeCounts> {
         .eq('owner_user_id', ctx.userId)
         .lt('due_at', day.end),
     ),
-    head(() =>
-      count(ctx, 'appointments').neq('status', 'cancelled').gte('scheduled_at', day.start).lt('scheduled_at', day.end),
-    ),
+    appointmentsToday(ctx, day),
   ]);
   return compact({ followUpsDue: followUps, appointmentsToday: appointments });
 }
 
 async function readReach(ctx: CountsCtx, day: Day): Promise<NudgeCounts> {
-  const newLeads = await head(() => count(ctx, 'leads').eq('stage', 'lead').gte('created_at', day.weekAgo));
-  return compact({ newLeads });
+  const [newLeads, appointments] = await Promise.all([
+    head(() => count(ctx, 'leads').eq('stage', 'lead').gte('created_at', day.weekAgo)),
+    appointmentsToday(ctx, day),
+  ]);
+  return compact({ newLeads, appointmentsToday: appointments });
 }
 
 /** One product's nudge counts. Never throws; a failed signal is simply absent. */

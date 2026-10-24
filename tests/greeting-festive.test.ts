@@ -40,7 +40,9 @@ describe('festivalWithin', () => {
     expect(festivalWithin('2026-05-25', 7)).toBeNull();
   });
 
-  it('includes the day itself', () => {
-    expect(festivalWithin('2026-11-08', 0)?.key).toBe('deepavali');
+  it('excludes the day itself', () => {
+    expect(festivalWithin('2026-11-08', 7)).toBeNull();
+    expect(festivalWithin('2026-11-07', 0)).toBeNull();
+    expect(festivalWithin('2026-11-07', 1)?.key).toBe('deepavali');
   });
 });

@@ -6,6 +6,8 @@ import { listThreads } from '@/lib/chat/store';
 import { createClient } from '@/lib/supabase/server';
 
 export default async function CommandPage() {
+  // Started first so the greeting loads alongside the chat list.
+  const greetingPromise = loadServerGreeting('tuah');
   // The list of chats comes with the page, so it is on screen at first paint
   // instead of after a second request. Demo guests have no saved chats.
   const viewer = await getViewer();
@@ -20,7 +22,7 @@ export default async function CommandPage() {
       <CommandChat
         initialThreads={threads}
         listedAt={listedAt}
-        greeting={await loadServerGreeting('tuah')}
+        greeting={await greetingPromise}
       />
     </Suspense>
   );

@@ -58,7 +58,8 @@ export async function fetchWeather(query: WeatherQuery, deps: WeatherDeps): Prom
         `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(query.city)}&count=5&language=en`,
       )) as { results?: GeoResult[] };
       const results = Array.isArray(geo?.results) ? geo.results : [];
-      const pick = results.find((r) => r.country_code === 'MY') ?? results[0];
+      // Never guess a city from another country: no Malaysian match means no weather.
+      const pick = results.find((r) => r.country_code === 'MY');
       if (!pick || typeof pick.latitude !== 'number' || typeof pick.longitude !== 'number') {
         value = null;
       } else {

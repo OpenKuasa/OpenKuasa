@@ -751,7 +751,6 @@ function ChatPane({
 }) {
   const viewer = useViewer();
   const firstName = viewer.firstName ?? null;
-  const weather = useGreetingWeather({ enabled: !!greeting && viewer.isDemo === false });
   // Signed-up users talk to the real assistant; demo guests get sample answers.
   const live = !viewer.isDemo;
   const [demoMessages, setDemoMessages] = useState<Message[]>([]);
@@ -933,6 +932,10 @@ function ChatPane({
   }
 
   const empty = messages.length === 0;
+  // Only an empty thread shows the greeting, so only it asks for the weather.
+  const weather = useGreetingWeather({
+    enabled: !!greeting && viewer.isDemo === false && empty,
+  });
   const width = compact ? '' : 'mx-auto max-w-2xl';
   // Demo guests keep the starters their sample answers are written for.
   const screenKey = screenFromPath(pathname)?.key;

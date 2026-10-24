@@ -36,21 +36,50 @@ export function readStoredLocation(): StoredLocation | null {
   }
 }
 
+const listeners = new Set<() => void>();
+
+/** Called by `useSyncExternalStore`; also tells same-tab readers the choice changed. */
+export function subscribeLocationChoice(listener: () => void): () => void {
+  listeners.add(listener);
+  return () => {
+    listeners.delete(listener);
+  };
+}
+
+function notify(): void {
+  listeners.forEach((listener) => listener());
+}
+
 export function writeStoredLocation(lat: number, lon: number): void {
   try {
     localStorage.setItem(KEY, JSON.stringify({ lat: roundCoord(lat), lon: roundCoord(lon) }));
   } catch {
     // Storage unavailable: the choice just won't be remembered.
   }
+  notify();
 }
 
-/** Decline device location on this browser (use the workspace city). */
+/** The browser refused location permission: remember it (workspace city, no more asking). */
 export function clearStoredLocation(): void {
   try {
     localStorage.setItem(KEY, 'declined');
   } catch {
     // Storage unavailable.
   }
+  notify();
+}
+
+/**
+ * The person picked the workspace city on purpose. That is not a permission
+ * refusal, so forget any saved device location and leave the choice 'unset'.
+ */
+export function removeStoredLocation(): void {
+  try {
+    localStorage.removeItem(KEY);
+  } catch {
+    // Storage unavailable.
+  }
+  notify();
 }
 
 export function locationChoice(): LocationChoice {
