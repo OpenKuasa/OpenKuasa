@@ -37,6 +37,7 @@ import {
 import { ASSISTANT } from '@/config/nav';
 import { ReplyCard, type CardType } from '@/components/command/reply-cards';
 import { useViewer } from '@/components/app/viewer-context';
+import { tuahHomeHeading } from '@/lib/chat/greeting';
 import {
   ChatKeyNotice,
   DAILY_LIMIT_NOTICE,
@@ -740,7 +741,7 @@ function ChatPane({
   onSettled: () => void;
 }) {
   const viewer = useViewer();
-  const firstName = viewer.isDemo ? null : viewer.name.split(' ')[0];
+  const firstName = viewer.firstName ?? null;
   // Signed-up users talk to the real assistant; demo guests get sample answers.
   const live = !viewer.isDemo;
   const [demoMessages, setDemoMessages] = useState<Message[]>([]);
@@ -954,7 +955,7 @@ function ChatPane({
                     compact ? 'text-xl' : 'text-3xl',
                   )}
                 >
-                  {firstName ? `How can I help, ${firstName}?` : 'How can I help?'}
+                  {tuahHomeHeading(firstName)}
                 </h1>
                 <p className="mt-2 text-sm text-muted-foreground">
                   I’m Tuah, powered by {ASSISTANT.name}

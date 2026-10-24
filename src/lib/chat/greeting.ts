@@ -13,3 +13,8 @@ export function greet(question: string, firstName: string | null | undefined): s
   if (!name) return question;
   return question.endsWith('?') ? `${question.slice(0, -1)}, ${name}?` : `${question}, ${name}`;
 }
+
+/** The Tuah home heading: "How can I help, Aisyah?", or plain when there is no first name. */
+export function tuahHomeHeading(firstName: string | null | undefined): string {
+  return greet('How can I help?', firstName);
+}

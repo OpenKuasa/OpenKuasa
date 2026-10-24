@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { firstNameOf, greet } from '@/lib/chat/greeting';
+import { firstNameOf, greet, tuahHomeHeading } from '@/lib/chat/greeting';
 import { toViewer } from '@/lib/auth/viewer';
 
 /** The Ask greetings use the person's first name when they set one, and nothing in its place when not. */
@@ -23,6 +23,22 @@ describe('firstNameOf', () => {
     expect(firstNameOf('')).toBeNull();
     expect(firstNameOf('   ')).toBeNull();
     expect(firstNameOf(null)).toBeNull();
+  });
+});
+
+describe('the Tuah home heading', () => {
+  it('names the person only by a first name they set', () => {
+    expect(tuahHomeHeading('Aisyah')).toBe('How can I help, Aisyah?');
+    expect(tuahHomeHeading(null)).toBe('How can I help?');
+    expect(tuahHomeHeading(undefined)).toBe('How can I help?');
+  });
+  it('is plain for an email-prefix viewer and a demo guest', () => {
+    const base = { id: 'u1', is_anonymous: false, user_metadata: {} };
+    const org = { id: 'o1', name: 'Kedai', role: 'owner' as const };
+    const email = toViewer({ ...base, email: 'smoke@example.com' } as never, org, null);
+    const demo = toViewer({ ...base, is_anonymous: true, email: null } as never, org, null);
+    expect(tuahHomeHeading(email.firstName)).toBe('How can I help?');
+    expect(tuahHomeHeading(demo.firstName)).toBe('How can I help?');
   });
 });
 
