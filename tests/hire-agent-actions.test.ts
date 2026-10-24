@@ -11,6 +11,7 @@ const USER = '44444444-4444-4444-8444-444444444444';
 const PROPOSAL = '55555555-5555-4555-8555-555555555555';
 const A = '11111111-1111-4111-8111-111111111111';
 const NOTE = '66666666-6666-4666-8666-666666666666';
+const APP = '77777777-7777-4777-8777-777777777777';
 
 type Reply = { data: unknown; error: unknown };
 
@@ -27,6 +28,10 @@ function fake(tables: Record<string, Reply>, rpcReply: Reply = { data: NOTE, err
       const chain: Record<string, unknown> = {
         select: () => chain,
         eq: (c: string, v: unknown) => {
+          read.filters.push([c, v]);
+          return chain;
+        },
+        gte: (c: string, v: unknown) => {
           read.filters.push([c, v]);
           return chain;
         },
@@ -68,6 +73,13 @@ describe('hireAgentNoteInput', () => {
     expect(hireAgentNoteInput.safeParse({ ...appNote, body: '   ' }).success).toBe(false);
     expect(hireAgentNoteInput.safeParse({ ...appNote, label: 'x'.repeat(201) }).success).toBe(false);
     expect(hireAgentNoteInput.safeParse({ ...appNote, stage: 'x'.repeat(65) }).success).toBe(false);
+  });
+
+  it('allows the optional window and minimum of job_few_applicants, as whole numbers in range', () => {
+    expect(hireAgentNoteInput.parse({ ...appNote, window_days: 14, min_count: 2 })).toMatchObject({ window_days: 14, min_count: 2 });
+    expect(hireAgentNoteInput.safeParse({ ...appNote, window_days: 0, min_count: 2 }).success).toBe(false);
+    expect(hireAgentNoteInput.safeParse({ ...appNote, window_days: 14, min_count: 1.5 }).success).toBe(false);
+    expect(hireAgentNoteInput.safeParse({ ...appNote, window_days: 14, min_count: 51 }).success).toBe(false);
   });
 });
 
@@ -163,7 +175,8 @@ describe('hireCreateAgentNote', () => {
     expect(await hireCreateAgentNote(given.ctx, input)).toEqual(stale);
     const missing = fake({
       agent_proposals: proposal('feedback_missing'),
-      hire_interviews: row({ status: 'completed', updated_at: '2026-10-20T05:00:00Z', feedback_at: null }),
+      hire_interviews: row({ status: 'completed', application_id: APP, updated_at: '2026-10-20T05:00:00Z', feedback_at: null }),
+      hire_applications: row({ outcome: 'active' }),
     });
     expect((await hireCreateAgentNote(missing.ctx, input)).ok).toBe(true);
   });
@@ -180,9 +193,47 @@ describe('hireCreateAgentNote', () => {
     }
     const untouched = fake({
       agent_proposals: proposal('interview_not_updated'),
-      hire_interviews: row({ status: 'scheduled', updated_at: '2026-10-01T00:00:00Z', feedback_at: null }),
+      hire_interviews: row({ status: 'scheduled', application_id: APP, updated_at: '2026-10-01T00:00:00Z', feedback_at: null }),
+      hire_applications: row({ outcome: 'active' }),
     });
     expect((await hireCreateAgentNote(untouched.ctx, input)).ok).toBe(true);
+    expect(untouched.reads.find((r) => r.table === 'hire_applications')!.filters).toEqual([
+      ['org_id', ORG],
+      ['id', APP],
+    ]);
+  });
+
+  it.each([['interview_not_updated', 'scheduled'], ['feedback_missing', 'completed']])(
+    '%s no longer applies once its application is withdrawn, rejected or gone',
+    async (check, status) => {
+      const input = as('hire_interview', 'once');
+      const interview = row({ status, application_id: APP, updated_at: '2026-10-01T00:00:00Z', feedback_at: null });
+      for (const application of [row({ outcome: 'withdrawn' }), row({ outcome: 'rejected' }), row(null)]) {
+        const { ctx, rpc } = fake({ agent_proposals: proposal(check), hire_interviews: interview, hire_applications: application });
+        expect(await hireCreateAgentNote(ctx, input)).toEqual(stale);
+        expect(rpc).not.toHaveBeenCalled();
+      }
+    },
+  );
+
+  it('job_few_applicants recounts applications in the window and no longer applies once it reached the minimum', async () => {
+    const input = { ...as('hire_job', '14'), window_days: 14, min_count: 2 };
+    const job = row({ status: 'open', closes_on: null, headcount: 1 });
+    const enough = fake({ agent_proposals: proposal('job_few_applicants'), hire_jobs: job, hire_applications: row([{ id: 'a' }, { id: 'b' }]) });
+    expect(await hireCreateAgentNote(enough.ctx, input)).toEqual(stale);
+    expect(enough.rpc).not.toHaveBeenCalled();
+    const filters = enough.reads.find((r) => r.table === 'hire_applications')!.filters;
+    expect(filters.slice(0, 2)).toEqual([
+      ['org_id', ORG],
+      ['job_id', A],
+    ]);
+    const since = filters.find((f) => f[0] === 'applied_at')![1] as string;
+    // The window starts at Malaysian midnight, 13 days before today (14 days counting today).
+    const expected = new Date(Date.now() + 8 * 3_600_000);
+    expected.setUTCDate(expected.getUTCDate() - 13);
+    expect(since).toBe(`${expected.toISOString().slice(0, 10)}T00:00:00+08:00`);
+    const few = fake({ agent_proposals: proposal('job_few_applicants'), hire_jobs: job, hire_applications: row([{ id: 'a' }]) });
+    expect((await hireCreateAgentNote(few.ctx, input)).ok).toBe(true);
   });
 
   it.each([['job_open_long'], ['job_few_applicants'], ['job_closing_soon']])('%s no longer applies once the job is closed', async (check) => {

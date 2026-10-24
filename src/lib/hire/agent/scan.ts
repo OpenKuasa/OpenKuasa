@@ -19,8 +19,11 @@ export type HireNoteInput = {
   entity_type: HireNoteEntityType;
   label: string;
   body: string;
-  /** When it is raised again: a doubling bucket number, `once`, or a closing date (spec §4.2). */
+  /** When it is raised again: the day threshold reached (N, 2N, 4N…), `once`, or a closing date (spec §4.2). */
   stage: string;
+  /** job_few_applicants only: the check's window and minimum, so approval can recount. Ignored by the RPC. */
+  window_days?: number;
+  min_count?: number;
 };
 
 /** Longest name put into a label or body. */
@@ -45,13 +48,10 @@ function daysSince(iso: string | null, today: string): number | null {
   return day === null ? null : daysBetween(day, today);
 }
 
-/**
- * The bucket number for "raised again only when it gets worse": 1 at n to 2n-1 days, 2 at 2n to
- * 4n-1, 3 at 4n… Null below n.
- */
+/** The day threshold reached, as finance stores it: N, 2N, 4N… (null below N). */
 function bucket(days: number, n: number): string | null {
   const stage = doublingStage(days, n);
-  return stage === null ? null : String(Math.round(Math.log2(stage / n)) + 1);
+  return stage === null ? null : String(stage);
 }
 
 const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
@@ -255,6 +255,8 @@ export function scanHire(raw: HireAgentRaw, now: Date): Candidate[] {
             label: cut(j.title),
             body: `${cut(j.title)} has had ${plural(k, 'new application', 'new applications')} in the last ${days} days.`,
             stage: bucket(n, days) as string,
+            window_days: days,
+            min_count: min,
           },
           `${cut(j.title)} — ${plural(k, 'new application', 'new applications')} in ${days} days`,
         );

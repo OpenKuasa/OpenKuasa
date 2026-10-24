@@ -103,6 +103,21 @@ describe('scanHire', () => {
     }
   });
 
+  it('job_few_applicants alone also carries its window and minimum, and still parses', () => {
+    const r = raw(one('job_few_applicants', { days: 14, min: 3 }), { jobs: [job({ openedAt: ago(20) })] });
+    const [c] = scanHire(r, NOW);
+    expect(Object.keys(c.input as object).sort()).toEqual([
+      'body',
+      'entity_type',
+      'label',
+      'min_count',
+      'stage',
+      'target',
+      'window_days',
+    ]);
+    expect(hireAgentNoteInput.parse(c.input)).toMatchObject({ window_days: 14, min_count: 3 });
+  });
+
   describe('application_unscreened', () => {
     const check = one('application_unscreened', { days: 5 });
 
@@ -115,18 +130,18 @@ describe('scanHire', () => {
         entity_type: 'hire_application',
         label: 'Aisyah · Events Executive',
         body: `Aisyah applied for Events Executive 5 days ago and is still at Applied.${AS_OF}`,
-        stage: '1',
+        stage: '5',
       });
       expect(scanHire(raw(check, { applications: [app({ appliedAt: ago(4) })] }), NOW)).toEqual([]);
     });
 
-    it('stage 1 at 5–9 days, stage 2 at 10–19 days, stage 3 at 20', () => {
+    it('the stage is the day threshold reached: 5 at 5–9 days, 10 at 10–19, 20 at 20', () => {
       const stageAt = (d: number) => inputs(raw(check, { applications: [app({ appliedAt: ago(d) })] }))[0].stage;
-      expect(stageAt(5)).toBe('1');
-      expect(stageAt(9)).toBe('1');
-      expect(stageAt(10)).toBe('2');
-      expect(stageAt(19)).toBe('2');
-      expect(stageAt(20)).toBe('3');
+      expect(stageAt(5)).toBe('5');
+      expect(stageAt(9)).toBe('5');
+      expect(stageAt(10)).toBe('10');
+      expect(stageAt(19)).toBe('10');
+      expect(stageAt(20)).toBe('20');
     });
 
     it('ignores other stages, and withdrawn or rejected applications', () => {
@@ -147,7 +162,7 @@ describe('scanHire', () => {
           entity_type: 'hire_application',
           label: 'Aisyah · Events Executive',
           body: `Aisyah is at Screening for Events Executive with no interview booked, 14 days after applying.${AS_OF}`,
-          stage: '1',
+          stage: '14',
         },
       ]);
       expect(scanHire(raw(check, { applications: [screening({ appliedAt: ago(13) })] }), NOW)).toEqual([]);
@@ -180,8 +195,8 @@ describe('scanHire', () => {
         `Aisyah (Events Executive, Interview) has had no activity for 30 days.${AS_OF}`,
         `Ben (Events Executive, Offer) has had no activity for 14 days.${AS_OF}`,
       ]);
-      expect(got[0].stage).toBe('2');
-      expect(got[1].stage).toBe('1');
+      expect(got[0].stage).toBe('28');
+      expect(got[1].stage).toBe('14');
     });
 
     it('counts from the latest interview activity, not from applied_at', () => {
@@ -295,7 +310,7 @@ describe('scanHire', () => {
           entity_type: 'hire_application',
           label: 'Aisyah · Events Executive',
           body: `The offer to Aisyah for Events Executive was made 7 days ago and has no answer recorded.${AS_OF}`,
-          stage: '1',
+          stage: '7',
         },
       ]);
       expect(scanHire(raw(check, { applications: [app({ stage: 'offer', offeredAt: ago(6) })] }), NOW)).toEqual([]);
@@ -326,7 +341,7 @@ describe('scanHire', () => {
           entity_type: 'hire_job',
           label: 'Events Executive',
           body: `Events Executive has been open 45 days with 1 of 2 hired.${AS_OF}`,
-          stage: '1',
+          stage: '45',
         },
       ]);
     });
@@ -363,7 +378,9 @@ describe('scanHire', () => {
           entity_type: 'hire_job',
           label: 'Events Executive',
           body: `Events Executive has had 1 new application in the last 14 days.${AS_OF}`,
-          stage: '1',
+          stage: '14',
+          window_days: 14,
+          min_count: 2,
         },
       ]);
     });
@@ -432,7 +449,7 @@ describe('scanHire', () => {
           entity_type: 'hire_candidate',
           label: 'Aisyah',
           body: `Aisyah has been on file 90 days, is in the talent pool (Re-engaged), and isn't in any current application.${AS_OF}`,
-          stage: '1',
+          stage: '90',
         },
       ]);
     });

@@ -1,6 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { z } from 'zod';
 import { HIRE_NOTE_ENTITY_TYPES } from '@/lib/hire/agent/scan';
+import { addDays, todayInMalaysia } from '@/lib/people/dates';
 import type { CapResult } from '@/lib/reach/capabilities';
 
 /**
@@ -28,6 +29,9 @@ export const hireAgentNoteInput = z.object({
     .max(500)
     .refine((s) => s.trim().length > 0, 'Write a note'),
   stage: z.string().min(1).max(64),
+  // job_few_applicants only: its window and minimum, so approval can recount (the RPC ignores them).
+  window_days: z.number().int().min(1).max(365).optional(),
+  min_count: z.number().int().min(1).max(50).optional(),
 });
 
 export type HireAgentNoteInput = z.infer<typeof hireAgentNoteInput>;
@@ -120,13 +124,18 @@ async function stillApplies(
     }
     case 'interview_not_updated':
     case 'feedback_missing': {
-      const interview = await readOne(ctx, 'hire_interviews', 'status,updated_at,feedback_at', id);
+      const interview = await readOne(ctx, 'hire_interviews', 'status,application_id,updated_at,feedback_at', id);
       if (interview === 'error') return 'unreadable';
       if (!interview) return 'stale';
-      if (checkKey === 'interview_not_updated') {
-        return interview.status === 'scheduled' && !after(interview.updated_at, proposedAt) ? 'live' : 'stale';
-      }
-      return interview.status === 'completed' && interview.feedback_at == null ? 'live' : 'stale';
+      const matches =
+        checkKey === 'interview_not_updated'
+          ? interview.status === 'scheduled' && !after(interview.updated_at, proposedAt)
+          : interview.status === 'completed' && interview.feedback_at == null;
+      if (!matches) return 'stale';
+      // Its application withdrawn, rejected or gone since: no longer a hiring matter to note.
+      const app = await readOne(ctx, 'hire_applications', 'outcome', String(interview.application_id));
+      if (app === 'error') return 'unreadable';
+      return app && app.outcome === 'active' ? 'live' : 'stale';
     }
     case 'job_open_long':
     case 'job_few_applicants':
@@ -144,6 +153,18 @@ async function stillApplies(
         if (hired === 'error') return 'unreadable';
         const headcount = typeof job.headcount === 'number' ? job.headcount : 1;
         return hired.length >= headcount ? 'stale' : 'live';
+      }
+      if (checkKey === 'job_few_applicants' && input.window_days && input.min_count) {
+        // Recount as the scan does: applications received on the last `window_days` Malaysian days.
+        const first = addDays(todayInMalaysia(new Date()), 1 - input.window_days);
+        const { data, error } = await ctx.client
+          .from('hire_applications')
+          .select('id')
+          .eq('org_id', ctx.orgId)
+          .eq('job_id', id)
+          .gte('applied_at', `${first}T00:00:00+08:00`);
+        if (error) return 'unreadable';
+        return (data ?? []).length >= input.min_count ? 'stale' : 'live';
       }
       return 'live';
     }
