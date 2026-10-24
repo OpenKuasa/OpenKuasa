@@ -51,13 +51,21 @@ begin
       raise exception 'service_role may write %', r.tbl;
     end if;
   end loop;
-  if has_column_privilege('service_role', 'public.hire_candidates', 'email', 'select')
-     or has_column_privilege('service_role', 'public.hire_candidates', 'phone', 'select')
-     or has_column_privilege('service_role', 'public.hire_applications', 'cover_letter', 'select')
-     or has_column_privilege('service_role', 'public.hire_applications', 'reject_reason', 'select')
-     or has_column_privilege('service_role', 'public.hire_interviews', 'feedback_comments', 'select')
-     or has_column_privilege('service_role', 'public.hire_agent_notes', 'body', 'select')
-     or has_column_privilege('service_role', 'public.hire_agent_notes', 'entity_label', 'select') then
-    raise exception 'service_role may read a private hiring column or a note''s body or label';
+  -- Every private column the header names stays unreadable.
+  select string_agg(v.tbl || '.' || v.col, ', ') into missing
+    from (values
+      ('hire_candidates', 'email'), ('hire_candidates', 'phone'), ('hire_candidates', 'headline'),
+      ('hire_candidates', 'location'), ('hire_candidates', 'skills'), ('hire_candidates', 'source'),
+      ('hire_applications', 'cv_url'), ('hire_applications', 'cv_path'), ('hire_applications', 'cover_letter'),
+      ('hire_applications', 'portfolio_url'), ('hire_applications', 'expected_salary_cents'),
+      ('hire_applications', 'rating'), ('hire_applications', 'source'), ('hire_applications', 'reject_reason'),
+      ('hire_interviews', 'notes'), ('hire_interviews', 'feedback_rating'),
+      ('hire_interviews', 'feedback_recommendation'), ('hire_interviews', 'feedback_comments'),
+      ('hire_jobs', 'description'), ('hire_jobs', 'salary_min_cents'), ('hire_jobs', 'salary_max_cents'),
+      ('hire_agent_notes', 'body'), ('hire_agent_notes', 'entity_label')
+    ) v(tbl, col)
+   where has_column_privilege('service_role', ('public.' || v.tbl)::regclass, v.col, 'select');
+  if missing is not null then
+    raise exception 'service_role may read private columns: %', missing;
   end if;
 end $$;
