@@ -79,6 +79,7 @@ import InterviewsScreen from '@/screens/hire/interviews';
 import TalentPoolScreen from '@/screens/hire/talent-pool';
 import CareersPageScreen from '@/screens/hire/careers-page';
 import HireSettingsScreen from '@/screens/hire/settings';
+import HireAgentsScreen from '@/screens/hire/agents';
 
 // Bendahara (finance / Safa)
 import FinAssistantScreen from '@/screens/finance/assistant';
@@ -179,6 +180,7 @@ export const SCREENS: Record<string, ComponentType> = {
 
   // Lekir (HIRA Recruit)
   'hire/assistant': HireAssistantScreen,
+  'hire/agents': HireAgentsScreen,
   'hire/dashboard': RecruitDashboardScreen,
   'hire/jobs': JobsScreen,
   'hire/candidates': CandidatesScreen,

@@ -11,6 +11,7 @@ const EMPTY: NavBadges = {
   pendingProposals: 0,
   pendingCrmProposals: 0,
   pendingFinanceProposals: 0,
+  pendingHireProposals: 0,
   unreadAnnouncements: 0,
   awaitingAcknowledgement: 0,
   waitingLeave: 0,

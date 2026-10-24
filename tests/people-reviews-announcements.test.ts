@@ -323,6 +323,7 @@ describe('nav badges set from a page', () => {
     pendingProposals: 3,
     pendingCrmProposals: 0,
     pendingFinanceProposals: 0,
+    pendingHireProposals: 0,
     unreadAnnouncements: 0,
     awaitingAcknowledgement: 0,
     waitingLeave: 0,

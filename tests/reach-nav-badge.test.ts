@@ -6,6 +6,7 @@ const ZERO: NavBadges = {
   pendingProposals: 0,
   pendingCrmProposals: 0,
   pendingFinanceProposals: 0,
+  pendingHireProposals: 0,
   unreadAnnouncements: 0,
   awaitingAcknowledgement: 0,
   waitingLeave: 0,
@@ -29,11 +30,12 @@ describe('AI Agents nav badge', () => {
     expect(agents?.badge).toBe('pendingCrmProposals');
   });
 
-  it('is one of exactly eleven badged nav items across every product (the others are Kasturi AI Agents, Bendahara AI Agents, Lekiu Announcements, My Documents, the five approval pages and Shift Calendar)', () => {
+  it('is one of exactly twelve badged nav items across every product (the others are Kasturi AI Agents, Bendahara AI Agents, Lekir AI Agents, Lekiu Announcements, My Documents, the five approval pages and Shift Calendar)', () => {
     const badged = PRODUCTS.flatMap((p) => p.sections.flatMap((s) => s.items)).filter((i) => i.badge);
     expect(badged.map((i) => [i.slug, i.badge]).sort()).toEqual([
       ['agents', 'pendingCrmProposals'],
       ['agents', 'pendingFinanceProposals'],
+      ['agents', 'pendingHireProposals'],
       ['agents', 'pendingProposals'],
       ['announcements', 'unreadAnnouncements'],
       ['approve-claims', 'waitingClaims'],

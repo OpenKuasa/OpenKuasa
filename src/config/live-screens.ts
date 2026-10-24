@@ -46,6 +46,8 @@ export const LIVE_SCREENS: ReadonlySet<string> = new Set([
   // Lekir: jobs, applications, candidates, interviews and the talent pool can be changed.
   // Settings saves the application form and links to where the rest is set.
   'hire/assistant',
+  // The focus agent: it suggests notes on applications, interviews, jobs and pool candidates.
+  'hire/agents',
   'hire/dashboard',
   'hire/jobs',
   'hire/candidates',

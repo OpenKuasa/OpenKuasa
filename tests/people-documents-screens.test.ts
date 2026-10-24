@@ -342,6 +342,7 @@ describe('the navigation badge figure', () => {
       [
         'agents:pendingCrmProposals',
         'agents:pendingFinanceProposals',
+        'agents:pendingHireProposals',
         'agents:pendingProposals',
         'announcements:unreadAnnouncements',
         'my-documents:awaitingAcknowledgement',

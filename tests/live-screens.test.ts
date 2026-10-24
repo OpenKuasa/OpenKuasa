@@ -22,8 +22,8 @@ describe('live screens', () => {
     expect(isSampleScreen('/command')).toBe(false);
   });
 
-  it('counts all nine Lekir screens as live', () => {
-    for (const slug of ['assistant', 'dashboard', 'jobs', 'candidates', 'applications', 'interviews', 'talent-pool', 'careers-page', 'settings']) {
+  it('counts all ten Lekir screens as live', () => {
+    for (const slug of ['assistant', 'agents', 'dashboard', 'jobs', 'candidates', 'applications', 'interviews', 'talent-pool', 'careers-page', 'settings']) {
       expect(isSampleScreen(`/hire/${slug}`), slug).toBe(false);
     }
   });
