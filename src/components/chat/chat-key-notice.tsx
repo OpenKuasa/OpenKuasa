@@ -10,6 +10,14 @@ import {
 import { cn } from '@/lib/utils';
 
 const AI_KEY_HREF = '/account/ai';
+const KEY_GUIDE_HREF = '/docs/getting-started/openrouter-key';
+
+const KEY_STEPS = [
+  'Create a free account at openrouter.ai.',
+  'Add a few dollars of credit.',
+  'Create a key.',
+  'Paste it on the AI key page.',
+];
 
 /**
  * Loads who is paying for chat (workspace key or free questions) and lets the
@@ -104,36 +112,72 @@ export function ChatKeyNotice({
       ? 'font-semibold underline underline-offset-2 hover:opacity-90'
       : 'font-semibold text-primary hover:underline';
 
+  const boxClass = cn(
+    'rounded-lg px-3 py-2 text-xs',
+    tone === 'onPrimary'
+      ? 'bg-primary-foreground/10 text-primary-foreground ring-1 ring-inset ring-primary-foreground/20'
+      : 'border bg-muted/50 text-muted-foreground',
+    className,
+  );
+
+  if (locked) {
+    return (
+      <div role="alert" className={cn(boxClass, 'space-y-2')}>
+        <p className="flex items-start gap-2">
+          <KeyRound className="mt-0.5 size-3.5 shrink-0" />
+          <span>
+            {status.freeLimit > 0
+              ? `You have used your ${status.freeLimit} free questions this week. `
+              : ''}
+            {status.canManageKey ? (
+              <strong className="font-semibold">Keep chatting with your own OpenRouter key</strong>
+            ) : (
+              'Ask a workspace owner or admin to add an OpenRouter key to keep chatting.'
+            )}
+          </span>
+        </p>
+        {status.canManageKey && (
+          <ol className="list-decimal space-y-0.5 pl-9">
+            {KEY_STEPS.map((step) => (
+              <li key={step}>{step}</li>
+            ))}
+          </ol>
+        )}
+        <p className="flex flex-wrap items-center gap-x-4 gap-y-1 pl-5">
+          {status.canManageKey && (
+            <Link
+              href={AI_KEY_HREF}
+              className={
+                tone === 'onPrimary'
+                  ? 'rounded-md bg-primary-foreground px-2.5 py-1 font-semibold text-primary hover:opacity-90'
+                  : 'rounded-md bg-primary px-2.5 py-1 font-semibold text-primary-foreground hover:opacity-90'
+              }
+            >
+              Add your key
+            </Link>
+          )}
+          <Link href={KEY_GUIDE_HREF} className={linkClass}>
+            Step-by-step guide
+          </Link>
+        </p>
+      </div>
+    );
+  }
+
   return (
-    <p
-      role={locked ? 'alert' : 'note'}
-      className={cn(
-        'flex items-start gap-2 rounded-lg px-3 py-2 text-xs',
-        tone === 'onPrimary'
-          ? 'bg-primary-foreground/10 text-primary-foreground ring-1 ring-inset ring-primary-foreground/20'
-          : 'border bg-muted/50 text-muted-foreground',
-        className,
-      )}
-    >
+    <p role="note" className={cn(boxClass, 'flex items-start gap-2')}>
       <KeyRound className="mt-0.5 size-3.5 shrink-0" />
       <span>
-        {locked
-          ? status.freeLimit > 0
-            ? `You have used your ${status.freeLimit} free questions this week. `
-            : 'Chat needs an OpenRouter key. '
-          : `${status.freeRemaining} of ${status.freeLimit} free questions left this week. `}
+        {`${status.freeRemaining} of ${status.freeLimit} free questions left this week. `}
         {status.canManageKey ? (
           <>
             <Link href={AI_KEY_HREF} className={linkClass}>
               Add your OpenRouter key
             </Link>{' '}
-            {locked ? 'to keep chatting.' : 'for unlimited chat.'}
+            for unlimited chat.
           </>
         ) : (
-          <>
-            Ask a workspace owner or admin to add an OpenRouter key
-            {locked ? ' to keep chatting.' : ' for unlimited chat.'}
-          </>
+          'Ask a workspace owner or admin to add an OpenRouter key for unlimited chat.'
         )}
       </span>
     </p>
