@@ -1,6 +1,6 @@
 import 'server-only';
 import { clientKey, requestClientAddress } from './client-address';
-import { consumeRateLimits, retryMinutes, type RateLimitCheck } from './rate-limit';
+import { consumeRateLimits, retryMinutes, type RateLimitCheck, type RateLimitVerdict } from './rate-limit';
 
 /**
  * Every limit the app keeps on attempts, in one place, and the one-line
@@ -59,6 +59,9 @@ export const FORM_VIEW_PER_CLIENT_AND_FORM: Rule = { bucket: 'form_view_client_f
 export const CHATBOT_MESSAGE_PER_CLIENT: Rule = { bucket: 'chatbot_message_client', limit: 20, unknownLimit: 200, windowSeconds: HOUR };
 /** Requests for a person made through those chatbots by one client. */
 export const CHATBOT_PERSON_PER_CLIENT: Rule = { bucket: 'chatbot_person_client', limit: 5, unknownLimit: 50, windowSeconds: HOUR };
+
+/** Weather lookups for the greeting by one signed-in user (keyed by user id, not address). */
+export const WEATHER_PER_USER: Rule = { bucket: 'weather', limit: 30, windowSeconds: 10 * MINUTE };
 
 /** What a person is told once a limit on signing in, signing up or resetting is used up. */
 export const tooManyAttempts = (retryAfterSeconds: number) => {
@@ -169,4 +172,14 @@ export async function chatbotLimited(rule: Rule): Promise<'ok' | 'limited' | 'un
   const verdict = await consumeRateLimits([perClient(rule, client)]);
   if (!verdict.allowed) return 'limited';
   return verdict.enforced ? 'ok' : 'unavailable';
+}
+
+/** Before a weather lookup for a signed-in user; the verdict says whether it may go ahead. */
+export async function weatherLimited(userId: string): Promise<RateLimitVerdict> {
+  return consumeRateLimits([{
+    bucket: WEATHER_PER_USER.bucket,
+    value: userId,
+    limit: WEATHER_PER_USER.limit,
+    windowSeconds: WEATHER_PER_USER.windowSeconds,
+  }]);
 }
