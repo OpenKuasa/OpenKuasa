@@ -61,6 +61,9 @@ import { ChangeList } from '@/components/chat/tool-cards';
 import { changeHeading, changeRows } from '@/lib/chat/change-rows';
 import { greet } from '@/lib/chat/greeting';
 import { useOptionalViewer } from '@/components/app/viewer-context';
+import { GreetingHeading } from '@/components/chat/greeting-heading';
+import { useGreetingWeather } from '@/components/chat/use-greeting-weather';
+import type { ServerGreeting } from '@/lib/greeting/types';
 
 /** Who answers in the card, and where its questions go. Plain strings, so a server screen can pass it. */
 export type AskPersona = {
@@ -86,12 +89,17 @@ export function AskHero({
   persona,
   prompts,
   isDemo,
+  greeting,
 }: {
   persona: AskPersona;
   prompts: string[];
   isDemo: boolean;
+  /** The personal greeting from the server; without it the plain heading shows. */
+  greeting?: ServerGreeting;
 }) {
   const viewer = useOptionalViewer();
+  // Weather only for real (non-demo) viewers, and only when a greeting is shown.
+  const weather = useGreetingWeather({ enabled: !!greeting && viewer?.isDemo === false });
   const [input, setInput] = useState('');
   const [demoAsked, setDemoAsked] = useState(false);
   const [focused, setFocused] = useState(false);
@@ -173,9 +181,26 @@ export function AskHero({
             <Sparkles className="size-3.5 animate-twinkle" />
             {persona.name} · {persona.role}
           </div>
-          <h1 className="mt-1 text-2xl font-bold tracking-tight">
-            {greet(persona.heading, viewer?.firstName)}
-          </h1>
+          {greeting ? (
+            <div className="mt-1">
+              <GreetingHeading
+                greeting={greeting}
+                firstName={viewer?.firstName ?? null}
+                weatherPhrase={weather.phrase}
+                onAsk={(q) => submit(q)}
+                location={{
+                  canAsk: weather.canAskLocation,
+                  choice: weather.choice,
+                  onUseDevice: weather.useDeviceLocation,
+                  onUseCity: weather.useCityInstead,
+                }}
+              />
+            </div>
+          ) : (
+            <h1 className="mt-1 text-2xl font-bold tracking-tight">
+              {greet(persona.heading, viewer?.firstName)}
+            </h1>
+          )}
           <div className="mt-3 flex flex-wrap gap-2">
             {prompts.map((p) => (
               <button

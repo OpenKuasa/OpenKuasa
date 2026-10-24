@@ -38,6 +38,9 @@ import { ASSISTANT } from '@/config/nav';
 import { ReplyCard, type CardType } from '@/components/command/reply-cards';
 import { useViewer } from '@/components/app/viewer-context';
 import { tuahHomeHeading } from '@/lib/chat/greeting';
+import { GreetingHeading } from '@/components/chat/greeting-heading';
+import { useGreetingWeather } from '@/components/chat/use-greeting-weather';
+import type { ServerGreeting } from '@/lib/greeting/types';
 import {
   ChatKeyNotice,
   DAILY_LIMIT_NOTICE,
@@ -287,7 +290,10 @@ export function SariConversation({
   listedAt,
   pathname,
   onClose,
+  greeting,
 }: {
+  /** The personal greeting from the server; without it the plain heading shows. */
+  greeting?: ServerGreeting;
   /** The full page: saved chats in a column beside the conversation. */
   showSidebar?: boolean;
   /** The floating assistant: a narrow panel with its own header. */
@@ -680,6 +686,7 @@ export function SariConversation({
             keep={keepsHistory}
             compact={compact}
             pathname={compact ? pathname : undefined}
+            greeting={greeting}
             onAsk={handleAsk}
             onSettled={handleSettled}
           />
@@ -724,9 +731,11 @@ function ChatPane({
   keep,
   compact,
   pathname,
+  greeting,
   onAsk,
   onSettled,
 }: {
+  greeting?: ServerGreeting;
   chat: LiveChat;
   /** Where the last question stood when this thread was read back. */
   answer: AnswerState;
@@ -742,6 +751,7 @@ function ChatPane({
 }) {
   const viewer = useViewer();
   const firstName = viewer.firstName ?? null;
+  const weather = useGreetingWeather({ enabled: !!greeting && viewer.isDemo === false });
   // Signed-up users talk to the real assistant; demo guests get sample answers.
   const live = !viewer.isDemo;
   const [demoMessages, setDemoMessages] = useState<Message[]>([]);
@@ -949,14 +959,31 @@ function ChatPane({
                 >
                   <Sparkles className={compact ? 'size-6' : 'size-7'} />
                 </div>
-                <h1
-                  className={cn(
-                    'font-bold tracking-tight',
-                    compact ? 'text-xl' : 'text-3xl',
-                  )}
-                >
-                  {tuahHomeHeading(firstName)}
-                </h1>
+                {greeting ? (
+                  <GreetingHeading
+                    greeting={greeting}
+                    firstName={firstName}
+                    weatherPhrase={weather.phrase}
+                    onAsk={(q) => send(q)}
+                    location={{
+                      canAsk: weather.canAskLocation,
+                      choice: weather.choice,
+                      onUseDevice: weather.useDeviceLocation,
+                      onUseCity: weather.useCityInstead,
+                    }}
+                    compact={compact}
+                    headingClassName={compact ? 'text-xl' : 'text-3xl'}
+                  />
+                ) : (
+                  <h1
+                    className={cn(
+                      'font-bold tracking-tight',
+                      compact ? 'text-xl' : 'text-3xl',
+                    )}
+                  >
+                    {tuahHomeHeading(firstName)}
+                  </h1>
+                )}
                 <p className="mt-2 text-sm text-muted-foreground">
                   I’m Tuah, powered by {ASSISTANT.name}
                 </p>
