@@ -57,8 +57,10 @@ describe('Bendahara Overview (live)', () => {
     expect(html).toContain('Paid of invoiced, last 90 days');
     expect(html).toContain('Nothing records when a customer opens an invoice yet.');
     expect(html).toContain('Invoices post to one sales account, so there are no categories yet.');
-    expect(html).toContain('Bendahara&#x27;s agents are coming later.');
-    expect(html.match(/Not available yet/g)?.length).toBe(3);
+    // The AI agents card is live: the waiting count and a link to the agents screen.
+    expect(html).toContain('suggestions waiting for you');
+    expect(html).toContain('href="/finance/agents"');
+    expect(html.match(/Not available yet/g)?.length).toBe(2);
     expect(html).toContain('AREA');
   });
 

@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { AgentsOverview } from '@/components/agents/agents-overview';
 import {
   Bot,
   Cake,
@@ -24,7 +25,7 @@ import { LiveDot } from '@/components/ui/live-dot';
 import { formatDay } from '@/lib/people/dates';
 import { approvalsHeading, buildPeopleOverviewModel } from '@/lib/people/overview';
 import { AskLekiuHero } from '@/screens/people/ask-lekiu-hero';
-import { DEPARTMENT_COLORS, HR_ONLY, LOAD_FAILED, Muted, NOT_AVAILABLE, NotLinkedCard, loadPeople } from '@/screens/people/parts';
+import { DEPARTMENT_COLORS, HR_ONLY, LOAD_FAILED, Muted, NotLinkedCard, loadPeople } from '@/screens/people/parts';
 import { loadServerGreeting } from '@/lib/greeting/server';
 
 /* ---- static config ------------------------------------------------ */
@@ -219,8 +220,10 @@ export default async function OverviewScreen() {
                 </div>
               ))}
             </div>
+          ) : viewer.isHr ? (
+            <AgentsOverview badge="pendingPeopleProposals" href="/people/agents" />
           ) : (
-            NOT_AVAILABLE
+            HR_ONLY
           )}
         </BentoCard>
 

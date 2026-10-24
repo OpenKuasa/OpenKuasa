@@ -1,3 +1,4 @@
+import { AgentsOverview } from '@/components/agents/agents-overview';
 import {
   BadgeCheck,
   Bot,
@@ -634,7 +635,7 @@ export default async function OverviewScreen() {
               ))}
             </div>
           ) : (
-            <NotYet why="Bendahara's agents are coming later." />
+            <AgentsOverview badge="pendingFinanceProposals" href="/finance/agents" />
           )}
         </BentoCard>
       </BentoGrid>

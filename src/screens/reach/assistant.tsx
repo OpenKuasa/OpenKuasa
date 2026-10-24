@@ -1,3 +1,4 @@
+import { AgentsOverview } from '@/components/agents/agents-overview';
 import {
   Bot,
   CalendarDays,
@@ -300,7 +301,7 @@ export default async function OverviewScreen() {
               ))}
             </div>
           ) : (
-            na
+            <AgentsOverview badge="pendingProposals" href="/reach/agents" />
           )}
         </BentoCard>
         <BentoCard
