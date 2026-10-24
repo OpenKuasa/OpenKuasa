@@ -68,6 +68,7 @@ import ScorecardScreen from '@/screens/people/scorecard';
 import ReviewScoresScreen from '@/screens/people/review-scores';
 import TrainingScreen from '@/screens/people/training';
 import HrSettingsScreen from '@/screens/people/settings';
+import PeopleAgentsScreen from '@/screens/people/agents';
 
 // Lekir (hire / HIRA Recruit)
 import HireAssistantScreen from '@/screens/hire/assistant';
@@ -177,6 +178,7 @@ export const SCREENS: Record<string, ComponentType> = {
   'people/review-scores': ReviewScoresScreen,
   'people/training': TrainingScreen,
   'people/settings': HrSettingsScreen,
+  'people/agents': PeopleAgentsScreen,
 
   // Lekir (HIRA Recruit)
   'hire/assistant': HireAssistantScreen,

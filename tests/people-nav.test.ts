@@ -3,21 +3,21 @@ import { PRODUCTS, getProduct, visibleSections } from '@/config/nav';
 import { buildSearchEntries } from '@/components/app/nav-search-entries';
 
 const people = getProduct('people')!;
-const HR_ONLY = ['approve-leave', 'approve-claims', 'approve-overtime', 'approve-time-off', 'approve-shift-swaps', 'payroll', 'payment-vouchers', 'settings', 'attendance'];
+const HR_ONLY = ['approve-leave', 'approve-claims', 'approve-overtime', 'approve-time-off', 'approve-shift-swaps', 'payroll', 'payment-vouchers', 'settings', 'agents', 'attendance'];
 const TEAM = ['approve-leave', 'approve-claims', 'approve-overtime', 'approve-time-off', 'approve-shift-swaps', 'attendance'];
-const HR_STILL = ['payroll', 'payment-vouchers', 'settings'];
+const HR_STILL = ['payroll', 'payment-vouchers', 'settings', 'agents'];
 const slugs = (role: 'owner' | 'admin' | 'member' | 'viewer', isDemo = false, managesTeam = false) =>
   visibleSections(people, { role, isDemo, managesTeam }).flatMap((section) => section.items.map((item) => item.slug));
 
 describe('Lekiu navigation by role', () => {
-  it('marks six pages for HR or a manager and three for HR alone', () => {
+  it('marks six pages for HR or a manager and four for HR alone', () => {
     const marked = people.sections.flatMap((s) => s.items).filter((i) => i.needs !== undefined);
     expect(marked.filter((i) => i.needs === 'approve-team').map((i) => i.slug).sort()).toEqual([...TEAM].sort());
     expect(marked.filter((i) => i.needs === 'approve').map((i) => i.slug).sort()).toEqual([...HR_STILL].sort());
-    expect(marked).toHaveLength(9);
+    expect(marked).toHaveLength(10);
   });
 
-  it.each(['member', 'viewer'] as const)('shows a %s who manages a team the six team pages and none of the HR-only three', (role) => {
+  it.each(['member', 'viewer'] as const)('shows a %s who manages a team the six team pages and none of the HR-only four', (role) => {
     const seen = slugs(role, false, true);
     for (const slug of TEAM) expect(seen).toContain(slug);
     for (const slug of HR_STILL) expect(seen).not.toContain(slug);
@@ -36,7 +36,7 @@ describe('Lekiu navigation by role', () => {
   });
 
   it.each(['owner', 'admin'] as const)('shows an %s every page', (role) => {
-    expect(slugs(role)).toHaveLength(31);
+    expect(slugs(role)).toHaveLength(32);
   });
 
   it.each(['member', 'viewer'] as const)('hides the HR pages from a %s, and the sections left empty', (role) => {
@@ -59,7 +59,7 @@ describe('Lekiu navigation by role', () => {
   });
 
   it('shows a demo visitor every page, whatever their role', () => {
-    expect(slugs('viewer', true)).toHaveLength(31);
+    expect(slugs('viewer', true)).toHaveLength(32);
   });
 
   it('changes nothing for the other products', () => {
@@ -81,11 +81,11 @@ describe('jump-to search by role', () => {
     expect(hrHrefs('member')).toEqual([]);
   });
 
-  it('offers an owner all nine', () => {
-    expect(hrHrefs('owner')).toHaveLength(9);
+  it('offers an owner all ten', () => {
+    expect(hrHrefs('owner')).toHaveLength(10);
   });
 
-  it('offers a member who manages a team exactly the six team pages of the nine', () => {
+  it('offers a member who manages a team exactly the six team pages of the ten', () => {
     const hrefs = buildSearchEntries({ role: 'member', isDemo: false, managesTeam: true })
       .map((e) => e.href)
       .filter((href) => HR_ONLY.some((slug) => href === `/people/${slug}`));

@@ -89,6 +89,8 @@ export const LIVE_SCREENS: ReadonlySet<string> = new Set([
   'people/review-scores',
   'people/training',
   'people/settings',
+  // The focus agent: it suggests notes on team records for HR to approve. HR only.
+  'people/agents',
 
   // Bendahara. Dashboard and Overview read the books (2026-10-23); the Overview's cards with no
   // source say so, and its demo still shows fixed figures.

@@ -21,6 +21,7 @@ export default async function AppLayout({
     pendingCrmProposals: 0,
     pendingFinanceProposals: 0,
     pendingHireProposals: 0,
+    pendingPeopleProposals: 0,
     unreadAnnouncements: 0,
     awaitingAcknowledgement: 0,
     waitingLeave: 0,
@@ -33,6 +34,10 @@ export default async function AppLayout({
   if (!viewer.isDemo && viewer.orgId) {
     try {
       const supabase = await createClient();
+      // Lekiu's AI Agents: HR only, so 0 for anyone else before any query runs.
+      const pendingPeople = can(viewer.role, 'approve')
+        ? countPendingProposals(supabase, viewer.orgId, 'people').catch(() => 0)
+        : Promise.resolve(0);
       // Lekiu: does this member manage a team? That decides which approval pages the nav shows them. Owners and
       // admins see those pages by role. A failed read is "no team" (readMyTeam never throws).
       // Lekir's own count, started alongside the others below.
@@ -47,6 +52,7 @@ export default async function AppLayout({
       badges.pendingCrmProposals = pendingCrm;
       badges.pendingFinanceProposals = pendingFinance;
       badges.pendingHireProposals = await pendingHire;
+      badges.pendingPeopleProposals = await pendingPeople;
       if (team.length > 0) viewer = { ...viewer, managesTeam: true };
     } catch {
       // keep the defaults

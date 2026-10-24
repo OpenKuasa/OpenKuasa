@@ -20,8 +20,11 @@ function outcomeOf(p: AgentProposal): Outcome {
   return p.status as Outcome;
 }
 
-/** A collapsed trail of the last few decided proposals and their outcome. */
-export function RecentlyDecided({ decided }: { decided: AgentProposal[] }) {
+/**
+ * A collapsed trail of the last few decided proposals and their outcome. `labels`, by proposal id,
+ * is shown in place of a stored title (Lekiu keeps the person's name out of the title).
+ */
+export function RecentlyDecided({ decided, labels }: { decided: AgentProposal[]; labels?: Record<string, string> }) {
   if (decided.length === 0) return null;
   return (
     <details className="space-y-2">
@@ -34,7 +37,7 @@ export function RecentlyDecided({ decided }: { decided: AgentProposal[] }) {
           const Icon = outcome.Icon;
           return (
             <li key={p.id} className="flex items-center justify-between gap-2 p-3 text-sm">
-              <span className="min-w-0 truncate text-muted-foreground">{p.title}</span>
+              <span className="min-w-0 truncate text-muted-foreground">{labels?.[p.id] ?? p.title}</span>
               <span className="inline-flex shrink-0 items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-medium text-muted-foreground">
                 <Icon className="size-3.5" aria-hidden="true" />
                 {outcome.label}

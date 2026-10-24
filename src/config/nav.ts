@@ -56,6 +56,7 @@ export type NavBadgeKey =
   | 'pendingCrmProposals'
   | 'pendingFinanceProposals'
   | 'pendingHireProposals'
+  | 'pendingPeopleProposals'
   | 'unreadAnnouncements'
   | 'awaitingAcknowledgement'
   | 'waitingLeave'
@@ -268,7 +269,10 @@ export const PRODUCTS: Product[] = [
       },
       {
         label: 'Configuration',
-        items: [{ label: 'Settings', slug: 'settings', icon: Settings, needs: 'approve' }],
+        items: [
+          { label: 'Settings', slug: 'settings', icon: Settings, needs: 'approve' },
+          { label: 'AI Agents', slug: 'agents', icon: Bot, needs: 'approve', badge: 'pendingPeopleProposals' },
+        ],
       },
     ],
   },

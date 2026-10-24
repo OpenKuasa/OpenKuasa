@@ -14,8 +14,9 @@ type ActionResult = { ok: boolean; error?: string };
 /**
  * A suggestion shown as a record link plus one line saying what approving does, built on the server.
  * `why` names the check that raised it; with a view the model's own rationale is not shown.
+ * `label`, when set, is shown in place of the stored title (Lekiu keeps the person's name out of the title).
  */
-export type SuggestionView = { href: string | null; effect: string; why: string | null };
+export type SuggestionView = { href: string | null; effect: string; why: string | null; label?: string };
 
 export function PendingApprovals({
   proposals,
@@ -74,11 +75,11 @@ export function PendingApprovals({
                 {view?.href ? (
                   <p className="font-medium">
                     <Link href={view.href} className="text-primary underline-offset-4 hover:underline">
-                      {p.title}
+                      {view.label ?? p.title}
                     </Link>
                   </p>
                 ) : (
-                  <p className="font-medium">{p.title}</p>
+                  <p className="font-medium">{view?.label ?? p.title}</p>
                 )}
                 {view ? (
                   view.why && <p className="text-muted-foreground">Why it came up: {view.why}</p>
