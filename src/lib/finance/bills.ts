@@ -175,6 +175,11 @@ export type BillDisplayStatus = 'draft' | 'pending' | 'overdue' | 'paid' | 'void
 export type BillListRow = {
   id: string;
   bill_no: string | null;
+  /**
+   * The supplier's own invoice number, as typed on the bill. The reads always give it; it is optional so that
+   * rows made by hand (samples, tests) need not. #242: the approve step shows it beside each bill.
+   */
+  supplier_ref?: string | null;
   supplier_id: string;
   supplier_name: string;
   bill_date: string;
@@ -251,7 +256,7 @@ export type BillDetail = BillListRow & { supplier_ref: string | null; notes: str
 export type SaveAndPostResult = FinResult<{ id: string; bill_no: string }> & { draftId?: string };
 
 const LIST_COLUMNS =
-  'id,bill_no,supplier_id,supplier_name,bill_date,due_date,total,paid,set_off,credited,balance,display_status,' +
+  'id,bill_no,supplier_ref,supplier_id,supplier_name,bill_date,due_date,total,paid,set_off,credited,balance,display_status,' +
   // The rate twice: as a number to show, and as exact text (PostgREST's cast) to work money from.
   'currency,fx_rate,fx_rate_text:fx_rate::text,fx_rate_source,fx_rate_date,fx_rate_provider,fx_rate_reference,' +
   'subtotal_myr,sst_myr,total_myr,balance_myr,paid_myr';
