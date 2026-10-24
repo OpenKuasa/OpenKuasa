@@ -28,5 +28,6 @@ export default function robots(): MetadataRoute.Robots {
         '/finance',
       ],
     },
+    sitemap: 'https://openkuasa.com/sitemap.xml',
   };
 }
