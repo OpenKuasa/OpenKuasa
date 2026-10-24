@@ -77,16 +77,43 @@ async function removedFrom(supabase: SupabaseClient, orgId: string): Promise<str
   return `You are no longer a member of ${name ?? THAT_WORKSPACE}. Disconnect this connection in Account → Developers.`;
 }
 
+/** How long a key's second-factor answer is kept, and how many keys are kept at most. */
+const FACTOR_TTL_MS = 60_000;
+const FACTOR_CACHE_MAX = 1000;
+/** credentialId → whether the person had a verified second factor, until `expires`. Never a token. */
+const factorCache = new Map<string, { hasFactor: boolean; expires: number }>();
+
+function rememberFactor(credentialId: string, hasFactor: boolean, now: number): void {
+  for (const [id, entry] of factorCache) if (entry.expires <= now) factorCache.delete(id);
+  // Still full: drop the oldest (a Map keeps insertion order).
+  while (factorCache.size >= FACTOR_CACHE_MAX) factorCache.delete(factorCache.keys().next().value as string);
+  factorCache.set(credentialId, { hasFactor, expires: now + FACTOR_TTL_MS });
+}
+
 /**
  * True when a key's session was made below aal2 and the person has since turned on a second factor: every row is then
- * hidden from it, so it is told plainly instead. An aal2 session is not checked. A failed check throws (503).
+ * hidden from it by RLS, so it is told plainly instead. Only the wording depends on this, so it never blocks: an aal2
+ * session is not checked, the answer is kept for a minute per key, and a failed check is logged and passes.
  */
-async function keyPredatesSecondFactor(accessToken: string): Promise<boolean> {
+async function keyPredatesSecondFactor(credentialId: string, accessToken: string): Promise<boolean> {
   // A missing aal claim counts as below aal2.
   if (jwtClaims(accessToken)?.aal === 'aal2') return false;
-  const { data, error } = await userClient(accessToken).auth.getUser(accessToken);
-  if (error || !data?.user) throw error ?? new Error('no user');
-  return (data.user.factors ?? []).some((f) => f.status === 'verified');
+  const now = Date.now();
+  const cached = factorCache.get(credentialId);
+  if (cached && cached.expires > now) return cached.hasFactor;
+  try {
+    const { data, error } = await userClient(accessToken).auth.getUser(accessToken);
+    if (error || !data?.user) {
+      logFailure('second factor check', error ?? new Error('no user'));
+      return false;
+    }
+    const hasFactor = (data.user.factors ?? []).some((f) => f.status === 'verified');
+    rememberFactor(credentialId, hasFactor, now);
+    return hasFactor;
+  } catch (error) {
+    logFailure('second factor check', error);
+    return false;
+  }
 }
 
 /**
@@ -96,9 +123,10 @@ async function keyPredatesSecondFactor(accessToken: string): Promise<boolean> {
 async function fromApiKey(key: string) {
   const resolved = await resolveApiKey(key);
   if (!resolved.ok) return null;
-  if (await keyPredatesSecondFactor(resolved.accessToken)) return 'outdated' as const;
+  const credentialId = `key:${resolved.id}`;
+  if (await keyPredatesSecondFactor(credentialId, resolved.accessToken)) return 'outdated' as const;
   return {
-    credentialId: `key:${resolved.id}`,
+    credentialId,
     userId: resolved.userId,
     clientId: null,
     orgId: resolved.orgId as string | null,

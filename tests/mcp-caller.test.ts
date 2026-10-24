@@ -475,13 +475,15 @@ describe('resolveCaller', () => {
     failing.add('profiles');
     expect(await resolveCaller(req(`Bearer ${KEY}`), 'Claude')).toEqual(outdated);
     expect(getUserCalls).toEqual([aal1]);
-    keyResolvesTo(ALICE, ORG_A, 'alice-at-1');
+    tokens.set('alice-at-2', ALICE);
+    resolveApiKey.mockResolvedValue({ ok: true, id: 'key-row-2', userId: ALICE, orgId: ORG_A, accessToken: 'alice-at-2' });
     expect(await resolveCaller(req(`Bearer ${KEY}`), 'Claude')).toEqual(outdated);
     failing.clear();
 
     // An unverified enrolment is not a second factor.
     factorsOf.set(ALICE, [{ id: 'f2', factor_type: 'totp', status: 'unverified' }]);
-    keyResolvesTo(ALICE, ORG_A, aal1);
+    tokens.set('alice-at-3', ALICE);
+    resolveApiKey.mockResolvedValue({ ok: true, id: 'key-row-3', userId: ALICE, orgId: ORG_A, accessToken: 'alice-at-3' });
     expect(await resolveCaller(req(`Bearer ${KEY}`), 'Claude')).toMatchObject({ ok: true, caller: { orgId: ORG_A } });
   });
 
@@ -502,20 +504,58 @@ describe('resolveCaller', () => {
     expect(getUserCalls).toEqual([]);
   });
 
-  test('an aal1 key whose factors cannot be checked is a 503 to try again, and logs nothing secret', async () => {
+  test('an aal1 key whose factors cannot be checked resolves as before, and logs nothing secret', async () => {
     const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
     try {
-      // The auth server refuses the session it just issued (a hiccup): not a removal, not a pass.
+      // The auth server refuses the session (a hiccup): the check only changes wording, so it never blocks.
       resolveApiKey.mockResolvedValue({ ok: true, id: 'key-row-1', userId: ALICE, orgId: ORG_A, accessToken: 'unknown-at' });
-      expect(await resolveCaller(req(`Bearer ${KEY}`), 'Claude')).toEqual({
-        ok: false,
-        status: 503,
-        message: 'Your access could not be checked just now. Try again.',
-      });
+      const out = await resolveCaller(req(`Bearer ${KEY}`), 'Claude');
+      expect(out).not.toMatchObject({ status: 503 });
+      expect(getUserCalls).toEqual(['unknown-at']);
+      // Not cached: the next request asks again.
+      await resolveCaller(req(`Bearer ${KEY}`), 'Claude');
+      expect(getUserCalls).toEqual(['unknown-at', 'unknown-at']);
+      // With the auth server answering, the key resolves as before.
+      keyResolvesTo(ALICE, ORG_A, 'alice-at-1');
+      getUserCalls.length = 0;
+      expect(JSON.stringify(logged.mock.calls)).toContain('second factor check failed');
+      expect(await resolveCaller(req(`Bearer ${KEY}`), 'Claude')).toMatchObject({ ok: true, caller: { orgId: ORG_A } });
       expect(JSON.stringify(logged.mock.calls)).not.toContain('unknown-at');
       expect(JSON.stringify(logged.mock.calls)).not.toContain('invalid JWT');
     } finally {
       logged.mockRestore();
+    }
+  });
+
+  test('a key\'s second-factor answer is kept for a minute', async () => {
+    const outdated = {
+      ok: false,
+      status: 401,
+      message: 'Two-step sign-in was turned on after this key was made. Make a new key in Account → Developers.',
+    };
+    let now = Date.parse('2026-10-24T00:00:00Z');
+    const clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
+    try {
+      const aal1 = jwt({ sub: ALICE, role: 'authenticated', aal: 'aal1' });
+      keyResolvesTo(ALICE, ORG_A, aal1);
+      expect(await resolveCaller(req(`Bearer ${KEY}`), 'Claude')).toMatchObject({ ok: true });
+      expect(getUserCalls).toEqual([aal1]);
+
+      // Within 60s: no call, even though a factor was turned on meanwhile.
+      factorsOf.set(ALICE, [{ id: 'f1', factor_type: 'totp', status: 'verified' }]);
+      now += 59_000;
+      expect(await resolveCaller(req(`Bearer ${KEY}`), 'Claude')).toMatchObject({ ok: true });
+      expect(getUserCalls).toEqual([aal1]);
+
+      // After 60s it checks again, and a cached "true" keeps giving the message without a call.
+      now += 2_000;
+      expect(await resolveCaller(req(`Bearer ${KEY}`), 'Claude')).toEqual(outdated);
+      expect(getUserCalls).toEqual([aal1, aal1]);
+      now += 30_000;
+      expect(await resolveCaller(req(`Bearer ${KEY}`), 'Claude')).toEqual(outdated);
+      expect(getUserCalls).toEqual([aal1, aal1]);
+    } finally {
+      clock.mockRestore();
     }
   });
 
