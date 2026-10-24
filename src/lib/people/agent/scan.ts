@@ -1,4 +1,5 @@
 import type { Candidate } from '@/lib/agents/definition';
+import { doublingStage } from '@/lib/agents/focus/stage';
 import type { PeopleAgentRaw } from '@/lib/people/agent/context';
 import {
   addDays,
@@ -58,17 +59,6 @@ function cut(text: string): string {
 
 const daysText = (n: number): string => (n === 1 ? '1 day' : `${n} days`);
 const isDay = (v: string | null): v is string => v !== null && isRealDate(v);
-
-/**
- * The doubling bucket a count of days is in, past the threshold `n`: n, 2n, 4n, 8n… So a check
- * with a 3-day threshold is raised at 3 days, again at 6, then 12, 24. Null below `n`.
- */
-export function doublingStage(days: number, n: number): number | null {
-  if (n < 1 || days < n) return null;
-  let stage = n;
-  while (stage * 2 <= days) stage *= 2;
-  return stage;
-}
 
 /**
  * How a document is named at the start of a note (spec §12.2): "{name}'s contract" for a named

@@ -1,20 +1,22 @@
 -- Let agent_proposals hold Lekiu (people) suggestions as well as Jebat (reach),
--- Kasturi (crm) and Bendahara (finance) ones, keep them for HR only, and let the
--- decide path mark an approved people suggestion that no longer applies as rejected.
+-- Kasturi (crm), Bendahara (finance) and Lekir (hire) ones, keep them for HR only,
+-- and let the decide path mark an approved people suggestion that no longer
+-- applies as rejected.
 --
 -- Apply ONLY together with (or after) the app code that decides people proposals
 -- (the Lekiu focus agent): until then nothing writes a people row, and the
 -- approval code would not know where to route one.
 --
--- Written against origin/main 28663529 (newest migration 20261125180300). The
--- Lekir session adds 'hire' in 20261125190xxx; whichever of the two applies
--- second restates the product check and the stale rule with all of them.
+-- Rebased onto origin/main 9630d1c4, which holds Lekir's 20261125190000 (hire,
+-- guard v6), already applied to production. This file applies after it and
+-- restates the product check and the stale rule with all five products.
+-- Re-check the guard against the hosted body before applying.
 set local lock_timeout = '5s';
 
 -- ---------------------------------------------------------------------------
--- 1. The product check, restated with 'people'. The newest check is the named
---    agent_proposals_product_check from 20261125170000; drop any product check
---    by what it constrains, as that file did, and add the new one.
+-- 1. The product check, restated with 'people' beside 'hire'. The newest check
+--    is the named agent_proposals_product_check from 20261125190000; drop any
+--    product check by what it constrains, as that file did, and add the new one.
 -- ---------------------------------------------------------------------------
 do $$
 declare
@@ -35,15 +37,16 @@ $$;
 
 alter table public.agent_proposals
   add constraint agent_proposals_product_check
-  check (product in ('reach','crm','finance','people'));
+  check (product in ('reach','crm','finance','hire','people'));
 
 -- ---------------------------------------------------------------------------
--- 2. Proposal guard v6. The v5 body (20261125170000) is carried forward as it
---    was; the only change is that the stale rule covers people as well as
---    finance: an approved PEOPLE proposal may become rejected when the decide
---    path finds, after the claim, that it no longer applies (the leave was
---    decided, the document renewed, payroll paid). That update changes only
---    status and result, and result says so with "stale": true.
+-- 2. Proposal guard v7. The v6 body (20261125190000, Lekir) is carried forward
+--    as it was; the only change is that the stale rule covers people as well as
+--    finance and hire: an approved PEOPLE proposal may become rejected when the
+--    decide path finds, after the claim, that it no longer applies (the leave
+--    was decided, the document renewed, payroll paid). That update changes only
+--    status and result, and result says so with "stale": true. crm and reach
+--    proposals behave exactly as before.
 -- ---------------------------------------------------------------------------
 create or replace function private.agent_proposals_guard()
 returns trigger language plpgsql set search_path = '' as $$
@@ -55,9 +58,9 @@ begin
   elsif old.status = 'approved' and new.status in ('approved','failed') then
     null; -- annotate the claimed row (result) or correct a failed apply
   elsif old.status = 'approved' and new.status = 'rejected'
-        and old.product in ('finance','people')
+        and old.product in ('finance','hire','people')
         and new.result->>'stale' = 'true' then
-    null; -- a finance or people approval that no longer applies (see above)
+    null; -- a finance, hire or people approval that no longer applies (see above)
   else
     raise exception 'this proposal is already handled' using errcode = 'AGP01';
   end if;
@@ -76,8 +79,10 @@ end $$;
 -- ---------------------------------------------------------------------------
 -- 3. People suggestions are for HR only (spec §5). A member or viewer neither
 --    sees nor decides a people proposal; every other product keeps its rule
---    (members read, writers decide). The decide path's own update runs under
---    the deciding person's session, so this policy is the gate that matters.
+--    (members read, writers decide; hire included: Lekir's 20261125190xxx
+--    files left these policies as they were). The decide path's own update
+--    runs under the deciding person's session, so this policy is the gate that
+--    matters.
 -- ---------------------------------------------------------------------------
 drop policy agent_proposals_select on public.agent_proposals;
 create policy agent_proposals_select on public.agent_proposals for select to authenticated
@@ -108,11 +113,11 @@ begin
      and pg_get_constraintdef(oid) ilike '%product%';
   select pg_get_constraintdef(oid) into t from pg_constraint
    where conrelid = 'public.agent_proposals'::regclass and conname = 'agent_proposals_product_check';
-  if n <> 1 or t is distinct from 'CHECK ((product = ANY (ARRAY[''reach''::text, ''crm''::text, ''finance''::text, ''people''::text])))' then
+  if n <> 1 or t is distinct from 'CHECK ((product = ANY (ARRAY[''reach''::text, ''crm''::text, ''finance''::text, ''hire''::text, ''people''::text])))' then
     raise exception 'agent_proposals product check is not as this file needs: % checks, %', n, t;
   end if;
   -- Every existing row still passes (validated by the add above; restated for the reader).
-  select count(*) into n from public.agent_proposals where product not in ('reach','crm','finance','people');
+  select count(*) into n from public.agent_proposals where product not in ('reach','crm','finance','hire','people');
   if n <> 0 then
     raise exception '% proposals have an unknown product', n;
   end if;
@@ -121,8 +126,8 @@ begin
   if n <> 1 then
     raise exception 'the agent_proposals guard trigger is missing or disabled';
   end if;
-  if pg_get_functiondef('private.agent_proposals_guard()'::regprocedure) not like '%old.product in (''finance'',''people'')%' then
-    raise exception 'private.agent_proposals_guard is not v6';
+  if pg_get_functiondef('private.agent_proposals_guard()'::regprocedure) not like '%old.product in (''finance'',''hire'',''people'')%' then
+    raise exception 'private.agent_proposals_guard is not v7';
   end if;
   select string_agg(polname || ':' || polcmd::text || ':' || polpermissive::text || ':'
                     || coalesce(pg_get_expr(polqual, polrelid), '') || ':' || coalesce(pg_get_expr(polwithcheck, polrelid), ''),

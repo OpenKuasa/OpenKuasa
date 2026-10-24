@@ -17,7 +17,8 @@
 -- aal2). Proposals are written and decided as the table owner, the way the worker and the decide path do.
 --
 -- What it checks:
---   * agent_proposals takes product 'hire' (and still 'reach', 'crm' and 'finance', and nothing else, e.g. 'people');
+--   * agent_proposals takes product 'hire' (and still 'reach', 'crm', 'finance' and, since 20261125200000, Lekiu's
+--     'people'; nothing else);
 --   * hire_add_agent_note writes the note of a hire createAgentNote proposal the caller approved in the last
 --     10 minutes, with the type, record, label and body taken from the proposal, once (a second call is HIR02);
 --   * it refuses (HIR01) another person's approval, an approval older than 10 minutes, a crm proposal, a pending
@@ -104,7 +105,7 @@ begin
 
   select pg_get_constraintdef(oid) into t from pg_constraint
    where conrelid = 'public.agent_proposals'::regclass and contype = 'c' and conname = 'agent_proposals_product_check';
-  if t is distinct from 'CHECK ((product = ANY (ARRAY[''reach''::text, ''crm''::text, ''finance''::text, ''hire''::text])))' then
+  if t is distinct from 'CHECK ((product = ANY (ARRAY[''reach''::text, ''crm''::text, ''finance''::text, ''hire''::text, ''people''::text])))' then
     fails := fails || format('agent_proposals_product_check is: %s', coalesce(t, 'missing'));
   end if;
   select count(*) into n from pg_constraint
@@ -286,8 +287,8 @@ begin
     'insert into public.agent_proposals (org_id, product, action, input, title) values (%L, ''reach'', ''x'', ''{}'', ''x'')', org));
   fails := fails || public.lekir_check_try('product finance', 'ok', format(
     'insert into public.agent_proposals (org_id, product, action, input, title) values (%L, ''finance'', ''x'', ''{}'', ''x'')', org));
-  fails := fails || public.lekir_check_try('product people', '23514', format(
-    'insert into public.agent_proposals (org_id, product, action, input, title) values (%L, ''people'', ''x'', ''{}'', ''x'')', org));
+  fails := fails || public.lekir_check_try('product nonsense', '23514', format(
+    'insert into public.agent_proposals (org_id, product, action, input, title) values (%L, ''nonsense'', ''x'', ''{}'', ''x'')', org));
 
   -- ==== the owner adds the notes they approved ======================================================================
   perform set_config('request.jwt.claims', owner_claims, true);

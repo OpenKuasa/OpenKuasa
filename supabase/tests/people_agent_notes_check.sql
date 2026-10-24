@@ -17,7 +17,7 @@
 -- decide path sets status, decided_at and decided_by before the note is asked for.
 --
 -- What it checks:
---   * agent_proposals takes product 'people' (and still 'reach', 'crm' and 'finance', and nothing else);
+--   * agent_proposals takes product 'people' (and still 'reach', 'crm', 'finance' and Lekir's 'hire', and nothing else);
 --   * hr_add_agent_note writes the note of a people createAgentNote proposal the caller (an owner or admin) approved
 --     in the last 10 minutes, with the type, record, employee, label and body taken from the proposal, once (a second
 --     call is HR_AGENT_NOTE_EXISTS);
@@ -26,7 +26,7 @@
 --     (22023) a proposal whose input does not describe a note, or names no employee of this workspace;
 --   * only HR (owner or admin) sees people proposals, the people-focus config row and the notes: a member and a viewer
 --     see none of them and update no people proposal, yet still see and (the member) decide finance ones;
---   * the proposal guard's stale rule covers people as it covers finance, and nothing else changes;
+--   * the proposal guard's stale rule (v7) covers people as it covers finance and hire, and nothing else changes;
 --   * nobody inserts or edits a note directly; an admin deletes one, a member cannot;
 --   * service_role may read exactly the HR columns the agent's scan reads (a real select of each, too), nothing else
 --     on any hr_ table (in particular no reason, leave type, category, amount, description, hours, document title,
@@ -53,7 +53,7 @@ declare
   p_bad_type uuid; p_bad_id uuid; p_pay_id uuid; p_no_id uuid; p_no_emp uuid; p_pay_emp uuid; p_foreign_emp uuid;
   p_long_body uuid; p_blank_label uuid;
   p_fin_pending uuid; p_people_pending uuid;
-  p_g_stale uuid; p_g_plain uuid; p_g_fin uuid; p_g_crm uuid;
+  p_g_stale uuid; p_g_plain uuid; p_g_fin uuid; p_g_hire uuid; p_g_crm uuid;
   note1 uuid; note2 uuid; note3 uuid; note4 uuid;
   n integer;
   t text;
@@ -87,7 +87,7 @@ begin
 
   select pg_get_constraintdef(oid) into t from pg_constraint
    where conrelid = 'public.agent_proposals'::regclass and contype = 'c' and conname = 'agent_proposals_product_check';
-  if t is distinct from 'CHECK ((product = ANY (ARRAY[''reach''::text, ''crm''::text, ''finance''::text, ''people''::text])))' then
+  if t is distinct from 'CHECK ((product = ANY (ARRAY[''reach''::text, ''crm''::text, ''finance''::text, ''hire''::text, ''people''::text])))' then
     fails := fails || format('agent_proposals_product_check is: %s', coalesce(t, 'missing'));
   end if;
   select count(*) into n from pg_constraint
@@ -514,9 +514,11 @@ begin
   insert into public.agent_proposals (org_id, agent_key, product, action, input, title)
     values (org, 'finance-focus', 'finance', 'createAgentNote', note_input, 'g finance') returning id into p_g_fin;
   insert into public.agent_proposals (org_id, agent_key, product, action, input, title)
+    values (org, 'hire-focus', 'hire', 'createAgentNote', note_input, 'g hire') returning id into p_g_hire;
+  insert into public.agent_proposals (org_id, agent_key, product, action, input, title)
     values (org, 'crm-focus', 'crm', 'createAgentNote', note_input, 'g crm') returning id into p_g_crm;
   update public.agent_proposals set status = 'approved', decided_at = now(), decided_by = owner_id
-   where id in (p_g_stale, p_g_plain, p_g_fin, p_g_crm);
+   where id in (p_g_stale, p_g_plain, p_g_fin, p_g_hire, p_g_crm);
   fails := fails || public.people_agent_check_try('people stale and decided_by changed together', 'AGP01', format(
     'update public.agent_proposals set status = ''rejected'', result = ''{"stale":true}'', decided_by = %L where id = %L',
     member_id, p_g_stale));
@@ -539,9 +541,11 @@ begin
   if n <> 1 then fails := fails || 'the stale people proposal is not rejected with its decision kept'::text; end if;
   fails := fails || public.people_agent_check_try('people rejected (stale) changed again', 'AGP01', format(
     'update public.agent_proposals set status = ''approved'' where id = %L', p_g_stale));
-  -- finance as before; crm still has no stale rejection.
+  -- finance and hire (Lekir, v6) as before; crm still has no stale rejection.
   fails := fails || public.people_agent_check_try('finance approved to rejected, stale', 'ok', format(
     'update public.agent_proposals set status = ''rejected'', result = ''{"stale":true}'' where id = %L', p_g_fin));
+  fails := fails || public.people_agent_check_try('hire approved to rejected, stale', 'ok', format(
+    'update public.agent_proposals set status = ''rejected'', result = ''{"stale":true}'' where id = %L', p_g_hire));
   fails := fails || public.people_agent_check_try('crm approved to rejected, stale', 'AGP01', format(
     'update public.agent_proposals set status = ''rejected'', result = ''{"stale":true}'' where id = %L', p_g_crm));
   fails := fails || public.people_agent_check_try('people approved, result annotated', 'ok', format(
