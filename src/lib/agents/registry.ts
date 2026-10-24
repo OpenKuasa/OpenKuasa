@@ -2,6 +2,7 @@ import type { AgentRegistry } from '@/lib/agents/definition';
 import { reachAgent } from '@/lib/agents/reach-agent';
 import { crmAgent } from '@/lib/agents/crm-agent';
 import { financeAgent } from '@/lib/agents/finance-agent';
+import { hireAgent } from '@/lib/agents/hire-agent';
 
 /**
  * The single composition root for the autonomous-agent framework. Statically imports
@@ -13,6 +14,7 @@ export const AGENTS: AgentRegistry = new Map([
   [reachAgent.agentKey, reachAgent],
   [crmAgent.agentKey, crmAgent],
   [financeAgent.agentKey, financeAgent],
+  [hireAgent.agentKey, hireAgent],
 ]);
 
 export { agentFor, agentForProduct, actionsFor } from '@/lib/agents/definition';

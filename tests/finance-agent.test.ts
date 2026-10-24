@@ -16,7 +16,7 @@ const A = '11111111-1111-4111-8111-111111111111';
 
 describe('registry', () => {
   it('registers Bendahara after Kasturi, with the same keys list', () => {
-    expect([...AGENTS.keys()]).toEqual(['weekly-studio', 'crm-focus', 'finance-focus']);
+    expect([...AGENTS.keys()]).toEqual(['weekly-studio', 'crm-focus', 'finance-focus', 'hire-focus']);
     expect([...AGENT_KEYS]).toEqual([...AGENTS.keys()]);
     expect(agentForProduct('finance', AGENTS)).toBe(financeAgent);
     expect(agentForProduct('crm', AGENTS)).toBe(crmAgent);
