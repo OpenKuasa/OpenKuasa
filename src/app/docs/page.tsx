@@ -47,7 +47,7 @@ export default function DocsHome() {
               <h2 className="text-lg font-semibold tracking-tight">{s.title}</h2>
               <p className="mt-1.5 text-sm text-mk-muted">{s.blurb}</p>
               <ul className="mt-5 space-y-1 border-t border-mk-border pt-4">
-                {s.guides.slice(0, 5).map((g) => (
+                {s.guides.map((g) => (
                   <li key={g.url}>
                     <Link
                       href={g.url}
