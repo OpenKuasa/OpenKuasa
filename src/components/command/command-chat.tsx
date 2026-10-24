@@ -2,6 +2,7 @@
 
 import { useSearchParams } from 'next/navigation';
 import { SariConversation } from '@/components/command/sari-conversation';
+import { cleanAsk } from '@/lib/docs/ask';
 import type { ChatThread } from '@/lib/chat/threads';
 import type { ServerGreeting } from '@/lib/greeting/types';
 
@@ -16,11 +17,15 @@ export function CommandChat({
   /** The personal greeting, when the page computed one. */
   greeting?: ServerGreeting;
 }) {
-  const urlThreadId = useSearchParams().get('chat');
+  const searchParams = useSearchParams();
+  const urlThreadId = searchParams.get('chat');
+  // A question sent from the docs; it only fills the input.
+  const askedQuestion = cleanAsk(searchParams.get('ask'));
   return (
     <SariConversation
       showSidebar
       urlThreadId={urlThreadId}
+      askedQuestion={askedQuestion}
       initialThreads={initialThreads}
       listedAt={listedAt}
       greeting={greeting}

@@ -1,5 +1,6 @@
 import { expect, test } from 'vitest';
-import { safeAppPath } from '@/lib/security/safe-path';
+import { safeAppPath, signInReturnPath } from '@/lib/security/safe-path';
+import { sariAskPath } from '@/lib/docs/ask';
 import { safeNextPath } from '@/lib/auth/mfa';
 import { isAppHref } from '@/lib/account/notifications';
 
@@ -68,4 +69,25 @@ test('every caller-facing check uses the same rules', () => {
   }
   expect(safeNextPath('/invite/abc')).toBe('/invite/abc');
   expect(isAppHref('/account/security')).toBe(true);
+});
+
+test('sign-in may return to Sari with a question, and nowhere else new', () => {
+  const ok = sariAskPath('How do I run payroll?');
+  expect(signInReturnPath(ok)).toBe(ok);
+  expect(signInReturnPath('/oauth/consent?x=1')).toBe('/oauth/consent?x=1');
+  for (const bad of ['/command', '/command?chat=1', '/command?ask=x&next=//evil.com', '/command?ask=a&ask=b', '/command/x?ask=a', '//evil.com/command?ask=a', `/command?ask=${'a'.repeat(301)}`, '/command?ask=x#y', '/people/payroll?ask=x']) {
+    expect(signInReturnPath(bad), bad).toBeNull();
+  }
+});
+
+test('the Sari return only takes a question already in its cleaned form', () => {
+  for (const bad of ['/command?ask=', '/command?ask=%20a', '/command?ask=a%0Ab', '/command?ask=a%20%20b', '/command?ask=a%00', '/command?team=0&ask=a', '/Command?ask=a']) {
+    expect(signInReturnPath(bad), bad).toBeNull();
+  }
+  // Characters a browser re-encodes still make a path sign-in accepts.
+  for (const question of ["What's the leave policy?", 'Gaji & KWSP: 50% #1?', 'Bayar gaji 😀']) {
+    const path = signInReturnPath(sariAskPath(question));
+    expect(path, question).not.toBeNull();
+    expect(new URL(path!, 'http://x.invalid').searchParams.get('ask')).toBe(question);
+  }
 });
