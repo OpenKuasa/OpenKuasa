@@ -11,6 +11,7 @@ OpenKuasa is a crowd-sourced, self-hostable platform covering marketing (Jebat),
 - [Home](https://openkuasa.com/): product overview
 - [Pricing](https://openkuasa.com/pricing): free to self-host; a hosted option is planned
 - [Privacy](https://openkuasa.com/privacy): privacy policy
+- [Docs](https://openkuasa.com/docs): guides for every product, and developer docs
 
 ## Source
 - [GitHub](https://github.com/OpenKuasa/OpenKuasa): AGPL-3.0 source code
