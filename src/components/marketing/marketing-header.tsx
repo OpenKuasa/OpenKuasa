@@ -7,6 +7,7 @@ import { Logo } from '@/components/brand/logo';
 import { GitHubIcon } from '@/components/brand/github-icon';
 import { ThemeToggle } from '@/components/theme/theme-toggle';
 import { Button } from '@/components/ui/button';
+import { GetAppButton } from '@/components/pwa/install-app';
 import { MEGA_MENU, NAV_LINKS, REPO_URL } from '@/config/marketing';
 import { cn } from '@/lib/utils';
 
@@ -22,7 +23,7 @@ export function MarketingHeader() {
             <Logo wordmarkClassName="text-mk-fg text-xl" />
           </Link>
 
-          <nav className="hidden items-center gap-6 text-sm text-mk-fg/75 lg:flex">
+          <nav className="hidden items-center gap-6 text-sm text-mk-fg/75 xl:flex">
             <Link href="/" className="transition-colors hover:text-mk-fg">
               Home
             </Link>
@@ -53,7 +54,7 @@ export function MarketingHeader() {
               <Link
                 key={l.label}
                 href={l.href}
-                className="transition-colors hover:text-mk-fg"
+                className="whitespace-nowrap transition-colors hover:text-mk-fg"
               >
                 {l.label}
               </Link>
@@ -61,7 +62,7 @@ export function MarketingHeader() {
           </nav>
         </div>
 
-        <div className="hidden items-center gap-4 lg:flex">
+        <div className="hidden items-center gap-4 xl:flex">
           <ThemeToggle className="text-mk-fg/75 hover:bg-mk-fg/10 hover:text-mk-fg dark:hover:bg-mk-fg/10" />
           <a
             href={REPO_URL}
@@ -72,6 +73,7 @@ export function MarketingHeader() {
             <GitHubIcon />
             GitHub
           </a>
+          <GetAppButton className="inline-flex items-center gap-1.5 whitespace-nowrap text-sm font-medium text-mk-fg/75 transition-colors hover:text-mk-fg" />
           <Link
             href="/login"
             className="text-sm font-medium text-mk-fg/75 transition-colors hover:text-mk-fg"
@@ -86,7 +88,7 @@ export function MarketingHeader() {
         {/* mobile toggle */}
         <button
           type="button"
-          className="text-mk-fg lg:hidden"
+          className="text-mk-fg xl:hidden"
           aria-label="Toggle menu"
           onClick={() => setMobileOpen((v) => !v)}
         >
@@ -97,8 +99,8 @@ export function MarketingHeader() {
       {/* Mega-menu panel (desktop) */}
       <div
         className={cn(
-          'absolute inset-x-0 top-full hidden border-b border-black/10 bg-background text-foreground shadow-xl lg:block',
-          megaOpen ? 'block' : 'lg:hidden',
+          'absolute inset-x-0 top-full hidden border-b border-black/10 bg-background text-foreground shadow-xl xl:block',
+          megaOpen ? 'block' : 'xl:hidden',
         )}
         onMouseEnter={() => setMegaOpen(true)}
         onMouseLeave={() => setMegaOpen(false)}
@@ -151,7 +153,7 @@ export function MarketingHeader() {
 
       {/* Mobile menu */}
       {mobileOpen ? (
-        <div className="border-t border-mk-border bg-mk-bg px-6 py-4 lg:hidden">
+        <div className="border-t border-mk-border bg-mk-bg px-6 py-4 xl:hidden">
           <nav className="flex flex-col gap-1 text-sm text-mk-fg/80">
             <Link href="/" className="py-2" onClick={() => setMobileOpen(false)}>
               Home
@@ -191,6 +193,7 @@ export function MarketingHeader() {
               <GitHubIcon />
               GitHub
             </a>
+            <GetAppButton className="flex items-center gap-2 py-2" />
             <div className="mt-3 flex items-center gap-3">
               <ThemeToggle className="shrink-0 text-mk-fg/80 hover:bg-mk-fg/10 hover:text-mk-fg dark:hover:bg-mk-fg/10" />
               <Button
