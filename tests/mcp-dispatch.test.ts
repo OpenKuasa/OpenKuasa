@@ -11,6 +11,7 @@ import { memoryTranscriptStore, type TranscriptStore } from '@/lib/mcp/transcrip
 import type { HeldCv } from '@/lib/ai/hire-tools';
 
 const APP = '44444444-4444-4444-8444-444444444481';
+const DEAL = '55555555-5555-4555-8555-555555555501';
 const LINK = 'https://meet.example/x';
 const CALLER = { credentialId: 'cred1', userId: 'user1' };
 const OTHER = { credentialId: 'cred2', userId: 'user1' };
@@ -40,6 +41,10 @@ function fakeTools() {
       total: 1,
       applications: [{ id: APP, candidate: 'Aina Rahman', job: 'Sales Executive', stage: 'screening', outcome: 'active' }],
     })),
+    listDeals: make('listDeals', z.object({}), () => ({
+      total: 1,
+      deals: [{ id: DEAL, name: 'Annual plan', contact_name: 'Tan Wei Ming' }],
+    })),
     readCandidateCv: make('readCandidateCv', z.object({ applicationId: z.string() }), (input) => {
       shelf.push({ toolCallId: 'x', applicationId: (input as { applicationId: string }).applicationId, bytes: new Uint8Array([37, 80]), candidate: 'Aina Rahman', job: 'Sales Executive' });
       return { ok: true, candidate: 'Aina Rahman', job: 'Sales Executive' };
@@ -52,6 +57,12 @@ function fakeTools() {
       z.object({ application_id: z.string(), date: z.string(), time: z.string(), kind: z.string(), place: z.string().optional() }),
       () => ({ ok: true }),
     ),
+    createDeal: make('createDeal', z.object({ title: z.string(), contactId: z.string(), stageId: z.string() }), (input) => ({
+      ok: true,
+      data: { id: DEAL, name: (input as { title: string }).title },
+    })),
+    deleteDeal: make('deleteDeal', z.object({ id: z.string() }), () => ({ ok: true })),
+    updateDeal: make('updateDeal', z.object({ id: z.string(), tag: z.string().optional() }), () => ({ ok: true })),
     throwing: make('throwing', z.object({}), () => {
       throw new Error('relation "secret_table" does not exist at /srv/app.ts:12');
     }),
@@ -475,5 +486,41 @@ describe('runChange activity log', () => {
     const arg = log.mock.calls[0] as unknown as [{ operation: string; target: string }];
     expect(arg[0].operation).toBe('scheduleInterview');
     expect(arg[0].target.length).toBeGreaterThan(0);
+  });
+
+  const GATES = () => ({ throwing: 'user-approval' as const, createDeal: 'user-approval' as const, deleteDeal: 'user-approval' as const, updateDeal: 'user-approval' as const });
+  const CONTACT = '66666666-6666-4666-8666-666666666601';
+  const STAGE = '77777777-7777-4777-8777-777777777701';
+
+  it('names a created deal by its title, not by the contact it points at', async () => {
+    const f = fakeTools();
+    const log = vi.fn(async () => true);
+    await runChange(opsFor(f, GATES), memoryTranscriptStore(), CALLER, 'createDeal', { title: 'OAuth prod check deal', contactId: CONTACT, stageId: STAGE }, undefined, { log });
+    expect(log).toHaveBeenCalledWith({ operation: 'createDeal', target: 'OAuth prod check deal' });
+  });
+
+  it('names a deleted deal by its name', async () => {
+    const f = fakeTools();
+    const store = memoryTranscriptStore();
+    await runRead(opsFor(f), store, CALLER, 'listDeals', {});
+    const log = vi.fn(async () => true);
+    await runChange(opsFor(f, GATES), store, CALLER, 'deleteDeal', { id: DEAL }, undefined, { log });
+    expect(log).toHaveBeenCalledWith({ operation: 'deleteDeal', target: 'Annual plan' });
+  });
+
+  it('names an update that carries only an id by that record', async () => {
+    const f = fakeTools();
+    const store = memoryTranscriptStore();
+    await runRead(opsFor(f), store, CALLER, 'listDeals', {});
+    const log = vi.fn(async () => true);
+    await runChange(opsFor(f, GATES), store, CALLER, 'updateDeal', { id: DEAL, tag: 'hot' }, undefined, { log });
+    expect(log).toHaveBeenCalledWith({ operation: 'updateDeal', target: 'Annual plan' });
+  });
+
+  it('falls back to the heading rather than an unresolved record', async () => {
+    const f = fakeTools();
+    const log = vi.fn(async () => true);
+    await runChange(opsFor(f, GATES), memoryTranscriptStore(), CALLER, 'deleteDeal', { id: DEAL }, undefined, { log });
+    expect(log).toHaveBeenCalledWith({ operation: 'deleteDeal', target: changeHeading('deleteDeal') });
   });
 });

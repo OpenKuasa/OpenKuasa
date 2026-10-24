@@ -16,7 +16,7 @@ import { revalidateFinance } from '@/lib/ai/finance-revalidate';
 import type { Decision } from '@/lib/ai/hire-deletions';
 import { stringsIn } from '@/lib/ai/hire-interview-gate';
 import { isHeldCvMessage } from '@/lib/ai/hire-tools';
-import { changeHeading, changeRows, type ChangeRow } from '@/lib/chat/change-rows';
+import { changeHeading, changeRows, CLEARED, EMPTY, unnamed, type ChangeRow } from '@/lib/chat/change-rows';
 import { nameIn, rowIn, type ToolResult } from '@/lib/chat/change-titles';
 import { canonicalJson, type Bound } from '@/lib/chat/proposal-store';
 import type { Operation, Operations } from '@/lib/mcp/operations';
@@ -150,6 +150,26 @@ export async function runRead(ops: Operations, store: TranscriptStore, caller: C
   };
 }
 
+const UNNAMED_PREFIX = unnamed('').split(' · ')[0];
+const usable = (text: unknown): text is string =>
+  typeof text === 'string' && text.trim() !== '' && text !== CLEARED && text !== EMPTY && !text.startsWith(UNNAMED_PREFIX);
+
+/**
+ * What the activity entry names: the thing changed. The change's own name or title first (a row for it, else the
+ * result's), then the record the change points at by `id`, else the heading. Other record rows are only things the
+ * change refers to (the contact a new deal is for), and a row no lookup named is never used.
+ */
+export function activityTarget(summary: { heading: string; rows: ChangeRow[] }, result: unknown): string {
+  const own = summary.rows.find((r) => r.kind === 'field' && (r.key === 'title' || r.key === 'name') && usable(r.to));
+  if (own) return own.to;
+  const data = (result as { ok?: unknown; data?: unknown } | null)?.ok === true ? (result as { data?: unknown }).data : undefined;
+  const named = data && typeof data === 'object' ? (data as { name?: unknown; title?: unknown }) : undefined;
+  if (usable(named?.name)) return named.name;
+  if (usable(named?.title)) return named.title;
+  const subject = summary.rows.find((r) => r.kind === 'record' && r.key === 'id' && usable(r.to));
+  return subject?.to ?? summary.heading;
+}
+
 export async function runChange(
   ops: Operations,
   store: TranscriptStore,
@@ -215,7 +235,7 @@ export async function runChange(
   // One entry per change that went through. A failure to write it never undoes or fails the change.
   let logged = true;
   if (succeeded !== false && deps?.log) {
-    const target = summary!.rows.find((r) => r.kind === 'record')?.to ?? summary!.heading;
+    const target = activityTarget(summary!, ran.result);
     try {
       logged = await deps.log({ operation: name, target });
     } catch {
