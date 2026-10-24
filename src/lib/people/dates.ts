@@ -36,6 +36,11 @@ export function timeInMalaysia(now: Date): string {
   return clockTime(now.toISOString());
 }
 
+/** The hour now in Kuala Lumpur, 0 to 23. */
+export function hourInMalaysia(now: Date): number {
+  return Number(timeInMalaysia(now).slice(0, 2));
+}
+
 /** The `YYYY-MM-DD` an instant falls on in Malaysia. */
 export function malaysiaDate(instant: string): string {
   if (Number.isNaN(Date.parse(instant))) return '';
