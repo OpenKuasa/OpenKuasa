@@ -1,3 +1,4 @@
+import { saveRosterInput } from '@/lib/people/roster-writes';
 import { describe, expect, it } from 'vitest';
 import {
   SHIFT_COLOR_CLASS,
@@ -69,9 +70,16 @@ describe('roster edits', () => {
 
   it('lists the changed cells in a fixed order, clears as null', () => {
     expect(changedCells({ [cellKey('b', '2026-10-06')]: 'off', [cellKey('a', '2026-10-07')]: null })).toEqual([
-      { employee_id: 'a', work_date: '2026-10-07', shift: null },
-      { employee_id: 'b', work_date: '2026-10-06', shift: 'off' },
+      { employee_id: 'a', work_date: '2026-10-07', shift_type_id: null },
+      { employee_id: 'b', work_date: '2026-10-06', shift_type_id: 'off' },
     ]);
+  });
+
+  it('sends cells in the shape the roster save takes', () => {
+    const emp = '11111111-1111-4111-8111-111111111111';
+    const type = '22222222-2222-4222-8222-222222222222';
+    const cells = changedCells({ [cellKey(emp, '2026-10-06')]: type, [cellKey(emp, '2026-10-07')]: null });
+    expect(saveRosterInput.safeParse({ week_start: '2026-10-05', cells }).success).toBe(true);
   });
 });
 

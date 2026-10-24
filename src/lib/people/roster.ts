@@ -197,7 +197,7 @@ export function copyLastWeek(input: {
   return { edits, filled };
 }
 
-export type RosterCellInput = { employee_id: string; work_date: string; shift: Cell };
+export type RosterCellInput = { employee_id: string; work_date: string; shift_type_id: Cell };
 
 /** The changed cells only, as the save sends them, in a fixed order. */
 export function changedCells(edits: RosterEdits): RosterCellInput[] {
@@ -205,7 +205,7 @@ export function changedCells(edits: RosterEdits): RosterCellInput[] {
     .sort()
     .map((key) => {
       const [employee_id, work_date] = key.split('|');
-      return { employee_id, work_date, shift: edits[key] };
+      return { employee_id, work_date, shift_type_id: edits[key] };
     });
 }
 

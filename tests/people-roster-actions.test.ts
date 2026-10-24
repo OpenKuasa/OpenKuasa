@@ -39,11 +39,12 @@ vi.mock('@/lib/people/roster-writes', async (orig) => {
 const actions = await import('@/app/(app)/people/attendance-actions');
 
 const EMP = '22222222-2222-4222-8222-222222222222';
+const TYPE = '33333333-3333-4333-8333-333333333333';
 const DEMO = { ok: false, error: 'The sample company is read-only. Sign up to try attendance with your own team.' };
 const FORBIDDEN = { ok: false, error: 'Only owners and admins can do that.' };
 const NOT_LINKED = { ok: false, error: "Your account isn't linked to an employee record yet." };
 const NOT_YOURS = { ok: false, error: 'You can only record your own hours.' };
-const ROSTER = { week_start: '2026-10-05', cells: [{ employee_id: EMP, work_date: '2026-10-05', shift: 'off' }] };
+const ROSTER = { week_start: '2026-10-05', cells: [{ employee_id: EMP, work_date: '2026-10-05', shift_type_id: TYPE }] };
 
 const as = (role: 'owner' | 'admin' | 'member' | 'viewer', linked = true, extra: Partial<typeof ctl.people> = {}) => {
   ctl.viewer = { userId: 'u1', orgId: 'org1', role, isDemo: false };

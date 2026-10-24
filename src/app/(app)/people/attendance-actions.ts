@@ -13,7 +13,7 @@ import {
 } from '@/lib/people/attendance-writes';
 import { type CapResult, type PeopleWriteContext, WRITE_FAILED } from '@/lib/people/capabilities';
 import { PEOPLE_PATHS } from '@/lib/people/paths';
-import { archiveShiftType, saveHours, saveRoster, saveShiftType } from '@/lib/people/roster-writes';
+import { archiveShiftType, saveHours, saveRoster, saveShiftType, type SaveRosterInput } from '@/lib/people/roster-writes';
 import { getPeopleViewer } from '@/lib/people/viewer';
 import { createClient } from '@/lib/supabase/server';
 
@@ -119,10 +119,11 @@ export async function saveAttendanceSettingsAction(input: unknown) {
   return changed(await saveAttendanceSettings(guard.ctx, input as never));
 }
 
-export async function saveRosterAction(input: unknown) {
+// Typed, so the grid cannot send a cell shape the save does not take; saveRoster still validates at runtime.
+export async function saveRosterAction(input: SaveRosterInput) {
   const guard = await asAdmin();
   if (refused(guard)) return guard;
-  return changed(await saveRoster(guard.ctx, input as never));
+  return changed(await saveRoster(guard.ctx, input));
 }
 
 export async function saveShiftTypeAction(input: unknown) {

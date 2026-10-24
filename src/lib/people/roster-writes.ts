@@ -70,6 +70,8 @@ export const saveRosterInput = z
     (v) => v.cells.every((c) => c.work_date >= v.week_start && c.work_date <= addDays(v.week_start, 6)),
     'Every cell must be in the week being saved.',
   );
+/** What the roster grid sends to `saveRosterAction`. */
+export type SaveRosterInput = z.infer<typeof saveRosterInput>;
 
 const halfHours = (what: string) =>
   z
