@@ -117,9 +117,18 @@ describe('Tuah with its team', () => {
     expect(seen.tuahTools[0].sort()).toEqual(['applyChange', 'askJebat', 'askKasturi', 'searchDocs']);
     expect(seen.workerTools[0]).toContain('listCrmContacts');
     expect(seen.workerTools[0]).toContain('createContact');
+    // Every specialist can read the guides too.
+    expect(seen.workerTools[0]).toContain('searchDocs');
     // Tuah on the larger model, the specialist on the cheaper one.
     expect(seen.layers).toContain('orchestrator');
     expect(seen.layers).toContain('worker');
+  });
+
+  it('the docs search is in no team approval map', async () => {
+    const products = [reachProduct(reach()), crmProduct(crm())];
+    const teamKit = createTeamTools(products, { ...team(), store: storeOf() }, ask);
+    expect(Object.keys(teamKit.tools)).not.toContain('searchDocs');
+    expect(Object.keys(teamKit.toolApproval ?? {})).toEqual(['applyChange']);
   });
 
   it('a change a specialist prepares is not saved, and reaches the user as one approval', async () => {

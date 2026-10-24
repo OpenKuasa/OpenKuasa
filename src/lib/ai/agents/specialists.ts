@@ -21,6 +21,7 @@ import {
 } from 'ai';
 import { z } from 'zod';
 import { subAgentSystem, withToday } from '@/lib/ai/agents/prompts';
+import { createDocsTools } from '@/lib/ai/docs-tools';
 import { cachedInstructions } from '@/lib/ai/prompt-cache';
 import { prepareCvStep } from '@/lib/ai/hire-tools';
 import {
@@ -543,7 +544,8 @@ function specialistTools(
       },
     });
   }
-  return tools;
+  // The docs search: read-only and in no product, so it is neither remembered as a lookup nor prepared as a change.
+  return { ...tools, ...createDocsTools() };
 }
 
 /** The tool Tuah uses to hand a task to one specialist. */
