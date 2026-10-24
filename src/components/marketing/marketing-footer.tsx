@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { Logo } from '@/components/brand/logo';
 import { GitHubIcon } from '@/components/brand/github-icon';
 import { REPO_URL } from '@/config/marketing';
+import { InstallAppLink } from '@/components/pwa/install-app';
 
 type Col = {
   title: string;
@@ -100,6 +101,7 @@ export function MarketingFooter() {
                 </a>
               ))}
             </div>
+            <InstallAppLink className="mt-5 text-mk-fg/80" />
           </div>
 
           {COLUMNS.map((col) => (

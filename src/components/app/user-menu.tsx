@@ -11,6 +11,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { UserAvatar } from '@/components/account/user-avatar';
 import { SignOutButton } from '@/components/auth/sign-out-button';
+import { InstallAppMenuItem } from '@/components/pwa/install-app';
 import { useViewer } from '@/components/app/viewer-context';
 import { canSee, type Capability } from '@/lib/auth/permissions';
 
@@ -72,6 +73,7 @@ export function UserMenu() {
               <Link href={item.href}>{item.label}</Link>
             </DropdownMenuItem>
           ))}
+          <InstallAppMenuItem />
         </div>
 
         <DropdownMenuSeparator className="my-0" />
