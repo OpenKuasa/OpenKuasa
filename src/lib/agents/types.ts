@@ -47,6 +47,7 @@ export const WEEKLY_STUDIO = 'weekly-studio';
 export const CRM_FOCUS = 'crm-focus';
 export const FINANCE_FOCUS = 'finance-focus';
 export const HIRE_FOCUS = 'hire-focus';
+export const PEOPLE_FOCUS = 'people-focus';
 
 /**
  * Thrown when a run cannot start because the workspace already has one in
