@@ -17,6 +17,7 @@ import {
   type Proposal,
 } from '@/lib/chat/delegation';
 import {
+  BookOpen,
   Briefcase,
   CalendarCheck,
   CalendarClock,
@@ -147,6 +148,8 @@ const TOOL_META: Record<string, ToolMeta> = {
   getCareersPage: { label: 'Careers page', Icon: Globe },
   readCandidateCv: { label: 'Reading CV', Icon: FileText, detail: cvCandidate, running: 'Reading a CV…' },
   listContacts: { label: 'Leads', Icon: Users },
+  // Every assistant's read-only search of the docs guides.
+  searchDocs: { label: 'Guides', Icon: BookOpen, running: 'Reading the guides…' },
 };
 
 function humanize(name: string): string {

@@ -14,6 +14,8 @@ import {
   tuahTeamSystem,
 } from '@/lib/ai/agents/prompts';
 import { ReplyText } from '@/components/chat/reply-text';
+import { liveStepStatus, toolMeta } from '@/components/chat/tool-parts';
+import { SpecialistCard } from '@/components/chat/specialist-card';
 
 type Results = { results: { title: string; url: string; heading: string | null; text: string }[] };
 const search = (query: string) =>
@@ -97,6 +99,13 @@ describe('reply text links /docs paths and nothing else', () => {
     expect(out).toContain('</a>.');
   });
 
+  test('no link while the reply is still arriving, and no prefetch once it is', () => {
+    const text = 'See /docs/getting-started/openrouter-key';
+    expect(renderToStaticMarkup(<ReplyText text={text} arriving />)).not.toContain('<a');
+    expect(renderToStaticMarkup(<ReplyText text={`**Key**\n${text}`} arriving />)).not.toContain('<a');
+    expect(html(text)).toContain('href="/docs/getting-started/openrouter-key"');
+  });
+
   test('links inside a marked reply too', () => {
     const out = html('**Done.**\n\n- Read /docs/products/tuah first');
     expect(out).toContain('<strong');
@@ -115,5 +124,25 @@ describe('reply text links /docs paths and nothing else', () => {
     ]) {
       expect(html(text), text).not.toContain('<a');
     }
+  });
+});
+
+describe('a guide search shows as a lookup, not a change', () => {
+  test('it has its own entry', () => {
+    const meta = toolMeta('searchDocs');
+    expect(meta.isFallback).toBe(false);
+    expect(meta.label).toBe('Guides');
+    expect(liveStepStatus('searchDocs')).toBe('Reading the guides…');
+  });
+
+  test('a specialist running one is not preparing a change', () => {
+    const out = renderToStaticMarkup(
+      <SpecialistCard
+        agent="Kasturi"
+        work={{ agent: 'Kasturi', product: 'crm', status: 'working', steps: [{ tool: 'searchDocs', done: false }], answer: '', proposals: [] }}
+      />,
+    );
+    expect(out).toContain('Reading the guides…');
+    expect(out.toLowerCase()).not.toContain('change');
   });
 });

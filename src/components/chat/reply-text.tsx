@@ -34,8 +34,8 @@ const TEXT_CLASS = 'whitespace-pre-wrap leading-relaxed text-primary-foreground'
 const DOCS_PATH = /(^|\s)(\/docs\/[a-z0-9-]+\/[a-z0-9-]+(?:#[a-z0-9-]+)?)(?![\w/#-])/g;
 
 /** Text with each docs guide path drawn as a link to it. Text without one comes back as the same string. */
-function withDocsLinks(text: string, key: string | number = 0): ReactNode {
-  if (!text.includes('/docs/')) return text;
+function withDocsLinks(text: string, links: boolean, key: string | number = 0): ReactNode {
+  if (!links || !text.includes('/docs/')) return text;
   const out: ReactNode[] = [];
   let from = 0;
   for (const match of text.matchAll(DOCS_PATH)) {
@@ -43,7 +43,7 @@ function withDocsLinks(text: string, key: string | number = 0): ReactNode {
     const path = match[2];
     if (start > from) out.push(text.slice(from, start));
     out.push(
-      <Link key={`${key}-${start}`} href={path} className="underline underline-offset-2">
+      <Link key={`${key}-${start}`} href={path} prefetch={false} className="underline underline-offset-2">
         {path}
       </Link>,
     );
@@ -104,22 +104,22 @@ const isPlain = (blocks: ReplyBlock[]): boolean =>
       (block.kind === 'paragraph' && block.lines.every((line) => line.every((node) => node.t === 'text'))),
   );
 
-function inline(content: Inline[]): ReactNode[] {
+function inline(content: Inline[], links: boolean): ReactNode[] {
   return content.map((node, index) => {
-    if (node.t === 'text') return withDocsLinks(node.text, index);
+    if (node.t === 'text') return withDocsLinks(node.text, links, index);
     if (node.t === 'bold') {
       return (
         <strong key={index} className="font-semibold">
-          {inline(node.children)}
+          {inline(node.children, links)}
         </strong>
       );
     }
-    return <em key={index}>{inline(node.children)}</em>;
+    return <em key={index}>{inline(node.children, links)}</em>;
   });
 }
 
 /** A paragraph's lines as one run of children, each line break a "\n" in the text (the paragraph is pre-wrapped). */
-function paragraphChildren(lines: Inline[][]): ReactNode[] {
+function paragraphChildren(lines: Inline[][], links: boolean): ReactNode[] {
   const out: ReactNode[] = [];
   const push = (node: ReactNode) => {
     const last = out.length - 1;
@@ -133,27 +133,27 @@ function paragraphChildren(lines: Inline[][]): ReactNode[] {
       else if (node.t === 'bold') {
         push(
           <strong key={`${lineIndex}-${nodeIndex}`} className="font-semibold">
-            {inline(node.children)}
+            {inline(node.children, links)}
           </strong>,
         );
-      } else push(<em key={`${lineIndex}-${nodeIndex}`}>{inline(node.children)}</em>);
+      } else push(<em key={`${lineIndex}-${nodeIndex}`}>{inline(node.children, links)}</em>);
     });
   });
   // Strings are joined above first, so a path is never split across two of them.
-  return out.map((node, index) => (typeof node === 'string' ? withDocsLinks(node, index) : node));
+  return out.map((node, index) => (typeof node === 'string' ? withDocsLinks(node, links, index) : node));
 }
 
-function blockNode(block: ReplyBlock, key: number): ReactNode {
+function blockNode(block: ReplyBlock, key: number, links: boolean): ReactNode {
   switch (block.kind) {
     case 'heading':
       // Modest on purpose: a bold line, the first level a touch larger. A chat bubble is not a page.
       return block.level === 1 ? (
         <h3 key={key} className="text-[0.9375rem] font-semibold">
-          {inline(block.content)}
+          {inline(block.content, links)}
         </h3>
       ) : (
         <h4 key={key} className="font-semibold">
-          {inline(block.content)}
+          {inline(block.content, links)}
         </h4>
       );
     case 'gap':
@@ -165,14 +165,14 @@ function blockNode(block: ReplyBlock, key: number): ReactNode {
     case 'paragraph':
       return (
         <p key={key} className="whitespace-pre-wrap">
-          {paragraphChildren(block.lines)}
+          {paragraphChildren(block.lines, links)}
         </p>
       );
     case 'bullets':
       return (
         <ul key={key} className="list-disc pl-5">
           {block.items.map((item, index) => (
-            <li key={index}>{inline(item)}</li>
+            <li key={index}>{inline(item, links)}</li>
           ))}
         </ul>
       );
@@ -182,7 +182,7 @@ function blockNode(block: ReplyBlock, key: number): ReactNode {
           {block.items.map((item, index) => (
             // `value` is the number the parser read (one to three digits), never text.
             <li key={index} value={item.n}>
-              {inline(item.content)}
+              {inline(item.content, links)}
             </li>
           ))}
         </ol>
@@ -226,8 +226,14 @@ function arrivingBlocks(text: string): ReplyBlock[] {
  * that is still being written.
  */
 export const ReplyText = memo(function ReplyText({ text, arriving = false }: { text: string; arriving?: boolean }) {
-  if (!MAY_HOLD_MARKS.test(text)) return <div className={TEXT_CLASS}>{withDocsLinks(text)}</div>;
+  // A docs path is drawn as a link only once the reply is complete: while it arrives, a path may be half written.
+  const links = !arriving;
+  if (!MAY_HOLD_MARKS.test(text)) return <div className={TEXT_CLASS}>{withDocsLinks(text, links)}</div>;
   const blocks = arriving ? arrivingBlocks(text) : replyBlocks(text);
-  if (isPlain(blocks)) return <div className={TEXT_CLASS}>{withDocsLinks(text)}</div>;
-  return <div className="break-words leading-relaxed text-primary-foreground">{blocks.map(blockNode)}</div>;
+  if (isPlain(blocks)) return <div className={TEXT_CLASS}>{withDocsLinks(text, links)}</div>;
+  return (
+    <div className="break-words leading-relaxed text-primary-foreground">
+      {blocks.map((block, key) => blockNode(block, key, links))}
+    </div>
+  );
 });
