@@ -8,6 +8,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { ReadOnlyNotice } from '@/components/account/settings-form';
 import { ActionNotice } from '@/components/account/action-notice';
+import { formatDate } from '@/components/account/dates';
 import { CopyButton } from '@/components/account/mcp-setup-card';
 import { createKeyAction, revokeKeyAction } from '@/app/account/developers/actions';
 
@@ -22,17 +23,15 @@ export type KeyListing = {
   lastUsedAt: string | null;
 };
 
-const DATE = new Intl.DateTimeFormat('en-MY', { day: '2-digit', month: 'short', year: 'numeric' });
-
 function when(iso: string | null): string {
   if (!iso) return 'Never used';
-  const date = new Date(iso);
-  return Number.isNaN(date.getTime()) ? '—' : `Last used ${DATE.format(date)}`;
+  const date = formatDate(iso);
+  return date ? `Last used ${date}` : '—';
 }
 
 function created(iso: string): string {
-  const date = new Date(iso);
-  return Number.isNaN(date.getTime()) ? '' : `Made ${DATE.format(date)}`;
+  const date = formatDate(iso);
+  return date ? `Made ${date}` : '';
 }
 
 /**

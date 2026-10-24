@@ -5,6 +5,7 @@ import { Plug } from 'lucide-react';
 import { BentoCard } from '@/components/bento/bento';
 import { Button } from '@/components/ui/button';
 import { ActionNotice } from '@/components/account/action-notice';
+import { formatDate } from '@/components/account/dates';
 import { ReadOnlyNotice } from '@/components/account/settings-form';
 import { disconnectAppAction } from '@/app/account/developers/actions';
 
@@ -17,11 +18,9 @@ export type ConnectedApp = {
   workspace: string | null;
 };
 
-const DATE = new Intl.DateTimeFormat('en-MY', { day: '2-digit', month: 'short', year: 'numeric' });
-
 function connectedOn(iso: string): string {
-  const date = new Date(iso);
-  return Number.isNaN(date.getTime()) ? '' : `Connected ${DATE.format(date)}`;
+  const date = formatDate(iso);
+  return date ? `Connected ${date}` : '';
 }
 
 function DisconnectButton({ clientId, name, onNotice }: { clientId: string; name: string; onNotice: (text: string | null) => void }) {
