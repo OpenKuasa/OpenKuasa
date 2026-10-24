@@ -133,6 +133,7 @@ const writer: VouchersWriter = {
   payments: [],
   orders: [],
   orderNotes: {},
+  orderFigures: {},
 };
 
 const render = (rows: PaymentVoucherRow[], initialAsk?: { kind: 'markPaid' | 'void'; id: string }) =>

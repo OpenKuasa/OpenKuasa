@@ -256,7 +256,7 @@ describe('the link in the Kind cell', () => {
 describe('the questions', () => {
   it('ask before approving, naming the amount, the payee, the date and the account', () => {
     expect(text(voucherQuestion('approve', row()))).toBe(
-      'Approve the payment of RM 300.00 to Tenaga Nasional, dated 05 Oct 2026, from Maybank Current? It is then To be paid, exactly as it stands: it cannot be changed after this, only paid or deleted.',
+      'Approve the payment of RM 300.00 to Tenaga Nasional, dated 05 Oct 2026, from Maybank Current? Once approved it is ready to pay, exactly as it stands: it cannot be changed after this, only paid or deleted.',
     );
     expect(voucherQuestion('approve', row()).filter((p) => p.strong).map((p) => p.text)).toEqual(['RM 300.00', 'Tenaga Nasional', 'Maybank Current']);
   });

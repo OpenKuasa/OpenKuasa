@@ -317,3 +317,23 @@ describe('the receive card', () => {
     expect(submitReceipts(order.id, drafts.map((d, i) => (i === 0 ? { ...d, received: '9' } : d)))).not.toHaveProperty('error');
   });
 });
+
+describe('the order a link asked for', () => {
+  it('draws it above the list with its lines, its status and the way back', () => {
+    const html = renderToStaticMarkup(<PurchaseOrdersView rows={[row()]} openedOrder={pending} writer={writerFor(admin)} />);
+    const t = text(html);
+    expect(t).toContain('Purchase order PO-0001');
+    expect(t).toContain('Kopi Hulu Supplies, 01 Oct 2026');
+    expect(t).toContain('Arabica beans 5 kg at RM 100.00 RM 500.00');
+    expect(t).toContain('Paper cups 200 pcs (50 per sleeve) at RM 2.00, SST 6% RM 400.00');
+    expect(t).toContain('Total RM 924.00');
+    expect(t).toContain('Awaiting approval. This is the order as it stands');
+    expect(t).toContain('Show all orders');
+    expect(html).toContain('href="/finance/purchase-orders"');
+  });
+
+  it('draws nothing when the page was not linked to an order', () => {
+    const t = text(render([row()]));
+    expect(t).not.toContain('Show all orders');
+  });
+});

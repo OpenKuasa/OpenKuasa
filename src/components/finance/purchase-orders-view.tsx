@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { useState } from 'react';
 import {
   Ban,
@@ -22,7 +23,7 @@ import {
 } from 'lucide-react';
 import { BentoCard, BentoGrid, BentoStat } from '@/components/bento/bento';
 import { ConfirmRow } from '@/components/finance/confirm-row';
-import { PurchaseOrderApproveCard } from '@/components/finance/purchase-order-approve-card';
+import { PurchaseOrderApproveCard, PurchaseOrderLines } from '@/components/finance/purchase-order-approve-card';
 import { PurchaseOrderPrintDialog } from '@/components/finance/purchase-order-print-dialog';
 import { downloadCsv } from '@/components/finance/download-csv';
 import { PurchaseOrderFormCard, type PurchaseOrderFormActions } from '@/components/finance/purchase-order-form-card';
@@ -135,7 +136,16 @@ export function createBillQuestion(order: PurchaseOrderListRow): string | null {
  * Export for everybody. A person who may edit (`writer`) also gets New purchase
  * order and a menu on each row that offers what its status, and they, may do.
  */
-export function PurchaseOrdersView({ rows, writer }: { rows: PurchaseOrderListRow[]; writer?: PurchaseOrdersWriter }) {
+export function PurchaseOrdersView({
+  rows,
+  writer,
+  openedOrder,
+}: {
+  rows: PurchaseOrderListRow[];
+  writer?: PurchaseOrdersWriter;
+  /** One order the page was linked to (`?po=`), drawn above the list with its lines; read only. */
+  openedOrder?: PurchaseOrderDetail | null;
+}) {
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState<PurchaseOrderFilter>('open');
   const [showAll, setShowAll] = useState(false);
@@ -498,6 +508,8 @@ export function PurchaseOrdersView({ rows, writer }: { rows: PurchaseOrderListRo
       />
 
       <BentoGrid>
+        {openedOrder ? <OpenedOrderCard order={openedOrder} /> : null}
+
         {card()}
 
         {stats.map((s, i) => (
@@ -679,5 +691,33 @@ export function PurchaseOrdersView({ rows, writer }: { rows: PurchaseOrderListRo
         </BentoCard>
       </BentoGrid>
     </ScreenContainer>
+  );
+}
+
+/**
+ * One order the page was linked to from somewhere else (`?po=<id>`), for someone checking it against a payment:
+ * its lines and totals, its status, and the way back to the list. Read only. The list stays below it, so the rest
+ * of the screen is still there; Show all orders drops the parameter rather than leaving it in the address bar.
+ */
+function OpenedOrderCard({ order }: { order: PurchaseOrderDetail }) {
+  return (
+    <BentoCard
+      title={`Purchase order ${order.po_no ?? 'draft'}`}
+      subtitle={`${order.supplier_name}, ${displayDate(order.po_date)}`}
+      icon={ClipboardCheck}
+      action={
+        <Button asChild variant="outline" size="sm">
+          <Link href="/finance/purchase-orders">Show all orders</Link>
+        </Button>
+      }
+      className="col-span-2 md:col-span-12"
+    >
+      <div className="space-y-3">
+        <PurchaseOrderLines order={order} />
+        <p className="text-sm text-muted-foreground">
+          {PO_STATUS_LABELS[order.status]}. This is the order as it stands; nothing on this card changes it.
+        </p>
+      </div>
+    </BentoCard>
   );
 }
