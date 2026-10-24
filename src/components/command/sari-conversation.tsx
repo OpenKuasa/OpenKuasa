@@ -972,6 +972,7 @@ function ChatPane({
                       onUseCity: weather.useCityInstead,
                     }}
                     compact={compact}
+                    align="center"
                     headingClassName={compact ? 'text-xl' : 'text-3xl'}
                   />
                 ) : (

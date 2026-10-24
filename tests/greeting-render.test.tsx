@@ -13,7 +13,8 @@ const greeting = {
 const html = (
   over: {
     firstName?: string | null;
-    choice?: 'device' | 'city' | 'unset';
+    choice?: 'device' | 'city' | 'unset' | 'loading';
+    align?: 'left' | 'center';
     weatherPhrase?: string | null;
   } = {},
 ) =>
@@ -23,6 +24,7 @@ const html = (
       firstName={over.firstName === undefined ? 'Aisyah' : over.firstName}
       weatherPhrase={over.weatherPhrase ?? null}
       onAsk={() => {}}
+      align={over.align}
       location={{
         canAsk: true,
         choice: over.choice ?? 'unset',
@@ -53,5 +55,16 @@ describe('GreetingHeading', () => {
 
   it('offers the workspace city when a device location is in use', () => {
     expect(html({ choice: 'device' })).toContain('Use workspace city');
+  });
+
+  it('shows no location link while the saved choice is loading', () => {
+    const out = html({ choice: 'loading' });
+    expect(out).not.toContain('Use my location');
+    expect(out).not.toContain('Use workspace city');
+  });
+
+  it('centres the prompt and link on the Tuah home, left elsewhere', () => {
+    expect(html({ align: 'center' })).toContain('mx-auto text-center');
+    expect(html()).not.toContain('mx-auto');
   });
 });

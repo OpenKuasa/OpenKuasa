@@ -5,7 +5,8 @@ import { cn } from '@/lib/utils';
 
 export type GreetingLocation = {
   canAsk: boolean;
-  choice: 'device' | 'city' | 'unset';
+  /** 'loading': this browser's saved choice is not read yet, so no link is shown. */
+  choice: 'device' | 'city' | 'unset' | 'loading';
   onUseDevice: () => void;
   onUseCity: () => void;
 };
@@ -22,6 +23,7 @@ export function GreetingHeading({
   onAsk,
   location,
   compact = false,
+  align = 'left',
   headingClassName,
 }: {
   greeting: ServerGreeting;
@@ -30,6 +32,8 @@ export function GreetingHeading({
   onAsk: (question: string) => void;
   location: GreetingLocation;
   compact?: boolean;
+  /** 'center' for the Tuah home; the product Ask boxes stay left. */
+  align?: 'left' | 'center';
   headingClassName?: string;
 }): ReactElement {
   const heading = composeHeading({
@@ -40,9 +44,10 @@ export function GreetingHeading({
   });
   const linkClass =
     'text-xs underline-offset-2 opacity-70 transition hover:underline hover:opacity-100';
+  const place = align === 'center' ? 'mx-auto text-center' : 'text-left';
 
   return (
-    <div className="min-w-0">
+    <div className={cn('min-w-0', align === 'center' && 'text-center')}>
       <h1
         className={cn(
           'font-bold tracking-tight',
@@ -54,15 +59,19 @@ export function GreetingHeading({
       <button
         type="button"
         onClick={() => onAsk(greeting.secondHalfQuestion)}
-        className="mt-1 block text-left text-sm opacity-80 underline-offset-2 transition hover:underline hover:opacity-100"
+        className={cn(
+          'mt-1 block text-sm opacity-80 underline-offset-2 transition',
+          'hover:underline hover:opacity-100',
+          place,
+        )}
       >
         {greeting.secondHalf}
       </button>
-      {location.canAsk && location.choice !== 'city' && location.choice !== 'device' && (
+      {location.canAsk && location.choice === 'unset' && (
         <button
           type="button"
           onClick={location.onUseDevice}
-          className={cn('mt-1 block', linkClass)}
+          className={cn('mt-1 block', linkClass, place)}
         >
           📍 Use my location for local weather
         </button>
@@ -71,7 +80,7 @@ export function GreetingHeading({
         <button
           type="button"
           onClick={location.onUseCity}
-          className={cn('mt-1 block', linkClass)}
+          className={cn('mt-1 block', linkClass, place)}
         >
           Use workspace city
         </button>

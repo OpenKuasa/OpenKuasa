@@ -1,6 +1,15 @@
 import type { TimeOfDay } from './time-of-day';
 import type { WeatherCondition, WeatherResult } from './types';
 
+/** Every condition, in one place (the weather route and client both read this). */
+export const WEATHER_CONDITIONS: readonly WeatherCondition[] = [
+  'clear',
+  'cloudy',
+  'rain',
+  'storm',
+  'haze',
+];
+
 /** Map a WMO weather code to a coarse condition. Unknown codes read as cloudy. */
 export function conditionFromWmo(code: number): WeatherCondition {
   if (code === 0 || code === 1) return 'clear';

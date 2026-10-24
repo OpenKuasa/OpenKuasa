@@ -10,11 +10,9 @@ import {
   type LocationChoice,
 } from '@/lib/greeting/location-store';
 import { timeOfDayPhrase } from '@/lib/greeting/time-of-day';
-import type { WeatherCondition } from '@/lib/greeting/types';
-import { weatherPhrase } from '@/lib/greeting/weather';
+import { WEATHER_CONDITIONS, weatherPhrase } from '@/lib/greeting/weather';
 
 const TIMEOUT_MS = 1500;
-const CONDITIONS: readonly string[] = ['clear', 'cloudy', 'rain', 'storm', 'haze'];
 
 type WeatherBody = { condition?: unknown; hot?: unknown; place?: unknown };
 
@@ -26,11 +24,12 @@ async function fetchPhrase(
   const res = await fetch(`/api/weather${query}`, { signal });
   if (!res.ok) return null;
   const body = (await res.json()) as WeatherBody;
-  if (typeof body.condition !== 'string' || !CONDITIONS.includes(body.condition)) return null;
+  const condition = WEATHER_CONDITIONS.find((c) => c === body.condition);
+  if (!condition) return null;
   const now = new Date();
   return weatherPhrase(
     {
-      condition: body.condition as WeatherCondition,
+      condition,
       hot: body.hot === true,
       place: typeof body.place === 'string' ? body.place : null,
     },
@@ -49,13 +48,14 @@ async function fetchPhrase(
 export function useGreetingWeather(opts: { enabled: boolean }): {
   phrase: string | null;
   canAskLocation: boolean;
-  choice: LocationChoice;
+  /** 'loading' until the mount effect has read this browser's saved choice. */
+  choice: LocationChoice | 'loading';
   useDeviceLocation: () => void;
   useCityInstead: () => void;
 } {
   const { enabled } = opts;
   const [phrase, setPhrase] = useState<string | null>(null);
-  const [choice, setChoice] = useState<LocationChoice>('unset');
+  const [choice, setChoice] = useState<LocationChoice | 'loading'>('loading');
   // Bumped to refetch after the person changes their choice.
   const [version, setVersion] = useState(0);
 
@@ -65,8 +65,12 @@ export function useGreetingWeather(opts: { enabled: boolean }): {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
     fetchPhrase(readStoredLocation(), controller.signal)
-      .then((text) => setPhrase(text))
-      .catch(() => setPhrase(null))
+      .then((text) => {
+        if (!controller.signal.aborted) setPhrase(text);
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) setPhrase(null);
+      })
       .finally(() => clearTimeout(timer));
     return () => {
       clearTimeout(timer);
@@ -82,9 +86,12 @@ export function useGreetingWeather(opts: { enabled: boolean }): {
           writeStoredLocation(pos.coords.latitude, pos.coords.longitude);
           setVersion((v) => v + 1);
         },
-        () => {
-          clearStoredLocation();
-          setChoice('city');
+        (err) => {
+          // Only a real refusal is remembered; a timeout or no-signal can be retried.
+          if (err.code === err.PERMISSION_DENIED) {
+            clearStoredLocation();
+            setChoice('city');
+          }
         },
         { timeout: 8000, maximumAge: 600000 },
       );
