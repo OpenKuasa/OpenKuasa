@@ -32,6 +32,8 @@ import { DeletionNotice } from '@/screens/hire/delete-dialog';
 import { InterviewHeaderButtons, InterviewRowMenu } from '@/screens/hire/interview-actions';
 import { InterviewDialogHost } from '@/screens/hire/interview-dialog';
 import { LOAD_FAILED, Muted, loadHire } from '@/screens/hire/parts';
+import { hireNoteCounts } from '@/screens/hire/agent-note-counts';
+import { AgentNoteMarker } from '@/components/hire/agent-note-marker';
 
 type Interview = InterviewsModel['rows'][number];
 
@@ -119,6 +121,8 @@ export default async function InterviewsScreen() {
   const [{ model }, viewer] = await Promise.all([loadHire('interviews', buildInterviewsModel), getViewer()]);
   // Worked out once for the screen. Each action checks again on the server, so this only decides what is drawn.
   const canEdit = !viewer.isDemo && can(viewer.role, 'edit-data');
+  // The agent's notes on the interviews just loaded (only those ids). A failed read shows no marker.
+  const agentNotes = await hireNoteCounts(viewer, 'hire_interview', model?.rows.map((r) => r.id));
   // Scheduled and still ahead. A scheduled interview whose time has passed is in the table below, tagged "Needs an outcome".
   const upcoming = model?.upcoming ?? [];
   // The server's clock, handed to the browser: whether an invitation can still be handed over is told from it, not
@@ -239,6 +243,7 @@ export default async function InterviewsScreen() {
                           <span className="whitespace-nowrap font-medium">
                             {r.name}
                           </span>
+                          <AgentNoteMarker note={agentNotes?.[r.id]} />
                           {/* In words: colour is never the only signal. */}
                           {tagsFor(r).map((tag) => (
                             <span

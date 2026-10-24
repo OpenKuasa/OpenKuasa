@@ -37,6 +37,8 @@ import { AddToPool, PoolFooter, PoolRowControls, PoolSearch } from '@/screens/hi
 import { POOL_READ_CAPPED, poolFooter, poolNoMatch, poolSearchText } from '@/lib/hire/pool';
 import { buildPoolModel, type PoolModel } from '@/lib/hire/lists';
 import { LOAD_FAILED, Muted, loadHire, topSlices } from '@/screens/hire/parts';
+import { hireNoteCounts } from '@/screens/hire/agent-note-counts';
+import { AgentNoteMarker } from '@/components/hire/agent-note-marker';
 
 type Candidate = PoolModel['rows'][number];
 type Status = Candidate['status'];
@@ -106,6 +108,8 @@ export default async function TalentPoolScreen({
   ]);
   // Worked out once for the screen. Each action checks again on the server, so this only decides what is drawn.
   const canEdit = !viewer.isDemo && can(viewer.role, 'edit-data');
+  // The agent's notes on the candidates shown (only those ids). A failed read shows no marker.
+  const agentNotes = await hireNoteCounts(viewer, 'hire_candidate', model?.rows.map((r) => r.id));
   const roleSlices: Slice[] = topSlices(
     model?.byTitle ?? [],
     (r) => r.value,
@@ -237,7 +241,10 @@ export default async function TalentPoolScreen({
                             {c.name.charAt(0)}
                           </div>
                           <div className="min-w-0">
-                            <p className="truncate font-medium">{c.name}</p>
+                            <p className="truncate font-medium">
+                              {c.name}
+                              <AgentNoteMarker note={agentNotes?.[c.id]} />
+                            </p>
                             <p className="truncate text-xs text-muted-foreground">
                               {c.title}
                             </p>

@@ -12,6 +12,8 @@ import { cn } from '@/lib/utils';
 import { LiveDot } from '@/components/ui/live-dot';
 import { Badge } from '@/components/ui/badge';
 import { TableCell, TableRow } from '@/components/ui/table';
+import { AgentNoteMarker } from '@/components/hire/agent-note-marker';
+import type { NoteCount } from '@/lib/hire/agent/notes';
 import { ApplicationActions } from '@/screens/hire/application-actions';
 
 /** 44 pixels of hit area on every button and link. */
@@ -173,7 +175,16 @@ function InterviewList({ interviews }: { interviews: PanelInterview[] }) {
  * gave on the form, then its interviews, then the controls that change the application. Someone who may not edit gets
  * the details and the interviews alone, and no button where there is nothing to open.
  */
-export function ApplicationRow({ row, canEdit }: { row: ApplicationRowData; canEdit: boolean }) {
+export function ApplicationRow({
+  row,
+  canEdit,
+  agentNote,
+}: {
+  row: ApplicationRowData;
+  canEdit: boolean;
+  /** The agent's notes on this application, for the row marker. Left out: no marker. */
+  agentNote?: NoteCount;
+}) {
   const [open, setOpen] = useState(false);
   const panelId = useId();
   const { details } = row;
@@ -192,6 +203,7 @@ export function ApplicationRow({ row, canEdit }: { row: ApplicationRowData; canE
               {row.name.charAt(0)}
             </span>
             <span className="whitespace-nowrap font-medium">{row.name}</span>
+            <AgentNoteMarker note={agentNote} />
           </div>
         </TableCell>
         <TableCell className="whitespace-nowrap">{row.job}</TableCell>

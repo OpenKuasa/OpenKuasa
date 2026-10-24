@@ -31,6 +31,8 @@ import { Label } from '@/components/ui/label';
 import { LiveDot } from '@/components/ui/live-dot';
 import { Textarea } from '@/components/ui/textarea';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { AgentNoteMarker } from '@/components/hire/agent-note-marker';
+import type { NoteCounts } from '@/lib/hire/agent/notes';
 
 type Row = JobsModel['rows'][number];
 type ActionResult = { ok: boolean; error?: string };
@@ -95,7 +97,18 @@ function focusOr(element: HTMLElement | null, fallback: HTMLElement | null) {
   (element?.isConnected ? element : fallback)?.focus();
 }
 
-export function JobsTable({ rows, canEdit, today }: { rows: Row[]; canEdit: boolean; today: string }) {
+export function JobsTable({
+  rows,
+  canEdit,
+  today,
+  agentNotes,
+}: {
+  rows: Row[];
+  canEdit: boolean;
+  today: string;
+  /** The agent's notes, by job id, for the row marker. Left out: no marker. */
+  agentNotes?: NoteCounts;
+}) {
   const [pending, start] = useTransition();
   const [editing, setEditing] = useState<Row | null>(null);
   const [creating, setCreating] = useState(false);
@@ -232,6 +245,7 @@ export function JobsTable({ rows, canEdit, today }: { rows: Row[]; canEdit: bool
                       <span className="flex items-center gap-2.5 font-medium">
                         <LiveDot active={row.status === 'Open'} />
                         {row.title}
+                        <AgentNoteMarker note={agentNotes?.[row.id]} />
                       </span>
                       <span className="mt-0.5 block pl-[18px] text-xs text-muted-foreground">
                         {openings(row.job)}

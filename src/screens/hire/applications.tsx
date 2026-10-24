@@ -14,6 +14,7 @@ import { can } from '@/lib/auth/permissions';
 import { getViewer } from '@/lib/auth/viewer';
 import { klDateOf } from '@/lib/hire/interview-time';
 import { buildApplicationsModel } from '@/lib/hire/lists';
+import { hireNoteCounts } from '@/screens/hire/agent-note-counts';
 import { ApplicationRow } from '@/screens/hire/application-details';
 import { DeletionNotice } from '@/screens/hire/delete-dialog';
 import { InterviewDialogHost } from '@/screens/hire/interview-dialog';
@@ -57,6 +58,8 @@ export default async function ApplicationsScreen() {
   ]);
   // Worked out once for the screen. The actions check again on the server, so this only decides what is drawn.
   const canEdit = !viewer.isDemo && can(viewer.role, 'edit-data');
+  // The agent's notes on the applications just loaded (only those ids). A failed read shows no marker.
+  const agentNotes = await hireNoteCounts(viewer, 'hire_application', model?.rows.map((r) => r.id));
   const countOf = (key: Status) => model?.statusMix.find((s) => s.key === key)?.value;
   const stat = (key: Status) => {
     const value = countOf(key);
@@ -167,6 +170,7 @@ export default async function ApplicationsScreen() {
                       key={r.id}
                       row={{ ...r, statusClass: STATUS_STYLES[r.status], live: r.status !== 'Rejected' }}
                       canEdit={canEdit}
+                      agentNote={agentNotes?.[r.id]}
                     />
                   ))}
                 </TableBody>

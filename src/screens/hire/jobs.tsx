@@ -19,6 +19,7 @@ import {
 import { can } from '@/lib/auth/permissions';
 import { getViewer } from '@/lib/auth/viewer';
 import { buildJobsModel } from '@/lib/hire/lists';
+import { hireNoteCounts } from '@/screens/hire/agent-note-counts';
 import { JobsTable } from '@/screens/hire/jobs-table';
 import { LOAD_FAILED, Muted, NOT_AVAILABLE, loadHire } from '@/screens/hire/parts';
 
@@ -40,6 +41,8 @@ const STATUS_COLOR: Record<string, string> = {
 export default async function JobsScreen() {
   const [{ model }, viewer] = await Promise.all([loadHire('jobs', buildJobsModel), getViewer()]);
   const canEdit = !viewer.isDemo && can(viewer.role, 'edit-data');
+  // The agent's notes on the jobs just loaded (only those ids). A failed read shows no marker.
+  const agentNotes = await hireNoteCounts(viewer, 'hire_job', model?.rows.map((r) => r.id));
   // The date in Kuala Lumpur, so the form and the server agree on "today".
   const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kuala_Lumpur' });
   const statusMix: Slice[] = (model?.statusMix ?? []).map((s) => ({
@@ -157,7 +160,7 @@ export default async function JobsScreen() {
           </div>
           {!model ? LOAD_FAILED : (
             <>
-              <JobsTable rows={model.rows} canEdit={canEdit} today={today} />
+              <JobsTable rows={model.rows} canEdit={canEdit} today={today} agentNotes={agentNotes} />
               {!model.isEmpty && (
                 <div className="border-t px-4 py-3 text-sm text-muted-foreground">
                   Showing {model.rows.length} jobs · {model.totalApplicants} applicants
