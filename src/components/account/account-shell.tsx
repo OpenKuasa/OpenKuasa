@@ -37,7 +37,9 @@ export function AccountShell({
           >
             <Menu className="size-5" />
           </button>
-          <Logo wordmark="OpenKuasa" wordmarkClassName="whitespace-nowrap max-sm:hidden" />
+          <Link href="/command" aria-label="OpenKuasa home">
+            <Logo wordmark="OpenKuasa" wordmarkClassName="whitespace-nowrap max-sm:hidden" />
+          </Link>
           <span className="hidden text-muted-foreground sm:inline">·</span>
           <span className="hidden font-semibold text-muted-foreground sm:inline">
             Account

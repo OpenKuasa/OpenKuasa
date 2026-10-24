@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import Link from 'next/link';
 import { Logo } from '@/components/brand/logo';
 
 /**
@@ -10,7 +11,9 @@ export function AuthShell({ children }: { children: ReactNode }) {
     <div className="flex min-h-dvh w-full">
       {/* form pane */}
       <div className="flex flex-1 flex-col px-6 py-8 sm:px-10 lg:px-16">
-        <Logo />
+        <Link href="/" aria-label="OpenKuasa home" className="w-fit">
+          <Logo />
+        </Link>
         <div className="flex flex-1 items-center justify-center">
           <div className="w-full max-w-sm space-y-6">{children}</div>
         </div>

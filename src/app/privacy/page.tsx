@@ -60,7 +60,9 @@ export default function PrivacyPage() {
     <div className="min-h-dvh w-full bg-background">
       <header className="border-b">
         <div className="mx-auto flex max-w-3xl items-center justify-between px-6 py-4">
-          <Logo />
+          <Link href="/" aria-label="OpenKuasa home">
+            <Logo />
+          </Link>
           <Link
             href="/command"
             className="inline-flex items-center gap-1.5 text-sm font-medium text-muted-foreground hover:text-foreground"
