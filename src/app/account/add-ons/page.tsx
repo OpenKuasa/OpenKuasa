@@ -16,6 +16,8 @@ type AddOn = {
   description: string;
   price: string;
   owned: boolean;
+  /** Not built yet: shown, but it cannot be added. */
+  comingSoon?: boolean;
 };
 
 const ADD_ONS: AddOn[] = [
@@ -43,9 +45,10 @@ const ADD_ONS: AddOn[] = [
   {
     name: 'e-Invoice LHDN',
     icon: BadgeCheck,
-    description: 'Submit compliant e-Invoices directly to LHDN MyInvois.',
-    price: 'RM 39 / mo',
-    owned: true,
+    description: 'Send e-Invoices to LHDN MyInvois from Bendahara.',
+    price: 'Coming soon',
+    owned: false,
+    comingSoon: true,
   },
   {
     name: 'Priority Support',
@@ -91,9 +94,9 @@ export default async function AddOnsPage() {
                 variant="outline"
                 size="sm"
                 className="w-full"
-                disabled={a.owned}
+                disabled={a.owned || a.comingSoon}
               >
-                {a.owned ? 'Added' : 'Add'}
+                {a.owned ? 'Added' : a.comingSoon ? 'Coming soon' : 'Add'}
               </Button>
             </div>
           );
