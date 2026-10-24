@@ -19,6 +19,7 @@ import { listAccounts, listPaymentsOut } from '@/lib/finance/money';
 import { listPurchaseOrders } from '@/lib/finance/purchase-orders';
 import { todayUtc } from '@/lib/finance/view-helpers';
 import { orderNotesByVoucher, voucherAccess } from '@/lib/finance/voucher-form';
+import { voucherFiguresByVoucher } from '@/lib/finance/voucher-order-figures';
 import { createClient } from '@/lib/supabase/server';
 import { SAMPLE_PAYMENT_VOUCHERS } from './cash-book-sample';
 import { SAMPLE_TODAY } from './sales-sample';
@@ -83,6 +84,7 @@ export default async function PaymentVouchersScreen() {
               orders,
               // Worked out only for someone who can approve, and only when a voucher for bills waits.
               orderNotes: access.readsOrders ? orderNotesByVoucher(payments, bills, orders) : {},
+              orderFigures: access.readsOrders ? voucherFiguresByVoucher(payments, bills, orders) : {},
             }
           : undefined
       }

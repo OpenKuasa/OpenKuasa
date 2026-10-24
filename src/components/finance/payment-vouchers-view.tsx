@@ -12,6 +12,7 @@ import { RowMenu, type RowMenuItem } from '@/components/finance/row-menu';
 import { SavedNoteCard } from '@/components/finance/saved-note-card';
 import { useFinanceAction } from '@/components/finance/use-finance-action';
 import { useLocalToday } from '@/components/finance/use-local-today';
+import { VoucherOrderFigures } from '@/components/finance/voucher-order-figures';
 import { type VoucherFormActions, VoucherFormCard } from '@/components/finance/voucher-form-card';
 import { PageHeader } from '@/components/screen/page-header';
 import { ScreenContainer } from '@/components/screen/screen-container';
@@ -68,6 +69,7 @@ import {
   writtenVoucherTitle,
 } from '@/lib/finance/voucher-form';
 import { markVoucherPaidInput } from '@/lib/finance/vouchers';
+import type { VoucherFigures } from '@/lib/finance/voucher-order-figures';
 import { cn } from '@/lib/utils';
 
 export type VoucherActions = VoucherFormActions & {
@@ -99,6 +101,12 @@ export type VouchersWriter = {
    * (`orderNotesByVoucher`). Empty for someone who may not decide: they are never asked to approve.
    */
   orderNotes: Record<string, string[]>;
+  /**
+   * By voucher id, the figures of the purchase orders behind the bills a waiting voucher pays
+   * (`voucherFiguresByVoucher`): what was ordered, received, billed and paid, this payment, and each bill with
+   * its share and the supplier's invoice number. Empty for someone who may not decide (#242).
+   */
+  orderFigures: Record<string, VoucherFigures>;
 };
 
 const PAID_SERIES: Series[] = [{ key: 'paid', label: 'Paid out (RM k)', color: 'var(--chart-1)' }];
@@ -319,8 +327,10 @@ export function PaymentVouchersView({
       );
     }
     if (asking.kind === 'approve') {
-      // The same advice, in the same words, as Payments Out gives before a supplier payment is marked paid.
+      // The same advice, in the same words, as Payments Out gives before a supplier payment is marked paid, and
+      // under it the figures of the orders behind the bills (#242): approving confirms that they match.
       const orderNotes = writer.orderNotes[row.transaction_id] ?? [];
+      const orderFigures = writer.orderFigures[row.transaction_id];
       return (
         <ConfirmRow
           key={row.transaction_id}
@@ -342,6 +352,7 @@ export function PaymentVouchersView({
               <OrderNotes notes={orderNotes} />
             </div>
           ) : null}
+          {orderFigures ? <VoucherOrderFigures figures={orderFigures} /> : null}
         </ConfirmRow>
       );
     }

@@ -114,6 +114,7 @@ const writer = (canDecide: boolean, orderNotes: Record<string, string[]> = {}): 
   payments: [],
   orders: [],
   orderNotes,
+  orderFigures: {},
 });
 
 const render = (w?: VouchersWriter, rows: PaymentVoucherRow[] = SAMPLE_PAYMENT_VOUCHERS, initialAsk?: { kind: 'edit' | 'submit' | 'approve' | 'reject' | 'markPaid' | 'delete' | 'void'; id: string }) =>

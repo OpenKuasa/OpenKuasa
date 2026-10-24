@@ -35,13 +35,37 @@ vi.mock('@/lib/finance/expenses', async (importOriginal) => ({ ...(await importO
 vi.mock('@/lib/finance/money', async (importOriginal) => ({
   ...(await importOriginal<object>()),
   listAccounts: async () => [{ id: 'a1', name: 'Maybank', currency: 'MYR' }],
-  listPaymentsOut: async () => [{ transaction_id: 'v1', bill_id: 'b1', status: 'pending_approval' }],
+  listPaymentsOut: async () => [
+    { transaction_id: 'v1', bill_id: 'b1', status: 'pending_approval', amount: 300, bill_no: 'BILL-0001', currency: 'MYR' },
+  ],
 }));
 vi.mock('@/lib/finance/bills', async (importOriginal) => ({
   ...(await importOriginal<object>()),
-  listBills: async () => [{ id: 'b1', bill_no: 'BILL-0001', purchase_order_id: 'po-ok' }],
+  listBills: async () => [
+    {
+      id: 'b1',
+      bill_no: 'BILL-0001',
+      supplier_ref: 'INV-8841',
+      bill_date: '2026-10-05',
+      currency: 'MYR',
+      paid: 100,
+      set_off: 0,
+      display_status: 'pending',
+      purchase_order_id: 'po-ok',
+    },
+  ],
 }));
-const order = (id: string, status: string) => ({ id, po_no: id.toUpperCase(), status, total: 100, billed_total: 300, received_total: 0, over_billed: true, billed_over_received: false });
+const order = (id: string, status: string) => ({
+  id,
+  po_no: id.toUpperCase(),
+  status,
+  total: 100,
+  billed_total: 300,
+  received_total: 0,
+  over_billed: true,
+  billed_over_received: false,
+  currency: 'MYR',
+});
 vi.mock('@/lib/finance/purchase-orders', async (importOriginal) => ({
   ...(await importOriginal<object>()),
   listPurchaseOrders: async () => [order('po-ok', 'approved'), order('po-closed', 'closed'), order('po-cancelled', 'cancelled'), order('po-draft', 'draft')],
@@ -56,6 +80,7 @@ type Writer = {
   orders: { id: string }[];
   contacts: unknown[];
   orderNotes: Record<string, string[]>;
+  orderFigures: Record<string, unknown>;
   bills: unknown[];
   payments: unknown[];
 };
@@ -102,6 +127,15 @@ describe('the Payment Vouchers loader', () => {
     expect((await load('member'))?.orderNotes).toEqual({});
     expect((await load('owner', [{ kind: 'bill', status: 'draft' }]))?.orderNotes).toEqual({});
     expect((await load('owner', [{ kind: 'expense', status: 'pending_approval' }]))?.orderNotes).toEqual({});
+  });
+
+  it('works out the figures of the orders behind a waiting voucher for whoever may approve, and no one else', async () => {
+    const figures = (await load('owner'))?.orderFigures as Record<string, { orders: { poNo: string; thisPayment: number; paid: number }[] }>;
+    expect(Object.keys(figures)).toEqual(['v1']);
+    expect(figures.v1.orders[0]).toMatchObject({ poNo: 'PO-OK', thisPayment: 300, paid: 100 });
+    expect(Object.keys(((await load('admin'))?.orderFigures as object) ?? {})).toEqual(['v1']);
+    expect((await load('member'))?.orderFigures).toEqual({});
+    expect((await load('owner', [{ kind: 'bill', status: 'draft' }]))?.orderFigures).toEqual({});
   });
 
   it('gives a writer the form\'s reads and a viewer or the demo workspace nothing', async () => {
