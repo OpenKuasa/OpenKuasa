@@ -16,7 +16,8 @@
 -- decision (status, decided_at, decided_by) is set in one statement, before the note is asked for.
 --
 -- What it checks:
---   * agent_proposals takes product 'finance' (and still 'reach', 'crm' and, since 20261125190000, 'hire'; nothing else);
+--   * agent_proposals takes product 'finance' (and still 'reach', 'crm', Lekir's 'hire' since 20261125190000
+--     and Lekiu's 'people' since 20261125200000; nothing else);
 --   * finance_add_agent_note writes the note of a finance createAgentNote proposal the caller approved in the last
 --     10 minutes, with the type, record, label and body taken from the proposal, once (a second call is FIN70);
 --   * it refuses (42501) another person's approval, an approval older than 10 minutes, a crm proposal, a pending
@@ -78,7 +79,7 @@ begin
 
   select pg_get_constraintdef(oid) into t from pg_constraint
    where conrelid = 'public.agent_proposals'::regclass and contype = 'c' and conname = 'agent_proposals_product_check';
-  if t is distinct from 'CHECK ((product = ANY (ARRAY[''reach''::text, ''crm''::text, ''finance''::text, ''hire''::text])))' then
+  if t is distinct from 'CHECK ((product = ANY (ARRAY[''reach''::text, ''crm''::text, ''finance''::text, ''hire''::text, ''people''::text])))' then
     fails := fails || format('agent_proposals_product_check is: %s', coalesce(t, 'missing'));
   end if;
   select count(*) into n from pg_constraint
@@ -237,8 +238,8 @@ begin
   t := public.bendahara_check_try('product reach', 'ok', format(
     'insert into public.agent_proposals (org_id, product, action, input, title) values (%L, ''reach'', ''x'', ''{}'', ''x'')', org));
   fails := fails || t;
-  t := public.bendahara_check_try('product people', '23514', format(
-    'insert into public.agent_proposals (org_id, product, action, input, title) values (%L, ''people'', ''x'', ''{}'', ''x'')', org));
+  t := public.bendahara_check_try('product nonsense', '23514', format(
+    'insert into public.agent_proposals (org_id, product, action, input, title) values (%L, ''nonsense'', ''x'', ''{}'', ''x'')', org));
   fails := fails || t;
 
   update public.agent_proposals set status = 'approved', decided_at = now(), decided_by = owner_id

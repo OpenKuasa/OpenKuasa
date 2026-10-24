@@ -59,10 +59,19 @@ begin
        or has_table_privilege('authenticated', 'public.' || t, 'INSERT, UPDATE, DELETE, TRUNCATE') or has_any_column_privilege('authenticated', 'public.' || t, 'INSERT, UPDATE')
        or has_table_privilege('anon', 'public.' || t, 'SELECT, INSERT, UPDATE, DELETE, TRUNCATE') or has_any_column_privilege('anon', 'public.' || t, 'SELECT, INSERT, UPDATE')
        -- (Not TRUNCATE: the live project's defaults leave it to the service role on every table, these included.)
-       or has_table_privilege('service_role', 'public.' || t, 'SELECT, INSERT, UPDATE, DELETE') or has_any_column_privilege('service_role', 'public.' || t, 'SELECT, INSERT, UPDATE')
+       or has_table_privilege('service_role', 'public.' || t, 'SELECT, INSERT, UPDATE, DELETE') or has_any_column_privilege('service_role', 'public.' || t, 'INSERT, UPDATE')
        or not has_table_privilege('authenticated', 'public.' || t, 'SELECT') then
       fails := fails || format('%s is not read-only behind its read policy and the second-factor one, and closed to the service role', t);
     end if;
+    -- The service role reads only the columns the Lekiu agent's scan reads (20261125200200): never a title, a body or
+    -- a file. supabase/tests/people_agent_notes_check.sql pins the whole list.
+    select string_agg(c.column_name, ',' order by c.column_name) into ctx from information_schema.columns c
+     where c.table_schema = 'public' and c.table_name = t
+       and has_column_privilege('service_role', ('public.' || t)::regclass, c.column_name, 'SELECT')
+       and (t || '.' || c.column_name) <> all (array[
+         'hr_documents.id', 'hr_documents.org_id', 'hr_documents.employee_id', 'hr_documents.doc_type', 'hr_documents.expires_on',
+         'hr_letters.id', 'hr_letters.org_id', 'hr_letters.employee_id', 'hr_letters.status', 'hr_letters.created_at']);
+    if ctx is not null then fails := fails || format('the service role reads %s.%s', t, ctx); end if;
   end loop;
   foreach t in array array['anon', 'authenticated', 'service_role', 'public'] loop
     if has_table_privilege(t, 'private.hr_released_documents', 'SELECT, INSERT, UPDATE, DELETE, TRUNCATE') or has_any_column_privilege(t, 'private.hr_released_documents', 'SELECT, INSERT, UPDATE')
@@ -541,7 +550,7 @@ begin
     || pg_temp.v('what the sweep released', format('select string_agg(path, '','') from private.hr_released_documents where path in (%L, %L, %L)', fo, f4, fa), fo)
     || pg_temp.x(adm, 'a released file is attached after all', format('hr_add_document(%L,''T'',''other'',null,%L' || pdf, ea, fo), 'DOC_BAD_FILE')
     || pg_temp.x(null, 'the service role releases the old file of a folder with no workspace behind it', format('(select count(*) from hr_release_orphaned_document_files(%L))', split_part(pg_temp.up(gen_random_uuid(), gen_random_uuid(), 'pdf', '2 days'), '/', 1)), '=1', 'aal1', 'service_role')
-    || pg_temp.x(null, 'the service role reads no document', '(select count(*) from public.hr_documents)', 'permission denied for table hr_documents', 'aal1', 'service_role');
+    || pg_temp.x(null, 'the service role reads no document''s title or file (only the agent''s columns)', '(select count(title) + count(file_path) from public.hr_documents)', 'permission denied for table hr_documents', 'aal1', 'service_role');
   fa := pg_temp.up(org, ex); fb := pg_temp.up(org, ex); fp := pg_temp.up(org, ep);
   insert into public.hr_documents (org_id, employee_id, title, doc_type, file_path, file_name, file_size, file_type) values (org, ex, 'One', 'other', fa, 'a.pdf', 10, 'application/pdf'), (org, ex, 'Two', 'other', fb, 'a.pdf', 10, 'application/pdf'), (org, ep, 'Kept', 'other', fp, 'a.pdf', 10, 'application/pdf');
   insert into public.hr_documents (org_id, employee_id, title, doc_type) values (org, ex, 'No file', 'other');
