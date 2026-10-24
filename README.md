@@ -129,6 +129,65 @@ under `src/app/(app)/`, written by `pnpm gen:routes` (see
   transactions, connected apps, developers, activity, changelog, docs, support
   and feedback.
 
+## Connect an AI tool (MCP)
+
+The server address is `https://<your-host>/api/mcp` (for openkuasa.com:
+`https://openkuasa.com/api/mcp`). The same steps are on **Account →
+Developers** in the app, with a copy button for each.
+
+1. On **Account → Developers**, make a key: give it a name such as "Claude Code
+   on my laptop" and copy it. It starts with `okk_` and is shown only once.
+   Make one key per tool, and revoke it when you stop using that tool.
+2. Keep the key in an environment variable, not in a command or a file you
+   might share. On macOS, straight from the clipboard:
+
+   ```bash
+   echo "export OPENKUASA_API_KEY=$(pbpaste)" >> ~/.zshrc && source ~/.zshrc
+   ```
+
+3. Add the server to your tool:
+
+   **Claude Code** — the single quotes keep the variable name in the config, so
+   Claude Code fills in the key when it connects:
+
+   ```bash
+   claude mcp add --transport http openkuasa https://openkuasa.com/api/mcp \
+     --header 'Authorization: Bearer ${OPENKUASA_API_KEY}'
+   ```
+
+   **Codex** — add to `~/.codex/config.toml`:
+
+   ```toml
+   [mcp_servers.openkuasa]
+   url = "https://openkuasa.com/api/mcp"
+   bearer_token_env_var = "OPENKUASA_API_KEY"
+   ```
+
+   **Cursor** — add to `~/.cursor/mcp.json`:
+
+   ```json
+   {
+     "mcpServers": {
+       "openkuasa": {
+         "url": "https://openkuasa.com/api/mcp",
+         "headers": { "Authorization": "Bearer ${env:OPENKUASA_API_KEY}" }
+       }
+     }
+   }
+   ```
+
+   **Claude Desktop and claude.ai** — no key. In Settings → Connectors, choose
+   Add custom connector, paste the server address, then sign in with OpenKuasa
+   and allow it for your workspace. This needs "Sign in with OpenKuasa" turned
+   on (`MCP_SIGN_IN_ENABLED`, see [Self-hosting setup](#self-hosting-setup)).
+
+4. Restart the tool, then ask it something like "what's in my CRM?".
+
+The tool acts as you, with exactly what you can see and do in the app. It asks
+before every change (unless you have told it not to), riskier changes come
+back with a note that needs your OK, and owners and admins see each change in
+the activity log as "via MCP".
+
 ## Screenshots
 
 A look at the running app (sample data):
