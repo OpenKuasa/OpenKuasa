@@ -1,4 +1,5 @@
 import { AskHero, type AskPersona } from '@/components/chat/ask-hero';
+import type { ServerGreeting } from '@/lib/greeting/types';
 
 const KASTURI: AskPersona = {
   name: 'Kasturi',
@@ -11,6 +12,14 @@ const KASTURI: AskPersona = {
 };
 
 /** Ask-Kasturi: the CRM assistant's chat card on the Kasturi Overview screen. */
-export function AskKasturiHero({ prompts, isDemo }: { prompts: string[]; isDemo: boolean }) {
-  return <AskHero persona={KASTURI} prompts={prompts} isDemo={isDemo} />;
+export function AskKasturiHero({
+  prompts,
+  isDemo,
+  greeting,
+}: {
+  prompts: string[];
+  isDemo: boolean;
+  greeting?: ServerGreeting;
+}) {
+  return <AskHero persona={KASTURI} prompts={prompts} isDemo={isDemo} greeting={greeting} />;
 }

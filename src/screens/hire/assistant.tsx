@@ -21,6 +21,7 @@ import { LiveDot } from '@/components/ui/live-dot';
 import { buildHireOverviewModel } from '@/lib/hire/overview';
 import { AskLekirHero } from '@/screens/hire/ask-lekir-hero';
 import { FUNNEL_COLOR, LOAD_FAILED, Muted, NOT_AVAILABLE, loadHire, topSlices } from '@/screens/hire/parts';
+import { loadServerGreeting } from '@/lib/greeting/server';
 
 /* ---- static config ------------------------------------------------ */
 
@@ -78,7 +79,7 @@ export default async function OverviewScreen() {
       <BentoGrid>
         {/* Ask-Lekir hero */}
         <BentoCard tone="primary" className="col-span-2 md:col-span-12">
-          <AskLekirHero prompts={PROMPTS} isDemo={isDemo} />
+          <AskLekirHero prompts={PROMPTS} isDemo={isDemo} greeting={await loadServerGreeting('hire')} />
         </BentoCard>
 
         {/* KPI row: headline figures only, the tables hold no history to chart */}

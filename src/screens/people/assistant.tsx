@@ -25,6 +25,7 @@ import { formatDay } from '@/lib/people/dates';
 import { approvalsHeading, buildPeopleOverviewModel } from '@/lib/people/overview';
 import { AskLekiuHero } from '@/screens/people/ask-lekiu-hero';
 import { DEPARTMENT_COLORS, HR_ONLY, LOAD_FAILED, Muted, NOT_AVAILABLE, NotLinkedCard, loadPeople } from '@/screens/people/parts';
+import { loadServerGreeting } from '@/lib/greeting/server';
 
 /* ---- static config ------------------------------------------------ */
 
@@ -80,7 +81,7 @@ export default async function OverviewScreen() {
       <BentoGrid>
         {/* Ask-Lekiu hero */}
         <BentoCard tone="primary" className="col-span-2 md:col-span-12">
-          <AskLekiuHero prompts={PROMPTS} isDemo={chatDemo} />
+          <AskLekiuHero prompts={PROMPTS} isDemo={chatDemo} greeting={await loadServerGreeting('people')} />
         </BentoCard>
 
         {notLinked ? (

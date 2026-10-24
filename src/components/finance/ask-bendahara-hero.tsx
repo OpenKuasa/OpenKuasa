@@ -1,4 +1,5 @@
 import { AskHero, type AskPersona } from '@/components/chat/ask-hero';
+import type { ServerGreeting } from '@/lib/greeting/types';
 
 const BENDAHARA: AskPersona = {
   name: 'Bendahara',
@@ -10,6 +11,14 @@ const BENDAHARA: AskPersona = {
 };
 
 /** Ask-Bendahara: the finance assistant's chat card on the Bendahara Overview screen. */
-export function AskBendaharaHero({ prompts, isDemo }: { prompts: string[]; isDemo: boolean }) {
-  return <AskHero persona={BENDAHARA} prompts={prompts} isDemo={isDemo} />;
+export function AskBendaharaHero({
+  prompts,
+  isDemo,
+  greeting,
+}: {
+  prompts: string[];
+  isDemo: boolean;
+  greeting?: ServerGreeting;
+}) {
+  return <AskHero persona={BENDAHARA} prompts={prompts} isDemo={isDemo} greeting={greeting} />;
 }

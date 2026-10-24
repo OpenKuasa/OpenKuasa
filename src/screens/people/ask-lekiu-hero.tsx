@@ -1,4 +1,5 @@
 import { AskHero, type AskPersona } from '@/components/chat/ask-hero';
+import type { ServerGreeting } from '@/lib/greeting/types';
 
 const LEKIU: AskPersona = {
   name: 'Lekiu',
@@ -11,6 +12,14 @@ const LEKIU: AskPersona = {
 };
 
 /** Ask-Lekiu: the HR assistant's chat card on the Lekiu Overview screen. */
-export function AskLekiuHero({ prompts, isDemo }: { prompts: string[]; isDemo: boolean }) {
-  return <AskHero persona={LEKIU} prompts={prompts} isDemo={isDemo} />;
+export function AskLekiuHero({
+  prompts,
+  isDemo,
+  greeting,
+}: {
+  prompts: string[];
+  isDemo: boolean;
+  greeting?: ServerGreeting;
+}) {
+  return <AskHero persona={LEKIU} prompts={prompts} isDemo={isDemo} greeting={greeting} />;
 }

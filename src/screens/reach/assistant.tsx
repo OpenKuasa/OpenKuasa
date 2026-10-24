@@ -27,6 +27,7 @@ import { createClient } from '@/lib/supabase/server';
 import { isLiveChatAllowed } from '@/lib/ai/access';
 import { getReachData } from '@/lib/reach/supabase';
 import { buildOverviewModel, type OverviewModel } from '@/lib/reach/overview';
+import { loadServerGreeting } from '@/lib/greeting/server';
 
 /* ---- mock data (Rimba Ventures Sdn Bhd) --------------------------- */
 
@@ -126,7 +127,7 @@ export default async function OverviewScreen() {
       <BentoGrid>
         {/* Ask-Jebat hero */}
         <BentoCard tone="primary" className="col-span-2 md:col-span-12">
-          <AskJebatHero prompts={PROMPTS} isDemo={isDemo} />
+          <AskJebatHero prompts={PROMPTS} isDemo={isDemo} greeting={await loadServerGreeting('reach')} />
         </BentoCard>
 
         {/* KPI row — only leads has a weekly series; the rest are headline-only */}

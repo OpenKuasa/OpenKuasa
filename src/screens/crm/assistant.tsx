@@ -27,6 +27,7 @@ import { formatRM, formatWinRate } from '@/lib/crm/deal-stats';
 import { loadCrmOverview, type CrmOverviewModel } from '@/lib/crm/overview';
 import { cn } from '@/lib/utils';
 import { AskKasturiHero } from './ask-kasturi-hero';
+import { loadServerGreeting } from '@/lib/greeting/server';
 
 /* ---- sample data (Rimba Ventures Sdn Bhd), shown when no database is configured ---- */
 
@@ -156,7 +157,7 @@ export default async function OverviewScreen() {
       <BentoGrid>
         {/* Ask-Kasturi hero */}
         <BentoCard tone="primary" className="col-span-2 md:col-span-12">
-          <AskKasturiHero prompts={PROMPTS} isDemo={isDemo} />
+          <AskKasturiHero prompts={PROMPTS} isDemo={isDemo} greeting={await loadServerGreeting('crm')} />
         </BentoCard>
 
         {/* KPI row: headline figures only, there is no history to compare them with */}

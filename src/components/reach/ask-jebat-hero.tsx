@@ -1,4 +1,5 @@
 import { AskHero, type AskPersona } from '@/components/chat/ask-hero';
+import type { ServerGreeting } from '@/lib/greeting/types';
 
 const JEBAT: AskPersona = {
   name: 'Jebat',
@@ -10,6 +11,14 @@ const JEBAT: AskPersona = {
 };
 
 /** Ask-Jebat: the marketing assistant's chat card on the Jebat Overview screen. */
-export function AskJebatHero({ prompts, isDemo }: { prompts: string[]; isDemo: boolean }) {
-  return <AskHero persona={JEBAT} prompts={prompts} isDemo={isDemo} />;
+export function AskJebatHero({
+  prompts,
+  isDemo,
+  greeting,
+}: {
+  prompts: string[];
+  isDemo: boolean;
+  greeting?: ServerGreeting;
+}) {
+  return <AskHero persona={JEBAT} prompts={prompts} isDemo={isDemo} greeting={greeting} />;
 }

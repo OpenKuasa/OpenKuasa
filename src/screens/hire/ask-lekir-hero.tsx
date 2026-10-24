@@ -1,4 +1,5 @@
 import { AskHero, type AskPersona } from '@/components/chat/ask-hero';
+import type { ServerGreeting } from '@/lib/greeting/types';
 
 const LEKIR: AskPersona = {
   name: 'Lekir',
@@ -11,6 +12,14 @@ const LEKIR: AskPersona = {
 };
 
 /** Ask-Lekir: the hiring assistant's chat card on the Lekir Overview screen. */
-export function AskLekirHero({ prompts, isDemo }: { prompts: string[]; isDemo: boolean }) {
-  return <AskHero persona={LEKIR} prompts={prompts} isDemo={isDemo} />;
+export function AskLekirHero({
+  prompts,
+  isDemo,
+  greeting,
+}: {
+  prompts: string[];
+  isDemo: boolean;
+  greeting?: ServerGreeting;
+}) {
+  return <AskHero persona={LEKIR} prompts={prompts} isDemo={isDemo} greeting={greeting} />;
 }
