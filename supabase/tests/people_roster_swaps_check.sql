@@ -105,8 +105,8 @@ begin
     begin
       delete from public.hr_shifts s where s.employee_id = e and s.work_date = d;
       if t is null then return null; end if;
-      insert into public.hr_shifts (org_id, employee_id, work_date, shift_type_id, shift)
-      select x.org_id, e, d, t, (select k.default_kind from public.hr_shift_types k where k.id = t)
+      insert into public.hr_shifts (org_id, employee_id, work_date, shift_type_id)
+      select x.org_id, e, d, t
       from public.hr_employees x where x.id = e
       returning hr_shifts.id into id;
       return id;
@@ -322,9 +322,9 @@ begin
     || pg_temp.t(mgr, 'the manager of both approves', format('public.hr_decide_shift_swap(%L, true, null)', sw), 'status:approved');
   a := pg_temp.kind(e_a, wk) || ' ' || pg_temp.kind(e_b, wk);
   if a is distinct from 'night morning' then fails := fails || format('after the approval a and b work %s on Monday, wanted night morning', a); end if;
-  select count(*) into i from public.hr_shifts s join public.hr_shift_types t on t.id = s.shift_type_id
-  where s.work_date = wk and s.employee_id in (e_a, e_b) and s.shift is not distinct from t.default_kind;
-  if i <> 2 then fails := fails || 'the exchanged shifts do not carry their type''s kind in the old column'::text; end if;
+  select count(*) into i from public.hr_shifts s join public.hr_shift_types t on t.id = s.shift_type_id and t.org_id = s.org_id
+  where s.work_date = wk and s.employee_id in (e_a, e_b);
+  if i <> 2 then fails := fails || format('%s of the 2 exchanged shifts point at a type of their workspace', i); end if;
   if (select w.decided_by from public.hr_shift_swaps w where w.id = sw) is distinct from mgr then fails := fails || 'the decision does not say who made it'::text; end if;
   if pg_temp.n(ua, 'hr_shift_swap') <> 2 or pg_temp.n(ub, 'hr_shift_swap') <> 2 or pg_temp.n(mgr, 'hr_shift_swap') <> 0 then
     fails := fails || format('after the approval a has %s swap notices (2), b %s (2), the manager %s (0)', pg_temp.n(ua, 'hr_shift_swap'), pg_temp.n(ub, 'hr_shift_swap'), pg_temp.n(mgr, 'hr_shift_swap'));
