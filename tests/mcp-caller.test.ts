@@ -510,7 +510,9 @@ describe('resolveCaller', () => {
       // The auth server refuses the session (a hiccup): the check only changes wording, so it never blocks.
       resolveApiKey.mockResolvedValue({ ok: true, id: 'key-row-1', userId: ALICE, orgId: ORG_A, accessToken: 'unknown-at' });
       const out = await resolveCaller(req(`Bearer ${KEY}`), 'Claude');
+      // Neither "try again" nor the two-step message: a failed check passes the key through unchanged.
       expect(out).not.toMatchObject({ status: 503 });
+      expect(JSON.stringify(out)).not.toContain('Two-step sign-in was turned on');
       expect(getUserCalls).toEqual(['unknown-at']);
       // Not cached: the next request asks again.
       await resolveCaller(req(`Bearer ${KEY}`), 'Claude');
