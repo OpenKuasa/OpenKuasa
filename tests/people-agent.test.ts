@@ -316,8 +316,8 @@ function emptyProposals() {
   return { client, inserts };
 }
 
-describe('pick prompt carries no personal data', () => {
-  it('the model sees only check labels and numbers, never a name, title, person-tied date or id', async () => {
+describe('the model sees only check labels and numbers, never a name, title, person-tied date or id', () => {
+  it('pick prompt carries no personal data', async () => {
     const prompts: string[] = [];
     vi.mocked(suggestProposals).mockImplementation(async (_key: string, prompt: string) => {
       prompts.push(prompt);
