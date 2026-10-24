@@ -1,5 +1,6 @@
 // tests/hire-chat-route.test.ts
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { DOCS_TOOL_NAMES } from '@/lib/ai/docs-tools';
 
 const ctl = vi.hoisted(() => ({
   user: null as { id: string; is_anonymous: boolean } | null,
@@ -293,7 +294,7 @@ describe('POST /api/hire/chat happy path', () => {
 
     const [call] = ctl.calls;
     expect(call.system).toMatch(/^You are Lekir/);
-    expect(call.tools.sort()).toEqual([...HIRE_TOOL_NAMES, ...HIRE_WRITE_TOOL_NAMES].sort());
+    expect(call.tools.sort()).toEqual([...HIRE_TOOL_NAMES, ...HIRE_WRITE_TOOL_NAMES, ...DOCS_TOOL_NAMES].sort());
     expect(call.tools).not.toContain('getCampaigns');
     expect(call.tools).not.toContain('listDeals');
 
@@ -314,7 +315,7 @@ describe('POST /api/hire/chat happy path', () => {
     const res = await POST(post(validBody));
     expect(res.status).toBe(200);
     await res.text();
-    expect(ctl.calls[0].tools.sort()).toEqual([...HIRE_TOOL_NAMES].sort());
+    expect(ctl.calls[0].tools.sort()).toEqual([...HIRE_TOOL_NAMES, ...DOCS_TOOL_NAMES].sort());
     for (const name of HIRE_WRITE_TOOL_NAMES) expect(ctl.calls[0].tools).not.toContain(name);
   });
 

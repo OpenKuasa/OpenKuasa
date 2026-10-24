@@ -18,6 +18,7 @@ import { guardFinanceWrites } from '@/lib/ai/finance-id-gate';
 import { guardRosterWrites } from '@/lib/ai/roster-id-gate';
 import { guardInterviewChanges } from '@/lib/ai/hire-interview-gate';
 import { cachedInstructions } from '@/lib/ai/prompt-cache';
+import { createDocsTools } from '@/lib/ai/docs-tools';
 import { guardPoolChanges } from '@/lib/ai/hire-pool-gate';
 import {
   REACH_WRITE_TOOL_NAMES,
@@ -93,7 +94,9 @@ export function guardChain(
 function boundToolkit(products: ProductToolkit[], messages: ModelMessage[], approvals: ApprovalBinding | undefined) {
   const kit = combineToolkits(products);
   const toolApproval = guardChain(products, kit.toolApproval);
-  return bindApprovals({ tools: kit.tools, toolApproval }, products, approvals ?? requestOnlyBinding(messages));
+  const bound = bindApprovals({ tools: kit.tools, toolApproval }, products, approvals ?? requestOnlyBinding(messages));
+  // The docs search is read-only and in no product: added after the approvals, so no gate or record ever sees it.
+  return { tools: { ...bound.tools, ...createDocsTools() }, toolApproval: bound.toolApproval };
 }
 
 export function runJebat(
@@ -312,7 +315,10 @@ export function runTuah(
   const binding = approvals ?? requestOnlyBinding(messages);
   // With its team, Tuah's one change tool is `applyChange`, which takes the stored record itself.
   const teamTools = team ? createTeamTools(products, { ...team, apiKey, store: binding.store }, messages) : null;
-  const { tools, toolApproval } = teamTools ?? boundToolkit(products, messages, binding);
+  // In team mode Tuah answers "how do I" itself, so it holds the docs search beside its specialists.
+  const { tools, toolApproval } = teamTools
+    ? { tools: { ...teamTools.tools, ...createDocsTools() }, toolApproval: teamTools.toolApproval }
+    : boundToolkit(products, messages, binding);
   const system = team
     ? tuahTeamSystem(
         products.map((p) => ({ name: p.name, area: TEAM_AREA[p.key] })),

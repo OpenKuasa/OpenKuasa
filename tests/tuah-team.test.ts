@@ -114,7 +114,7 @@ describe('Tuah with its team', () => {
     seen.layers = [];
     await runTuah(...withTuah(ask, reach(), undefined, undefined, null, crm(), team())).consumeStream();
 
-    expect(seen.tuahTools[0].sort()).toEqual(['applyChange', 'askJebat', 'askKasturi']);
+    expect(seen.tuahTools[0].sort()).toEqual(['applyChange', 'askJebat', 'askKasturi', 'searchDocs']);
     expect(seen.workerTools[0]).toContain('listCrmContacts');
     expect(seen.workerTools[0]).toContain('createContact');
     // Tuah on the larger model, the specialist on the cheaper one.

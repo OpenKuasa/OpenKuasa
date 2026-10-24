@@ -1,3 +1,4 @@
+import Link from 'next/link';
 import { memo, type ReactNode } from 'react';
 // The letters' parser, used as it is: a pure function from text to a small tree, linear in the text. It lives with
 // the HR letters for now; it belongs somewhere shared (it is not HR-specific), and this is the only chat import of it.
@@ -16,8 +17,9 @@ import { parseLetter, type Block, type Inline } from '@/lib/people/letter-marks'
  *
  * The rules of this file:
  * - Text is only ever put in as a React text child, which React escapes. Every element is written out below by
- *   name with fixed classes. Nothing in the text chooses an element, an attribute or a class; there is no link, no
- *   picture and no markup made from a string.
+ *   name with fixed classes. Nothing in the text chooses an element or a class, and there is no picture and no
+ *   markup made from a string. The one link is a path to a docs guide ("/docs/<section>/<slug>", maybe "#id"),
+ *   matched by `DOCS_PATH` and nothing looser; any other address, a full https:// one included, stays text.
  * - A reply with no marks is drawn exactly as every reply was before: one pre-wrapped block holding the text as it
  *   came. Only a reply that holds a mark takes the other path, where each line break and each empty line is still
  *   kept as it was.
@@ -27,6 +29,30 @@ import { parseLetter, type Block, type Inline } from '@/lib/people/letter-marks'
  */
 
 const TEXT_CLASS = 'whitespace-pre-wrap leading-relaxed text-primary-foreground';
+
+/** A docs guide path at the start of the text or after a space, not run on into more of a path or a word. */
+const DOCS_PATH = /(^|\s)(\/docs\/[a-z0-9-]+\/[a-z0-9-]+(?:#[a-z0-9-]+)?)(?![\w/#-])/g;
+
+/** Text with each docs guide path drawn as a link to it. Text without one comes back as the same string. */
+function withDocsLinks(text: string, key: string | number = 0): ReactNode {
+  if (!text.includes('/docs/')) return text;
+  const out: ReactNode[] = [];
+  let from = 0;
+  for (const match of text.matchAll(DOCS_PATH)) {
+    const start = match.index + match[1].length;
+    const path = match[2];
+    if (start > from) out.push(text.slice(from, start));
+    out.push(
+      <Link key={`${key}-${start}`} href={path} className="underline underline-offset-2">
+        {path}
+      </Link>,
+    );
+    from = start + path.length;
+  }
+  if (out.length === 0) return text;
+  if (from < text.length) out.push(text.slice(from));
+  return out;
+}
 
 /** The person's own words, as typed. */
 export function TypedText({ text }: { text: string }) {
@@ -80,7 +106,7 @@ const isPlain = (blocks: ReplyBlock[]): boolean =>
 
 function inline(content: Inline[]): ReactNode[] {
   return content.map((node, index) => {
-    if (node.t === 'text') return node.text;
+    if (node.t === 'text') return withDocsLinks(node.text, index);
     if (node.t === 'bold') {
       return (
         <strong key={index} className="font-semibold">
@@ -113,7 +139,8 @@ function paragraphChildren(lines: Inline[][]): ReactNode[] {
       } else push(<em key={`${lineIndex}-${nodeIndex}`}>{inline(node.children)}</em>);
     });
   });
-  return out;
+  // Strings are joined above first, so a path is never split across two of them.
+  return out.map((node, index) => (typeof node === 'string' ? withDocsLinks(node, index) : node));
 }
 
 function blockNode(block: ReplyBlock, key: number): ReactNode {
@@ -199,8 +226,8 @@ function arrivingBlocks(text: string): ReplyBlock[] {
  * that is still being written.
  */
 export const ReplyText = memo(function ReplyText({ text, arriving = false }: { text: string; arriving?: boolean }) {
-  if (!MAY_HOLD_MARKS.test(text)) return <div className={TEXT_CLASS}>{text}</div>;
+  if (!MAY_HOLD_MARKS.test(text)) return <div className={TEXT_CLASS}>{withDocsLinks(text)}</div>;
   const blocks = arriving ? arrivingBlocks(text) : replyBlocks(text);
-  if (isPlain(blocks)) return <div className={TEXT_CLASS}>{text}</div>;
+  if (isPlain(blocks)) return <div className={TEXT_CLASS}>{withDocsLinks(text)}</div>;
   return <div className="break-words leading-relaxed text-primary-foreground">{blocks.map(blockNode)}</div>;
 });
