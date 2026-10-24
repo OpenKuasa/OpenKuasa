@@ -49,7 +49,11 @@ function splitHeader(fileName: string, raw: string): { header: Record<string, st
     if (colon === -1) throw new Error(`${fileName}: header line "${line}" is not "key: value"`);
     const key = line.slice(0, colon).trim();
     if (key in header) throw new Error(`${fileName}: header key "${key}" appears twice`);
-    header[key] = line.slice(colon + 1).trim();
+    const value = line.slice(colon + 1).trim();
+    if (value.length >= 2 && /^(["']).*\1$/.test(value)) {
+      throw new Error(`${fileName}: header "${key}" is wrapped in quotes; write the value without quote marks`);
+    }
+    header[key] = value;
   }
   return { header, body: lines.slice(end + 1).join('\n') };
 }

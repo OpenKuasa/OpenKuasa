@@ -15,6 +15,12 @@ describe('docs content', () => {
     }
   });
 
+  test('rejects a header value wrapped in quotes, naming the file and key', () => {
+    for (const head of ['title: "Run payroll"\ndescription: d\norder: 1\nask: a', "title: t\ndescription: d\norder: 1\nask: 'How do I run payroll?'"]) {
+      expect(() => parseGuide('bad.md', `---\n${head}\n---\nbody`, 'tuah', 'x')).toThrow(/^bad\.md: .*quote/);
+    }
+  });
+
   test('every real guide file loads, sits in a known section and has a unique url', () => {
     const guides = getAllGuides();
     expect(guides.length).toBeGreaterThanOrEqual(2);
