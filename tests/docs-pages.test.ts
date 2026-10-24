@@ -51,3 +51,48 @@ test('Ask Sari links to the docs ask route with the question', async () => {
   expect(html).toContain('href="/docs/ask?q=How%20do%20I%20add%20my%20key%3F"');
   expect(html).toContain('Still stuck? Ask Sari');
 });
+
+test('every section with guides has a page param; empty sections do not', async () => {
+  const { DOC_SECTIONS } = await import('@/lib/docs/sections');
+  const { generateStaticParams, dynamicParams } = await import('@/app/docs/[section]/page');
+  const params = await generateStaticParams();
+  const withGuides = new Set(getAllGuides().map((g) => g.section));
+  expect(dynamicParams).toBe(false);
+  for (const s of DOC_SECTIONS) {
+    if (withGuides.has(s.key)) expect(params).toContainEqual({ section: s.key });
+    else expect(params).not.toContainEqual({ section: s.key });
+  }
+  expect(params).not.toContainEqual({ section: 'nope' });
+});
+
+test('the loader and GuideBody agree on what counts as a heading', async () => {
+  const { createElement } = await import('react');
+  const { renderToStaticMarkup } = await import('react-dom/server');
+  const { parseGuide } = await import('@/lib/docs/content');
+  const { GuideBody } = await import('@/components/docs/guide-body');
+  const raw = [
+    '---',
+    'title: T',
+    'description: D',
+    'order: 1',
+    'ask: Q?',
+    '---',
+    ' ## Indented one',
+    '',
+    '##   ',
+    '',
+    '- item',
+    '',
+    '  ## In a list',
+    '',
+    '## Real `code` **bold**',
+    '',
+    '### Sub',
+    '',
+  ].join('\n');
+  const guide = parseGuide('t/x.md', raw, 'getting-started', 'x');
+  const html = renderToStaticMarkup(createElement(GuideBody, { guide }));
+  const ids = [...html.matchAll(/<h[23] id="([^"]+)"/g)].map((m) => m[1]);
+  expect(ids).toEqual(guide.headings.map((h) => h.id));
+  expect(ids).toEqual(['real-code-bold', 'sub']);
+});
