@@ -62,6 +62,10 @@ const EXPECTED: Record<string, { cards: number; withIcon: number }> = {
   'components/account/api-keys-card': { cards: 2, withIcon: 2 },
   'components/account/connected-apps-card': { cards: 1, withIcon: 1 },
   'components/account/mcp-setup-card': { cards: 1, withIcon: 1 },
+  // Each product's AI Agents screen.
+  'screens/finance/agents': { cards: 14, withIcon: 9 },
+  'screens/crm/agents': { cards: 13, withIcon: 8 },
+  'screens/hire/agents': { cards: 14, withIcon: 9 },
 };
 
 describe.each(Object.keys(EXPECTED))('the icons %s gives its cards', (file) => {
