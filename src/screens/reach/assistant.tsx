@@ -93,6 +93,7 @@ function Muted({ children }: { children: React.ReactNode }) {
 export default async function OverviewScreen() {
   // Started first so the greeting loads alongside the screen's own reads.
   const greetingPromise = loadServerGreeting('reach');
+  void greetingPromise.catch(() => {});
   const supabase = await createClient();
   const {
     data: { user },

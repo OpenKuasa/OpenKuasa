@@ -58,6 +58,7 @@ const initials = (name: string) =>
 export default async function OverviewScreen() {
   // Started first so the greeting loads alongside the screen's own reads.
   const greetingPromise = loadServerGreeting('hire');
+  void greetingPromise.catch(() => {});
   const { model, isDemo } = await loadHire('overview', buildHireOverviewModel);
   const applications = model?.totals.applications ?? 0;
   const noApplications = applications === 0;

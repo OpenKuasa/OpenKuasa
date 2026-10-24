@@ -58,6 +58,7 @@ const initials = (name: string) =>
 export default async function OverviewScreen() {
   // Started first so the greeting loads alongside the screen's own reads.
   const greetingPromise = loadServerGreeting('people');
+  void greetingPromise.catch(() => {});
   const { model, viewer, chatDemo, hasWorkspace } = await loadPeople('overview', buildPeopleOverviewModel);
   const headcount = model?.totals.headcount ?? 0;
   const noStaff = headcount === 0;

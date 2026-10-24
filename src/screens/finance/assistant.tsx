@@ -179,6 +179,7 @@ function overdueAge(days: number): string {
 export default async function OverviewScreen() {
   // Started first so the greeting loads alongside the screen's own reads.
   const greetingPromise = loadServerGreeting('finance');
+  void greetingPromise.catch(() => {});
   const supabase = await createClient();
   const {
     data: { user },

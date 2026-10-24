@@ -119,6 +119,7 @@ function Muted({ children }: { children: React.ReactNode }) {
 export default async function OverviewScreen() {
   // Started first so the greeting loads alongside the screen's own reads.
   const greetingPromise = loadServerGreeting('crm');
+  void greetingPromise.catch(() => {});
   // The workspace's own figures. With no database configured the screen shows
   // the sample; a workspace whose figures could not be read shows that instead.
   const isSample = !hasSupabaseEnv();
