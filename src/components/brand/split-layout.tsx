@@ -1,4 +1,5 @@
 import { type ReactNode } from 'react';
+import Link from 'next/link';
 import { Logo } from './logo';
 import { cn } from '@/lib/utils';
 
@@ -26,7 +27,9 @@ export function SplitLayout({
   return (
     <div className="flex min-h-dvh w-full flex-col lg:flex-row">
       <div className="flex flex-col gap-10 border-b bg-muted/60 p-8 lg:w-[42%] lg:border-b-0 lg:border-r lg:p-12">
-        <Logo />
+        <Link href="/" aria-label="OpenKuasa home" className="w-fit">
+          <Logo />
+        </Link>
         <div className="flex flex-1 flex-col justify-center">
           <div className="max-w-sm">
             <h1 className="text-4xl font-bold leading-[1.05] tracking-tight text-foreground lg:text-5xl">
