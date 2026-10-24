@@ -2,31 +2,42 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
 import manifest from '@/app/manifest';
-import { installStateFor, isAppleMobile } from '@/lib/pwa/install';
+import { installGuideFor, installStateFor, isAppleMobile } from '@/lib/pwa/install';
 
-describe('install link', () => {
-  test('hidden once running as the installed app, even if a prompt is waiting', () => {
-    expect(installStateFor({ standalone: true, hasPrompt: true, appleMobile: false })).toBe('hidden');
-    expect(installStateFor({ standalone: true, hasPrompt: false, appleMobile: true })).toBe('hidden');
+const UA = {
+  iphone: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 Version/18.0 Mobile/15E148 Safari/604.1',
+  ipadAsMac: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 Version/18.0 Safari/605.1.15',
+  macSafari: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 Version/18.0 Safari/605.1.15',
+  macChrome: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/155.0.0.0 Safari/537.36',
+  winEdge: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/155.0.0.0 Safari/537.36 Edg/155.0.0.0',
+  android: 'Mozilla/5.0 (Linux; Android 15; Pixel 9) AppleWebKit/537.36 Chrome/155.0.0.0 Mobile Safari/537.36',
+  firefox: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 14.0; rv:140.0) Gecko/20100101 Firefox/140.0',
+};
+
+describe('Get the app button', () => {
+  test('hidden only inside the installed app', () => {
+    expect(installStateFor({ standalone: true, hasPrompt: true })).toBe('hidden');
+    expect(installStateFor({ standalone: true, hasPrompt: false })).toBe('hidden');
   });
 
-  test("uses the browser's prompt when there is one", () => {
-    expect(installStateFor({ standalone: false, hasPrompt: true, appleMobile: false })).toBe('prompt');
+  test("opens the browser's prompt when there is one, otherwise shows the steps", () => {
+    expect(installStateFor({ standalone: false, hasPrompt: true })).toBe('prompt');
+    expect(installStateFor({ standalone: false, hasPrompt: false })).toBe('steps');
   });
 
-  test('shows the Share steps on iPhone and iPad, where Safari has no prompt', () => {
-    expect(installStateFor({ standalone: false, hasPrompt: false, appleMobile: true })).toBe('ios-steps');
+  test('picks the steps for each browser', () => {
+    expect(installGuideFor(UA.iphone, 5)).toBe('ios');
+    expect(installGuideFor(UA.ipadAsMac, 5)).toBe('ios');
+    expect(installGuideFor(UA.macSafari, 0)).toBe('mac-safari');
+    expect(installGuideFor(UA.macChrome, 0)).toBe('chrome-desktop');
+    expect(installGuideFor(UA.winEdge, 0)).toBe('edge-desktop');
+    expect(installGuideFor(UA.android, 5)).toBe('android');
+    expect(installGuideFor(UA.firefox, 0)).toBe('other');
   });
 
-  test('hidden on browsers that cannot install (no prompt, not Apple mobile)', () => {
-    expect(installStateFor({ standalone: false, hasPrompt: false, appleMobile: false })).toBe('hidden');
-  });
-
-  test('spots iPhones and iPads, including iPads that say they are a Mac', () => {
-    expect(isAppleMobile('Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X)', 5)).toBe(true);
-    expect(isAppleMobile('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) Safari/605.1.15', 5)).toBe(true);
-    expect(isAppleMobile('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) Safari/605.1.15', 0)).toBe(false);
-    expect(isAppleMobile('Mozilla/5.0 (Linux; Android 15) Chrome/130', 5)).toBe(false);
+  test('spots iPads that say they are a Mac only when they have touch', () => {
+    expect(isAppleMobile(UA.ipadAsMac, 5)).toBe(true);
+    expect(isAppleMobile(UA.macSafari, 0)).toBe(false);
   });
 });
 
