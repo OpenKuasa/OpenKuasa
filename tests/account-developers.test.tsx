@@ -51,6 +51,7 @@ vi.mock('next/navigation', () => ({
 
 import DevelopersPage from '@/app/account/developers/page';
 import { createKeyAction, disconnectAppAction, revokeKeyAction } from '@/app/account/developers/actions';
+import { ActionNotice } from '@/components/account/action-notice';
 import { NewKeyNotice, shouldShowNewKey } from '@/components/account/api-keys-card';
 
 type Row = Record<string, unknown>;
@@ -482,5 +483,17 @@ describe('the new-key box after a revoke', () => {
 
   test('stays when the list could not be read', () => {
     expect(shouldShowNewKey(KEY_ALICE, null)).toBe(true);
+  });
+});
+
+describe('ActionNotice', () => {
+  test('says what happened after a revoke or a disconnect', () => {
+    expect(renderToStaticMarkup(<ActionNotice text="Key revoked." />)).toContain('Key revoked.');
+    expect(renderToStaticMarkup(<ActionNotice text="Disconnected." />)).toContain('role="status"');
+  });
+
+  test('shows nothing when there is nothing to say', () => {
+    expect(renderToStaticMarkup(<ActionNotice text={null} />)).toBe('');
+    expect(renderToStaticMarkup(<ActionNotice text="" />)).toBe('');
   });
 });
