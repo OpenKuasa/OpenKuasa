@@ -16,7 +16,7 @@ export function AskSariBox({ question }: { question: string }) {
         <Link href={`/docs/ask?q=${encodeURIComponent(question)}`}>Ask Sari</Link>
       </Button>
       <p className="mt-4 text-xs text-mk-subtle">
-        Asking Sari needs a free account. You&apos;ll sign in first if you&apos;re not already.
+        Asking Sari needs a free account. You&apos;ll sign in first. New here? Sign up, and you can ask Sari once your workspace is set up.
       </p>
     </aside>
   );
