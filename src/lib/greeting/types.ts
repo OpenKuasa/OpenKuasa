@@ -24,3 +24,11 @@ export type NudgeCounts = {
   appointmentsToday?: number;
   newLeads?: number;
 };
+
+export type ServerGreeting = {
+  lead: string;
+  emoji: string;
+  isFestive: boolean;
+  secondHalf: string;
+  secondHalfQuestion: string;
+};
