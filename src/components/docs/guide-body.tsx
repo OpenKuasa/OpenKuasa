@@ -7,13 +7,15 @@ import { cn } from '@/lib/utils';
 type MdNode = {
   type: string;
   depth?: number;
-  position?: { start: { offset?: number } };
+  children?: unknown[];
+  position?: { start: { column: number; offset?: number } };
   data?: { hProperties?: Record<string, unknown> };
 };
 
 /**
  * Gives each ## / ### heading the id the loader worked out, in the same order.
- * Only top-level ATX headings count, as in the loader (fenced code is skipped by the parser).
+ * Same rule as the loader: a non-empty `##`/`###` line that starts at column 0
+ * (such a line is always top-level; fenced code is skipped by the parser).
  */
 function headingIds(ids: string[]) {
   return () => (tree: { children: MdNode[] }, file: { value: unknown }) => {
@@ -21,8 +23,9 @@ function headingIds(ids: string[]) {
     let i = 0;
     for (const node of tree.children) {
       if (node.type !== 'heading' || (node.depth !== 2 && node.depth !== 3)) continue;
-      const offset = node.position?.start.offset;
-      if (offset !== undefined && source.slice(offset).trimStart()[0] !== '#') continue;
+      const start = node.position?.start;
+      if (!start || start.column !== 1 || source[start.offset ?? -1] !== '#') continue;
+      if (!node.children?.length) continue;
       const id = ids[i++];
       if (!id) continue;
       node.data = { ...node.data, hProperties: { ...node.data?.hProperties, id } };

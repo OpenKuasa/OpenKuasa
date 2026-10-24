@@ -65,7 +65,8 @@ function findHeadings(body: string): { depth: 2 | 3; text: string }[] {
       continue;
     }
     if (fence) continue;
-    const m = /^(#{2,3})\s+(.+?)\s*#*\s*$/.exec(line);
+    // A heading is a non-empty ##/### line at column 0; GuideBody uses the same rule for ids.
+    const m = /^(#{2,3})\s+(\S.*?)\s*#*\s*$/.exec(line);
     if (m) found.push({ depth: m[1].length as 2 | 3, text: m[2] });
   }
   return found;
