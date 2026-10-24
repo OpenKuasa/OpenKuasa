@@ -7,7 +7,7 @@ export const ASK_MAX = 300;
 // Control characters; a line break or tab becomes a space.
 const CONTROL = /[\u0000-\u001f\u007f-\u009f]/g;
 // Invisible characters that hide or reorder text.
-const INVISIBLE = /[​-‏‪-‮⁠-⁤⁦-⁩﻿]/g;
+const INVISIBLE = /[\u200b-\u200f\u202a-\u202e\u2060-\u2064\u2066-\u2069\ufeff]/g;
 // Half of a surrogate pair on its own: not text, and encodeURIComponent throws on it.
 const LONE_SURROGATE = /[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/g;
 
