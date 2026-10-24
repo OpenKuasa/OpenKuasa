@@ -193,10 +193,15 @@ describe('the renderer and where it is used', () => {
     const code = renderer.replace(/\/\*[\s\S]*?\*\/|\/\/[^\n]*/g, '');
     for (const forbidden of [
       'dangerouslySetInnerHTML', 'innerHTML', 'outerHTML', '__html', 'createElement', 'cloneElement', 'insertAdjacentHTML',
-      'document.', 'eval(', 'new Function', 'href', 'src=', '<a ', '<a>', '<img', '<iframe', '<script', '<object', '<embed', 'style=',
+      'document.', 'eval(', 'new Function', 'src=', '<a ', '<a>', '<img', '<iframe', '<script', '<object', '<embed', 'style=',
     ]) {
       expect(code, forbidden).not.toContain(forbidden);
     }
+    // The one link: a docs guide path, matched by the fixed pattern and nothing looser. The Link line and the
+    // pattern are pinned word for word on purpose: a tripwire, so any change to how a link is made is looked at here.
+    expect(code.match(/href/g)).toHaveLength(1);
+    expect(code).toContain('<Link key={`${key}-${start}`} href={path} prefetch={false} className="underline underline-offset-2">');
+    expect(code).toContain(String.raw`const DOCS_PATH = /(^|\s)(\/docs\/[a-z0-9-]+\/[a-z0-9-]+(?:#[a-z0-9-]+)?)(?![\w/#-])/g;`);
     // Every element is written out by name: no tag held in a variable, no props spread from data.
     expect(code).not.toMatch(/<[A-Z][A-Za-z]*\s[^>]*\{\.\.\./);
     expect(code).not.toMatch(/<\{|const Tag\b|as keyof JSX/);

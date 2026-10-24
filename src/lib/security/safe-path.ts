@@ -2,6 +2,8 @@
 // link: a `next` query parameter, a form field, a stored notification href.
 // Imported by client components, so it must stay free of server-only modules.
 
+import { cleanAsk } from '@/lib/docs/ask';
+
 // Never resolved over the network; only used to parse a relative path.
 const BASE = 'http://app.invalid';
 
@@ -35,15 +37,32 @@ export function safeAppPath(value: unknown): string | null {
   return `${url.pathname}${url.search}${url.hash}`;
 }
 
-/** The only page sign-in returns to after signing in: the consent screen an AI tool sent the person to. */
+/** The consent screen an AI tool sent the person to. */
 const SIGN_IN_RETURN = '/oauth/consent';
 
+/** Sari's page, when the docs sent a question along. */
+const SARI_RETURN = '/command';
+
+/** Exactly `/command?ask=<question>`: one `ask`, nothing else, no fragment, the question already cleaned. */
+function isSariAsk(path: string): boolean {
+  const url = new URL(path, BASE);
+  if (url.pathname !== SARI_RETURN || url.hash) return false;
+  const keys = [...url.searchParams.keys()];
+  if (keys.length !== 1 || keys[0] !== 'ask') return false;
+  const ask = url.searchParams.get('ask');
+  return cleanAsk(ask) === ask;
+}
+
 /**
- * A `next` for the sign-in page and action: a same-site path (as `safeAppPath` checks) to the consent screen,
- * otherwise null. Any other page is ignored, so sign-in cannot be used to send people somewhere else.
+ * A `next` for the sign-in page and action: a same-site path (as `safeAppPath` checks), otherwise null.
+ * Only two places are accepted: the consent screen (`/oauth/consent`, any query), and Sari's page with a
+ * question from the docs (`/command` with only `ask`, once, already in its `cleanAsk` form, and no fragment).
+ * The question only fills the input there; nothing is sent. Any other page is ignored, so sign-in cannot be
+ * used to send people somewhere else.
  */
 export function signInReturnPath(value: unknown): string | null {
   const path = safeAppPath(value);
   if (!path) return null;
-  return path === SIGN_IN_RETURN || path.startsWith(`${SIGN_IN_RETURN}?`) ? path : null;
+  if (path === SIGN_IN_RETURN || path.startsWith(`${SIGN_IN_RETURN}?`)) return path;
+  return isSariAsk(path) ? path : null;
 }

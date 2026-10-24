@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { DOCS_TOOL_NAMES } from '@/lib/ai/docs-tools';
 
 // Shared, hoisted control surface so the mock factories can read mutable state.
 const ctl = vi.hoisted(() => ({
@@ -215,7 +216,8 @@ describe('POST /api/crm/chat happy path', () => {
     expect(call.systemParts?.[1].marked).toBe(false);
     expect(call.systemParts?.[1].content).toMatch(/^TODAY\n- It is /);
     // Appointments and lead forms are Kasturi screens too; ads and leads are not.
-    expect(call.tools).toHaveLength(4 + 2 + 2 + CRM_WRITE_TOOL_NAMES.length + KASTURI_SHARED_TOOL_NAMES.length);
+    expect(call.tools).toHaveLength(4 + 2 + 2 + CRM_WRITE_TOOL_NAMES.length + KASTURI_SHARED_TOOL_NAMES.length + DOCS_TOOL_NAMES.length);
+    expect(call.tools).toEqual(expect.arrayContaining([...DOCS_TOOL_NAMES]));
     expect(call.tools).not.toContain('getCampaigns');
     expect(call.tools).not.toContain('createLead');
     expect(call.tools).not.toContain('promoteLeadToContact');

@@ -34,7 +34,7 @@ const COLUMNS: Col[] = [
     title: 'Resources',
     links: [
       { label: 'Pricing', href: '/pricing' },
-      { label: 'Tutorials & Docs', href: '/account/docs' },
+      { label: 'Tutorials & Docs', href: '/docs' },
       { label: 'Product Changelog', href: '/account/changelog' },
       { label: 'Feature Requests', href: '/account/feedback' },
       { label: 'GitHub', href: REPO_URL, external: true },

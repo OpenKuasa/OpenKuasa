@@ -4,6 +4,10 @@ import { staticSecurityHeaders } from "./src/lib/security/headers";
 const nextConfig: NextConfig = {
   // Development logs print each server function call with its arguments; a form post's arguments are personal data.
   logging: { serverFunctions: false },
+  // The guide files are read from disk at run time; make sure they ship with the server build.
+  outputFileTracingIncludes: {
+    "/*": ["content/docs/**/*.md"],
+  },
   experimental: {
     // The apply form's post: a 5 MB CV plus the form's other fields. The default is 1 MB.
     serverActions: { bodySizeLimit: "6mb" },

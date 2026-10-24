@@ -22,7 +22,7 @@ const ITEMS: { label: string; href: string; needs?: Capability }[] = [
   { label: 'Change Password', href: '/account/security' },
   { label: 'Product Changelog', href: '/account/changelog' },
   { label: 'Contact Support', href: '/account/support' },
-  { label: 'Tutorials & Docs', href: '/account/docs' },
+  { label: 'Tutorials & Docs', href: '/docs' },
   { label: 'Feature Requests', href: '/account/feedback' },
 ];
 

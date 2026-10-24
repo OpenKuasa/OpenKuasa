@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { DOCS_TOOL_NAMES } from '@/lib/ai/docs-tools';
 
 const ctl = vi.hoisted(() => ({
   user: null as { id: string; is_anonymous: boolean } | null,
@@ -294,7 +295,7 @@ describe('POST /api/people/chat happy path', () => {
 
     const [call] = ctl.calls;
     expect(call.system).toMatch(/^You are Lekiu/);
-    expect(call.tools.sort()).toEqual([...UNLINKED_OWNER_TOOLS].sort());
+    expect(call.tools.sort()).toEqual([...UNLINKED_OWNER_TOOLS, ...DOCS_TOOL_NAMES].sort());
     expect(call.tools).not.toContain('getCampaigns');
     expect(call.tools).not.toContain('listDeals');
     expect(call.tools).not.toContain('listJobs');
@@ -318,7 +319,7 @@ describe('POST /api/people/chat happy path', () => {
     await res.text();
     expect(ctl.captured!.viewer).toEqual({ employeeId: 'emp-7', isHr: false, isDemo: false });
     // Same lookups for everyone (the database limits what a member reads), plus their own leave tools.
-    expect(ctl.calls[0].tools.sort()).toEqual([...PEOPLE_TOOL_NAMES, ...SELF_TOOLS].sort());
+    expect(ctl.calls[0].tools.sort()).toEqual([...PEOPLE_TOOL_NAMES, ...SELF_TOOLS, ...DOCS_TOOL_NAMES].sort());
   });
 
   it('resolves the workspace exactly once', async () => {
@@ -353,8 +354,9 @@ describe('POST /api/people/chat happy path', () => {
     ctl.org = { orgId: 'org1', role };
     await (await POST(post(validBody))).text();
     expect(ctl.captured!.write).toBeUndefined();
-    expect(ctl.calls[0].tools.sort()).toEqual([...PEOPLE_TOOL_NAMES].sort());
-    for (const name of ctl.calls[0].tools) expect(name).toMatch(/^(get|list)/);
+    expect(ctl.calls[0].tools.sort()).toEqual([...PEOPLE_TOOL_NAMES, ...DOCS_TOOL_NAMES].sort());
+    // Every other tool is a lookup; the docs search reads only the guides.
+    for (const name of ctl.calls[0].tools) expect(name).toMatch(/^(get|list|searchDocs$)/);
   });
 
   it.each(['member', 'viewer'])('gives a linked %s their own leave tools, bound to their own employee record', async (role) => {
@@ -363,7 +365,7 @@ describe('POST /api/people/chat happy path', () => {
     await (await POST(post({ ...validBody, employeeId: 'emp-9', employee_id: 'emp-9' }))).text();
     expect(ctl.captured!.write).toMatchObject({ tier: 'self', employeeId: 'emp-7' });
     expect(ctl.captured!.write?.ctx.orgId).toBe('org1');
-    expect(ctl.calls[0].tools.sort()).toEqual([...PEOPLE_TOOL_NAMES, ...SELF_TOOLS].sort());
+    expect(ctl.calls[0].tools.sort()).toEqual([...PEOPLE_TOOL_NAMES, ...SELF_TOOLS, ...DOCS_TOOL_NAMES].sort());
     for (const name of ['decideLeave', 'decideTimeOff', 'setLeaveEntitlement', 'createEmployee', 'deleteDepartment', 'decideClaim', 'decideOvertime', 'markClaimPaid', 'unmarkClaimPaid']) {
       expect(ctl.calls[0].tools).not.toContain(name);
     }
@@ -421,7 +423,7 @@ describe('POST /api/people/chat happy path', () => {
     ctl.linkedEmployee = { id: 'emp-7' };
     await (await POST(post(validBody))).text();
     expect(ctl.captured!.write).toBeUndefined();
-    expect(ctl.calls[0].tools.sort()).toEqual([...PEOPLE_TOOL_NAMES].sort());
+    expect(ctl.calls[0].tools.sort()).toEqual([...PEOPLE_TOOL_NAMES, ...DOCS_TOOL_NAMES].sort());
   });
 
   it.each(['owner', 'admin', 'member'])('gives a %s in the demo workspace the lookups only, which the database keeps read-only', async (role) => {
@@ -429,7 +431,7 @@ describe('POST /api/people/chat happy path', () => {
     ctl.slug = DEMO_ORG_SLUG;
     await (await POST(post(validBody))).text();
     expect(ctl.captured!.write).toBeUndefined();
-    expect(ctl.calls[0].tools.sort()).toEqual([...PEOPLE_TOOL_NAMES].sort());
+    expect(ctl.calls[0].tools.sort()).toEqual([...PEOPLE_TOOL_NAMES, ...DOCS_TOOL_NAMES].sort());
   });
 
   it('gives an owner who is also an employee the hr tier, and their own employee id', async () => {

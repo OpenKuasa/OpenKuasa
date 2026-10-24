@@ -282,6 +282,14 @@ function showInUrl(threadId: string | null, mode: 'push' | 'replace') {
   else window.history.replaceState(null, '', next);
 }
 
+/** Drops `?ask=` from the address bar once its question is in the input, so a refresh does not bring it back. */
+function dropAskFromUrl() {
+  const url = new URL(window.location.href);
+  if (!url.searchParams.has('ask')) return;
+  url.searchParams.delete('ask');
+  window.history.replaceState(null, '', `${url.pathname}${url.search}${url.hash}`);
+}
+
 export function SariConversation({
   showSidebar = false,
   compact = false,
@@ -291,9 +299,12 @@ export function SariConversation({
   pathname,
   onClose,
   greeting,
+  askedQuestion = null,
 }: {
   /** The personal greeting from the server; without it the plain heading shows. */
   greeting?: ServerGreeting;
+  /** A question from the docs (`?ask=`, cleaned): it fills the input and is never sent from here. */
+  askedQuestion?: string | null;
   /** The full page: saved chats in a column beside the conversation. */
   showSidebar?: boolean;
   /** The floating assistant: a narrow panel with its own header. */
@@ -687,6 +698,7 @@ export function SariConversation({
             compact={compact}
             pathname={compact ? pathname : undefined}
             greeting={greeting}
+            askedQuestion={askedQuestion}
             onAsk={handleAsk}
             onSettled={handleSettled}
           />
@@ -732,10 +744,13 @@ function ChatPane({
   compact,
   pathname,
   greeting,
+  askedQuestion,
   onAsk,
   onSettled,
 }: {
   greeting?: ServerGreeting;
+  /** A question from the docs to start the input with, unsent. */
+  askedQuestion: string | null;
   chat: LiveChat;
   /** Where the last question stood when this thread was read back. */
   answer: AnswerState;
@@ -754,7 +769,11 @@ function ChatPane({
   // Signed-up users talk to the real assistant; demo guests get sample answers.
   const live = !viewer.isDemo;
   const [demoMessages, setDemoMessages] = useState<Message[]>([]);
-  const [input, setInput] = useState('');
+  // A question from the docs starts in the input, unsent. Demo guests keep an empty box.
+  const [input, setInput] = useState(() => (live && askedQuestion) || '');
+  useEffect(() => {
+    if (live && askedQuestion) dropAskFromUrl();
+  }, [live, askedQuestion]);
   const [demoThinking, setDemoThinking] = useState(false);
   const idRef = useRef(1);
   const endRef = useRef<HTMLDivElement>(null);
