@@ -195,8 +195,28 @@ describe('scanHire', () => {
         `Aisyah (Events Executive, Interview) has had no activity for 30 days.${AS_OF}`,
         `Ben (Events Executive, Offer) has had no activity for 14 days.${AS_OF}`,
       ]);
-      expect(got[0].stage).toBe('28');
-      expect(got[1].stage).toBe('14');
+      // The day the quiet spell began, then the threshold reached.
+      expect(got[0].stage).toBe('2026-09-23:28');
+      expect(got[1].stage).toBe('2026-10-09:14');
+    });
+
+    it('fresh activity breaks the spell, and the next quiet spell raises a new key', () => {
+      const first = raw(check, {
+        applications: [app({ stage: 'interview', appliedAt: ago(30) })],
+        interviews: [interview({ createdAt: ago(20), updatedAt: ago(16) })],
+      });
+      const firstStage = inputs(first)[0].stage;
+      expect(firstStage).toBe('2026-10-07:14');
+      // Someone touches the interview 3 days ago: quiet again only after 14 more days.
+      const later = new Date(NOW.getTime() + 14 * DAY);
+      const again = raw(check, {
+        applications: [app({ stage: 'interview', appliedAt: ago(30) })],
+        interviews: [interview({ createdAt: ago(20), updatedAt: ago(3) })],
+      });
+      expect(scanHire(again, NOW)).toEqual([]);
+      const secondStage = (scanHire(again, later)[0].input as HireNoteInput).stage;
+      expect(secondStage).toBe('2026-10-20:14');
+      expect(secondStage).not.toBe(firstStage);
     });
 
     it('counts from the latest interview activity, not from applied_at', () => {

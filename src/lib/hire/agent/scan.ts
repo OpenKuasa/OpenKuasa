@@ -19,7 +19,10 @@ export type HireNoteInput = {
   entity_type: HireNoteEntityType;
   label: string;
   body: string;
-  /** When it is raised again: the day threshold reached (N, 2N, 4N…), `once`, or a closing date (spec §4.2). */
+  /**
+   * When it is raised again (spec §4.2): the day threshold reached (N, 2N, 4N…); for
+   * application_quiet `<last activity day>:<threshold>`; `once`; or a closing date.
+   */
   stage: string;
   /** job_few_applicants only: the check's window and minimum, so approval can recount. Ignored by the RPC. */
   window_days?: number;
@@ -165,7 +168,8 @@ export function scanHire(raw: HireAgentRaw, now: Date): Candidate[] {
             entity_type: 'hire_application',
             label: appLabel(a),
             body: `${cut(a.candidate)} (${cut(a.job)}, ${STAGE_LABEL[a.stage]}) has had no activity for ${n} days.`,
-            stage: bucket(n, days) as string,
+            // The day the quiet spell began, then the threshold: fresh activity starts a new spell with new keys.
+            stage: `${dayOf(lastActivity(a))}:${bucket(n, days)}`,
           },
           `${appLabel(a)} — no activity for ${n} days`,
         );

@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   HIRE_NO_LONGER_APPLIES,
   hireAgentNoteInput,
@@ -14,6 +14,13 @@ const NOTE = '66666666-6666-4666-8666-666666666666';
 const APP = '77777777-7777-4777-8777-777777777777';
 
 type Reply = { data: unknown; error: unknown };
+
+// 12:00 on Fri 23 Oct 2026 in Kuala Lumpur: "today" for the approval checks.
+beforeEach(() => {
+  vi.useFakeTimers({ toFake: ['Date'] });
+  vi.setSystemTime(new Date('2026-10-23T04:00:00.000Z'));
+});
+afterEach(() => vi.useRealTimers());
 
 /** A client whose reads answer per table (single row or rows), and whose rpc is a spy. */
 function fake(tables: Record<string, Reply>, rpcReply: Reply = { data: NOTE, error: null }) {
@@ -271,6 +278,20 @@ describe('hireCreateAgentNote', () => {
       hire_jobs: row({ status: 'open', closes_on: '2026-11-30', headcount: 1 }),
     });
     expect(await hireCreateAgentNote(ctx, as('hire_job', '2026-10-30'))).toEqual(stale);
+  });
+
+  it('job_closing_soon no longer applies once its closing date has passed in Malaysia', async () => {
+    const past = fake({
+      agent_proposals: proposal('job_closing_soon'),
+      hire_jobs: row({ status: 'open', closes_on: '2026-10-22', headcount: 1 }),
+    });
+    expect(await hireCreateAgentNote(past.ctx, as('hire_job', '2026-10-22'))).toEqual(stale);
+    expect(past.rpc).not.toHaveBeenCalled();
+    const today = fake({
+      agent_proposals: proposal('job_closing_soon'),
+      hire_jobs: row({ status: 'open', closes_on: '2026-10-23', headcount: 1 }),
+    });
+    expect((await hireCreateAgentNote(today.ctx, as('hire_job', '2026-10-23'))).ok).toBe(true);
   });
 
   it("pool_idle no longer applies once the candidate is out of the pool or in a current application", async () => {

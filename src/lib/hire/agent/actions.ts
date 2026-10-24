@@ -143,7 +143,11 @@ async function stillApplies(
       const job = await readOne(ctx, 'hire_jobs', 'status,closes_on,headcount', id);
       if (job === 'error') return 'unreadable';
       if (!job || job.status !== 'open') return 'stale';
-      if (checkKey === 'job_closing_soon') return job.closes_on === input.stage ? 'live' : 'stale';
+      if (checkKey === 'job_closing_soon') {
+        // Moved, or already past in Malaysia: no longer "closing soon".
+        const closes = job.closes_on;
+        return closes === input.stage && typeof closes === 'string' && closes >= todayInMalaysia(new Date()) ? 'live' : 'stale';
+      }
       if (checkKey === 'job_open_long') {
         const hired = await readWhere(ctx, 'hire_applications', 'id', [
           ['job_id', id],
