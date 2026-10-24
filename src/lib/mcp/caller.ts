@@ -6,7 +6,8 @@
  * server on every call and bound to the workspace recorded for it in `mcp_oauth_bindings`: the one the person allowed
  * on the consent screen (`/oauth/consent`), or, when the auth server skipped that screen and nothing is recorded, the
  * one they have open at first use, recorded then as them. A person with a second factor is refused an OAuth token that
- * was not raised to aal2 (not supported yet; they use a key).
+ * was not raised to aal2 (not supported yet; they use a key). A key whose session was made before the person turned
+ * on a second factor (below aal2, so every row is hidden from it) is told to make a new key.
  *
  * Every call then reads, as the person: their role in the credential's workspace (none means removed), and the
  * workspace they now have open; a different one is refused rather than acted on behind their back.
@@ -44,6 +45,8 @@ export const FAILED = 'Your access could not be checked just now. Try again.';
 export const SIGN_IN_OFF = "Sign-in connections aren't available yet. Use an API key from Account → Developers.";
 export const MFA_NOT_SUPPORTED =
   "Sign-in connections don't work with two-step sign-in yet. Use an API key from Account → Developers instead.";
+export const KEY_BEFORE_SECOND_FACTOR =
+  'Two-step sign-in was turned on after this key was made. Make a new key in Account → Developers.';
 
 const OTHER_WORKSPACE = 'your other workspace';
 /** The workspace a removed person can no longer read the name of. */
@@ -74,10 +77,26 @@ async function removedFrom(supabase: SupabaseClient, orgId: string): Promise<str
   return `You are no longer a member of ${name ?? THAT_WORKSPACE}. Disconnect this connection in Account → Developers.`;
 }
 
-/** An API key: its person and workspace, as `resolveApiKey` checked them. */
+/**
+ * True when a key's session was made below aal2 and the person has since turned on a second factor: every row is then
+ * hidden from it, so it is told plainly instead. An aal2 session is not checked. A failed check throws (503).
+ */
+async function keyPredatesSecondFactor(accessToken: string): Promise<boolean> {
+  // A missing aal claim counts as below aal2.
+  if (jwtClaims(accessToken)?.aal === 'aal2') return false;
+  const { data, error } = await userClient(accessToken).auth.getUser(accessToken);
+  if (error || !data?.user) throw error ?? new Error('no user');
+  return (data.user.factors ?? []).some((f) => f.status === 'verified');
+}
+
+/**
+ * An API key: its person and workspace, as `resolveApiKey` checked them. 'outdated' when its session predates the
+ * person's second factor.
+ */
 async function fromApiKey(key: string) {
   const resolved = await resolveApiKey(key);
   if (!resolved.ok) return null;
+  if (await keyPredatesSecondFactor(resolved.accessToken)) return 'outdated' as const;
   return {
     credentialId: `key:${resolved.id}`,
     userId: resolved.userId,
@@ -157,6 +176,7 @@ export async function resolveCaller(request: Request, clientName: string): Promi
     const credential = oauthClient ? await fromOAuth(token, oauthClient) : await fromApiKey(token);
     if (!credential) return { ok: false, status: 401, message: CREDENTIAL_REFUSED };
     if (credential === 'mfa') return { ok: false, status: 401, message: MFA_NOT_SUPPORTED };
+    if (credential === 'outdated') return { ok: false, status: 401, message: KEY_BEFORE_SECOND_FACTOR };
     const { credentialId, userId, clientId, accessToken } = credential;
     const supabase = oauthClient ?? userClient(accessToken);
 
