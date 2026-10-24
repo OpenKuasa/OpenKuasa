@@ -32,18 +32,18 @@ which stays open source under AGPL-3.0.
 ## What's inside
 
 Six modules and a cross-app assistant, named after the Malay warriors and court
-of Melaka. **77 of the 90 menu screens read and write your workspace's own
-data** in Supabase. The rest still show sample data and carry a
-work-in-progress banner.
+of Melaka. **All 92 menu screens read and write your workspace's own data** in
+Supabase. A few parts inside them are not built yet; they say so on screen
+(see [Status](#status)).
 
-| Module | What it does | Alternative to | Route | Live / menu screens |
+| Module | What it does | Alternative to | Route | Menu screens |
 | --- | --- | --- | --- | --- |
 | **Tuah** | AI command center — chat with your whole business | AI business copilots | `/command` | chat |
-| **Jebat** | Ads & marketing — ad studio, creative bank, leads, lead forms, an autonomous weekly agent | ad platforms & agencies | `/reach` | 8 / 8 |
-| **Kasturi** | CRM — contacts, deals, broadcast, automations, landing pages, chatbot | CRM tools | `/crm` | 13 / 15 |
-| **Lekiu** | Team — employees, attendance, leave, claims, payroll, performance | HR & payroll suites | `/people` | 29 / 30 |
-| **Lekir** | Recruit — jobs, careers page, candidates, interviews, talent pool | recruiting (ATS) | `/hire` | 8 / 9 |
-| **Bendahara** | Finance — sales, purchases, cash book, banking, double-entry ledger, reports | accounting software | `/finance` | 19 / 28 |
+| **Jebat** | Ads & marketing — ad studio, creative bank, leads, lead forms, an autonomous weekly agent | ad platforms & agencies | `/reach` | 8 |
+| **Kasturi** | CRM — contacts, deals, broadcast, automations, landing pages, chatbot, an AI agent | CRM tools | `/crm` | 15 |
+| **Lekiu** | Team — employees, attendance, rosters, leave, claims, payroll, performance | HR & payroll suites | `/people` | 31 |
+| **Lekir** | Recruit — jobs, careers page, candidates, interviews, talent pool | recruiting (ATS) | `/hire` | 9 |
+| **Bendahara** | Finance — sales, purchases, cash book, banking, multi-currency, double-entry ledger, SST, reports, an AI agent | accounting software | `/finance` | 29 |
 | **Taming Sari** | "Sari", the assistant available from every screen | — | everywhere | — |
 
 The menus live in `src/config/nav.ts`, and `src/config/live-screens.ts` lists
@@ -70,24 +70,39 @@ under `src/app/(app)/`, written by `pnpm gen:routes` (see
   your own pipelines and stages, follow-ups, a calendar, automations (rules on
   contact, form and deal events), public landing pages at `/p/<id>`, email
   broadcasts through the workspace's own Resend key (with one-click
-  unsubscribe), billings read from Bendahara invoices, and reports. The
+  unsubscribe), billings read from Bendahara invoices, recent activity,
+  reports, and a plugins page showing which connections are set up. The
   chatbot answers visitors on your landing pages using the workspace's AI key.
 - **Lekiu** — staff self-service (attendance, goals, documents, payslips),
   leave / time-off / claims / overtime applications with approval queues,
   reporting lines (a manager approves for their direct reports only),
-  timesheets, shift calendar, payroll runs and payslips, payment vouchers,
-  letters on your letterhead in English or Malay, scorecards,
-  reviews and training.
+  rosters and hours with shift swaps, timesheets, a shift calendar and an HR
+  calendar, payroll runs and payslips, payment vouchers, letters on your
+  letterhead in English or Malay, scorecards, reviews and training.
 - **Lekir** — jobs from draft to open, a public careers page with an apply
-  form and PDF CV upload, a candidate pipeline, applications, interviews with
-  calendar invites and feedback, and a talent pool.
-- **Bendahara** — quotations into invoices, credit notes (with a reason),
-  payments in, refunds, cash receipts, supplier bills, payment vouchers that
-  pay several bills, payments out, expenses with approval, RFQs with quote
-  comparison, purchase orders with approval and a printable copy, a receipts
-  inbox (optional AI reading), banking with transfers, customers & suppliers,
-  products, an editable chart of accounts, journals on a double-entry ledger,
-  and profit & loss, balance sheet and trial balance reports with CSV export.
+  form, PDF CV upload and a daily cap on applications, a candidate pipeline
+  with search, applications, interviews with calendar invites and feedback,
+  a talent pool, and settings.
+- **Bendahara** — quotations into invoices (with line and whole-document
+  discounts), credit notes (with a reason), payments in, refunds, cash
+  receipts, supplier bills and supplier credit notes, payment vouchers that
+  pay several bills, payments out, contra entries, expenses with approval (and
+  sending an approved one back), RFQs with quote comparison, purchase orders
+  with approval and a printable copy, a receipts inbox (optional AI reading),
+  banking with transfers, customers & suppliers, products, an editable chart
+  of accounts, journals on a double-entry ledger, and profit & loss, balance
+  sheet and trial balance reports with CSV export. **Foreign currency**: MYR
+  is the base; accounts, documents, purchase orders and transfers can be in
+  another currency, using Bank Negara Malaysia's middle rates, with a
+  month-end revaluation. Also an **SST** setup and the SST-02 return, a
+  dashboard and overview, an audit trail, and accounting settings (financial
+  year, books lock, numbering).
+- **AI agents with your own focus** (Kasturi and Bendahara) — you write in
+  plain words what the agent should watch for, it reads that back as checks it
+  understands, and it runs on your schedule. What it finds comes back as
+  suggestions you approve or dismiss; Bendahara's agent only adds notes and
+  never changes a document. A suggestion that no longer applies closes itself.
+  Lekir and Lekiu are next.
 
 ### Platform
 
@@ -95,6 +110,14 @@ under `src/app/(app)/`, written by `pnpm gen:routes` (see
   onboarding; each workspace has owner, admin, member and viewer roles, with
   row-level security in Postgres. Two-factor sign-in with recovery codes; once
   a person turns it on, their changes need the second factor.
+- **MCP server** — connect Claude Code, Claude Desktop, Cursor, Codex or any
+  other MCP app at `/api/mcp`. Three tools give it the same 259 operations
+  Tuah has (113 look-ups, 146 changes), run as the signed-in person under
+  their own permissions, with Tuah's checks; riskier changes come back with a
+  note that needs a second OK. Each person makes their own API key on
+  Account → Developers (shown once, revocable). "Sign in with OpenKuasa" for
+  apps that don't take a key is optional (`MCP_SIGN_IN_ENABLED`). Every change
+  is written to the activity log as "via MCP", for owners and admins.
 - **Demo workspace** — an optional, read-only sample workspace behind a "Try
   the demo" button on the login page (`NEXT_PUBLIC_DEMO_ENABLED=1`).
 - **App shell** — a two-level sidebar (product rail + collapsible per-module
@@ -121,12 +144,12 @@ A look at the running app (sample data):
 
 OpenKuasa is in early development. Being upfront about where it stands:
 
-- **Working** — the screens listed above read and write real workspace data,
-  and the assistants call real models.
-- **Still sample data** — Bendahara's overview, dashboard, AI agents, e-Invoice LHDN,
-  SST report, audit trail, contra entries, FX revaluation and accounting
-  settings; Kasturi's AI agents and plugins; Lekir's settings (only the
-  application form card is real); and the Lekiu copy of the calendar.
+- **Working** — every menu screen reads and writes real workspace data, and
+  the assistants and agents call real models.
+- **Not built yet, and marked on screen** — sending e-Invoices to LHDN (the
+  e-Invoice screen says "Coming soon"); the SST-02 service-tax return on
+  payment basis ("not ready yet"); and the Bendahara overview cards that have
+  no data source yet. Lekir and Lekiu have no AI agent yet.
 - **Not connected** — ad platforms (Meta and others), WhatsApp, Instagram and
   Messenger, payment gateways, bank feeds, LHDN MyInvois submission, and
   EPF / SOCSO / EIS / PCB filing or bank payment files.
@@ -240,6 +263,7 @@ turn on the rest of the app:
 | `AI_GATEWAY_BASE_URL` | Optional gateway in front of OpenRouter. |
 | `AGENTS_ENABLED` | `true` lets scheduled agent runs happen. Off by default. |
 | `CRON_SECRET` | 32+ characters. Authorises the scheduled endpoints below. |
+| `MCP_SIGN_IN_ENABLED` | `true` turns on "Sign in with OpenKuasa" for MCP apps. Off by default, so apps connect with API keys only. It also needs the Supabase OAuth server on (Authentication → OAuth Server, consent path `/oauth/consent`). |
 | `NEXT_PUBLIC_DEMO_ENABLED` | `1` shows the "Try the demo" button on the login page. |
 | `PUBLIC_SITE_URL` | The lasting address written into broadcast unsubscribe links. |
 | `RATE_LIMIT_PEPPER` | Keys the hashes the rate limiter stores, so they cannot be tested against guesses. |
@@ -264,13 +288,14 @@ Authentication) for sign-in and signup to work:
 
 ### Scheduled triggers (cron)
 
-Five endpoints do background work and are meant to be called by a scheduler
+Six endpoints do background work and are meant to be called by a scheduler
 you run (for example a cron job every five minutes), not by a browser:
 
 | Endpoint | What it does |
 | --- | --- |
 | `POST /api/agents/run` | Runs the agent schedules that are due |
 | `POST /api/agents/poll` | Finishes pending videos, fails stuck runs, expires old proposals |
+| `POST /api/finance/fx-rates/fetch` | Stores Bank Negara Malaysia's exchange rates; reaches BNM only when a rate is missing |
 | `POST /api/hire/cv-cleanup` | Removes stored CV files of deleted applications |
 | `POST /api/finance/receipt-cleanup` | Removes Receipts Inbox files of deleted receipts, and uploads nobody recorded within the hour |
 | `POST /api/maintenance/sweep-files` | Removes document and logo files nothing points at (once a day is plenty) |
