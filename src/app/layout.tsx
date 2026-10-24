@@ -1,7 +1,8 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { headers } from "next/headers";
 import { Lexend, Geist_Mono } from "next/font/google";
 import { ThemeSync } from "@/components/theme/theme-sync";
+import { PwaSetup } from "@/components/pwa/pwa-setup";
 import { THEME_INIT_SCRIPT } from "@/lib/theme";
 import "./globals.css";
 
@@ -35,6 +36,20 @@ export const metadata: Metadata = {
     title,
     description,
   },
+  // Installed on an iPhone or iPad from Safari's "Add to Home Screen": opens full screen, named OpenKuasa.
+  appleWebApp: {
+    capable: true,
+    title: 'OpenKuasa',
+    statusBarStyle: 'default',
+  },
+};
+
+// The window and status bar colour of the installed app, matching the page background in each theme.
+export const viewport: Viewport = {
+  themeColor: [
+    { media: '(prefers-color-scheme: light)', color: '#ffffff' },
+    { media: '(prefers-color-scheme: dark)', color: '#0f141a' },
+  ],
 };
 
 export default async function RootLayout({ children }: LayoutProps<"/">) {
@@ -58,6 +73,7 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
         */}
         <script nonce={nonce} dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
         <ThemeSync />
+        <PwaSetup />
         {children}
       </body>
     </html>
