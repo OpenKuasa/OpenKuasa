@@ -130,7 +130,8 @@ describe('/api/mcp', () => {
     expect(name).toBe('createCrmDeal');
     expect(args).toEqual({ title: 'Big order' });
     expect(confirm).toBe('tok-1');
-    expect(mocks.logMcpChange).toHaveBeenCalledWith(SUPABASE, {
+    expect(mocks.logMcpChange).toHaveBeenCalledWith({
+      actor: caller.userId,
       org: caller.orgId,
       operation: 'createCrmDeal',
       target: 'Big order',
@@ -152,7 +153,7 @@ describe('/api/mcp', () => {
       return { ok: true, result: { ok: true } };
     });
     await POST(call('openkuasa_change', { operation: 'createCrmDeal', arguments: {} }));
-    const client = mocks.logMcpChange.mock.calls[0][1].client as string;
+    const client = mocks.logMcpChange.mock.calls[0][0].client as string;
     expect(Array.from(client)).toHaveLength(60);
     expect(client.endsWith('\u{1F600}')).toBe(true);
     expect(client).toBe(client.toWellFormed());
@@ -180,7 +181,7 @@ describe('/api/mcp', () => {
       return { ok: true, result: { ok: true } };
     });
     await POST(call('openkuasa_change', { operation: 'createCrmDeal', arguments: {} }, { 'user-agent': 'Cursor/1.7.0 (darwin)' }));
-    expect(mocks.logMcpChange.mock.calls[0][1].client).toBe('Cursor');
+    expect(mocks.logMcpChange.mock.calls[0][0].client).toBe('Cursor');
   });
 
   test('Operations are built fresh for every call, with the caller\'s own access', async () => {

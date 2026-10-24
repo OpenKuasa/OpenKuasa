@@ -109,7 +109,8 @@ export function createMcpServer(caller: McpCaller, deps: McpServerDeps = {}): Mc
   const limits = deps.limiter ?? limiter;
   const ref = { credentialId: caller.credentialId, userId: caller.userId };
   const log: ChangeLog =
-    deps.log ?? ((entry) => logMcpChange(caller.supabase, { ...entry, org: caller.orgId, client: caller.clientName }));
+    deps.log ??
+    ((entry) => logMcpChange({ ...entry, actor: caller.userId, org: caller.orgId, client: caller.clientName }));
   const operations =
     deps.operations ??
     (async () =>
