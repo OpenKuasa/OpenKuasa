@@ -257,6 +257,8 @@ describe('buildPeopleAgentContext', () => {
     expect(find('hr_letters').filters).toContainEqual(['eq', 'status', 'draft']);
     expect(find('hr_goals').filters).toContainEqual(['in', 'status', ['on_track', 'at_risk']]);
     expect(find('hr_documents').filters).toContainEqual(['not.is', 'expires_on', null]);
+    // Long-expired documents are never read: 120 days before 23 Oct 2026 (Malaysia).
+    expect(find('hr_documents').filters).toContainEqual(['gte', 'expires_on', '2026-06-25']);
     // A generous window: the pure scan applies the strict 14 days.
     const since = find('hr_attendance_days').filters.find((f) => f[0] === 'gte' && f[1] === 'work_date')![2] as string;
     expect(since <= '2026-10-10').toBe(true);

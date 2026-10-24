@@ -2,7 +2,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { describeCheck, validatePlan, type FocusPlan } from '@/lib/agents/focus/plan';
 import { PEOPLE_FOCUS } from '@/lib/agents/types';
 import { PEOPLE_FOCUS_MENU } from '@/lib/people/agent/checks';
-import { scanPeople } from '@/lib/people/agent/scan';
+import { EXPIRED_LOOKBACK_DAYS, scanPeople } from '@/lib/people/agent/scan';
 import { addDays, todayInMalaysia } from '@/lib/people/dates';
 
 /**
@@ -85,7 +85,9 @@ export async function buildPeopleAgentContext(
   const plan = row?.focus_confirmed_at ? validatePlan(PEOPLE_FOCUS_MENU, row.focus_plan).plan : null;
 
   const now = new Date();
-  const since = addDays(todayInMalaysia(now), -ATTENDANCE_READ_DAYS);
+  const today = todayInMalaysia(now);
+  const since = addDays(today, -ATTENDANCE_READ_DAYS);
+  const expiredSince = addDays(today, -EXPIRED_LOOKBACK_DAYS);
 
   const [employeeRows, documentRows, goalRows, leaveRows, claimRows, overtimeRows, letterRows, attendanceRows, payrollRows] =
     await Promise.all([
@@ -98,6 +100,8 @@ export async function buildPeopleAgentContext(
           .select('id,employee_id,doc_type,expires_on')
           .eq('org_id', orgId)
           .not('expires_on', 'is', null)
+          // Long-expired documents are never raised; the scan applies the same bound.
+          .gte('expires_on', expiredSince)
           .order('expires_on', { ascending: true })
           .order('id', { ascending: true })
           .range(from, to),

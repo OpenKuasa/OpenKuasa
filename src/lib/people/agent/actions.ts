@@ -69,8 +69,12 @@ const RECORD_CHECKS: Record<string, RecordCheck> = {
     stillMatches: (row, input, today) => {
       const on = typeof row.expires_on === 'string' ? row.expires_on.slice(0, 10) : null;
       if (on === null) return false;
-      // An expired note needs it still expired; a soon note needs it still within the check's N.
-      return input.stage === 'expired' ? on < today : on <= addDays(today, input.days ?? 0);
+      // The stage names the expiry it was raised for: a renewed (or otherwise changed) date is stale.
+      const expired = input.stage.startsWith('expired');
+      if (input.stage !== `${expired ? 'expired' : 'soon'}:${on}`) return false;
+      // An expired note needs it still expired. A soon note needs it not yet expired (its text says
+      // "expires <date>"; once past, the next scan raises an expired note) and within the check's N.
+      return expired ? on < today : on >= today && on <= addDays(today, input.days ?? 0);
     },
   },
   goal_overdue: { entityType: 'hr_goal', table: 'hr_goals', columns: 'employee_id,status', stillMatches: (r) => r.status !== 'done' },

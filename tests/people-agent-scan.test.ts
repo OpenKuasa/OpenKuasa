@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { peopleAgentNoteInput } from '@/lib/people/agent/actions';
 import type { PeopleAgentRaw } from '@/lib/people/agent/context';
+import { peopleAgent } from '@/lib/agents/people-agent';
 import { PEOPLE_NOTE_ENTITY_TYPES, scanPeople, type PeopleNoteInput } from '@/lib/people/agent/scan';
 
 // 12:00 on Fri 23 Oct 2026 in Kuala Lumpur.
@@ -101,11 +102,11 @@ describe('scanPeople', () => {
         entityLabel: 'Aisyah Rahman',
         body: `Aisyah Rahman's contract expires 04 Nov 2026.${AS_OF}`,
         target: R1,
-        stage: 'soon',
+        stage: 'soon:2026-11-04',
         days: 30,
       });
       expect((out[0].input as PeopleNoteInput).body).toBe(`A confidential document for Mei Ling Tan expired 20 Oct 2026.${AS_OF}`);
-      expect((out[0].input as PeopleNoteInput).stage).toBe('expired');
+      expect((out[0].input as PeopleNoteInput).stage).toBe('expired:2026-10-20');
     });
 
     it('names each type: identity stays, other and unknown are "a document", expiring today is "today"', () => {
@@ -133,6 +134,35 @@ describe('scanPeople', () => {
     });
   });
 
+  describe('document_expiring renewals and old expiries', () => {
+    const check = [{ key: 'document_expiring', params: { days: 30 } }];
+
+    it('a renewed document (same id, new expires_on) gets a new dedupe key and is raised again', () => {
+      const key = peopleAgent.proposals.dedupeKey!;
+      const first = scan(raw({ checks: check, documents: [{ id: R1, employeeId: E1, docType: 'contract', expiresOn: '2026-11-04' }] }));
+      // Renewed for a year; a month before the new expiry it comes up again.
+      const later = new Date('2027-09-15T04:00:00.000Z');
+      const again = scan(
+        raw({ checks: check, documents: [{ id: R1, employeeId: E1, docType: 'contract', expiresOn: '2027-10-01' }] }),
+        later,
+      );
+      expect(again).toHaveLength(1);
+      expect((again[0].input as PeopleNoteInput).stage).toBe('soon:2027-10-01');
+      expect((again[0].input as PeopleNoteInput).target).toBe(R1);
+      expect(key(again[0].action, again[0].input, again[0].checkKey)).not.toBe(key(first[0].action, first[0].input, first[0].checkKey));
+      // Stages stay within the 40-character input limit.
+      expect((again[0].input as PeopleNoteInput).stage.length).toBeLessThanOrEqual(40);
+    });
+
+    it('a document that expired more than 120 days ago is not raised; 120 days still is', () => {
+      const doc = (expiresOn: string) =>
+        scan(raw({ checks: check, documents: [{ id: R1, employeeId: E1, docType: 'contract', expiresOn }] }));
+      expect(doc('2026-04-06')).toEqual([]); // 200 days ago
+      expect(doc('2026-06-24')).toEqual([]); // 121 days ago
+      expect(doc('2026-06-25').map((c) => c.title)).toEqual(['Document expired · 120 days ago']);
+    });
+  });
+
   describe('goal_overdue', () => {
     const goals: PeopleAgentRaw['goals'] = [
       { id: R1, employeeId: E1, title: 'Launch the Penang branch', progress: 40, dueDate: '2026-10-14' }, // 9 late
@@ -145,8 +175,8 @@ describe('scanPeople', () => {
     it('with N = 0 flags goals a day or more late, in buckets of 1, 2, 4, 8 days', () => {
       const out = scan(raw({ checks: [{ key: 'goal_overdue', params: { days: 0 } }], goals }));
       expect(out.map((c) => [c.title, (c.input as PeopleNoteInput).stage])).toEqual([
-        ['Goal overdue · 40% done · 9 days late', '8'],
-        ['Goal overdue · 90% done · 1 day late', '1'],
+        ['Goal overdue · 40% done · 9 days late', '2026-10-14:8'],
+        ['Goal overdue · 90% done · 1 day late', '2026-10-22:1'],
       ]);
       expect(out[0].input).toMatchObject({
         entityType: 'hr_goal',
@@ -159,7 +189,17 @@ describe('scanPeople', () => {
 
     it('with N = 7 buckets at 7, 14, 28', () => {
       const out = inputs(raw({ checks: [{ key: 'goal_overdue', params: { days: 7 } }], goals }));
-      expect(out.map((i) => [i.target, i.stage])).toEqual([[R1, '7']]);
+      expect(out.map((i) => [i.target, i.stage])).toEqual([[R1, '2026-10-14:7']]);
+    });
+
+    it('a due date moved later starts the reminders afresh, with a new dedupe key', () => {
+      const key = peopleAgent.proposals.dedupeKey!;
+      const check = [{ key: 'goal_overdue', params: { days: 0 } }];
+      const before = scan(raw({ checks: check, goals: [{ id: R1, employeeId: E1, title: 'x', progress: 10, dueDate: '2026-10-14' }] }));
+      // Moved to 21 Oct: 2 days late, bucket 2 — would collide with an old '2' bucket without the date.
+      const after = scan(raw({ checks: check, goals: [{ id: R1, employeeId: E1, title: 'x', progress: 10, dueDate: '2026-10-21' }] }));
+      expect((after[0].input as PeopleNoteInput).stage).toBe('2026-10-21:2');
+      expect(key(after[0].action, after[0].input, after[0].checkKey)).not.toBe(key(before[0].action, before[0].input, before[0].checkKey));
     });
   });
 

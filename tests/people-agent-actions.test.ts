@@ -77,7 +77,7 @@ const payrollNote = note({
   stage: '2026-10',
 });
 const streakNote = note({ entityType: 'hr_employee', entityId: EMP, target: EMP, stage: '2026-10-16' });
-const docNote = note({ entityType: 'hr_document', stage: 'soon', days: 30 });
+const docNote = note({ entityType: 'hr_document', stage: 'soon:2026-11-04', days: 30 });
 
 const stale = { ok: false, error: PEOPLE_NO_LONGER_APPLIES, stale: true };
 const NOT_ADDED = { ok: false, error: 'That note could not be added.' };
@@ -140,9 +140,11 @@ describe('peopleCreateAgentNote', () => {
   // [check, input, table, a row that no longer matches, a row that still does]
   const cases: [string, PeopleAgentNoteInput, string, Record<string, unknown>, Record<string, unknown>][] = [
     ['document_expiring', docNote, 'hr_documents', { expires_on: '2027-10-01' }, { expires_on: '2026-11-04' }],
-    ['document_expiring', docNote, 'hr_documents', { expires_on: null }, { expires_on: '2026-10-01' }],
-    ['document_expiring', { ...docNote, stage: 'expired' }, 'hr_documents', { expires_on: '2026-11-04' }, { expires_on: '2026-10-20' }],
-    ['goal_overdue', note({ entityType: 'hr_goal', stage: '8' }), 'hr_goals', { status: 'done' }, { status: 'at_risk' }],
+    ['document_expiring', docNote, 'hr_documents', { expires_on: null }, { expires_on: '2026-11-04' }],
+    // Renewed, but still inside the check's N: a different expiry is still a different note.
+    ['document_expiring', docNote, 'hr_documents', { expires_on: '2026-11-10' }, { expires_on: '2026-11-04' }],
+    ['document_expiring', { ...docNote, stage: 'expired:2026-10-20' }, 'hr_documents', { expires_on: '2026-11-04' }, { expires_on: '2026-10-20' }],
+    ['goal_overdue', note({ entityType: 'hr_goal', stage: '2026-10-14:8' }), 'hr_goals', { status: 'done' }, { status: 'at_risk' }],
     ['leave_waiting', leaveNote, 'hr_leave_requests', { status: 'approved' }, { status: 'pending' }],
     ['leave_starts_soon', note({ stage: '2026-10-25' }), 'hr_leave_requests', { status: 'rejected' }, { status: 'pending' }],
     ['claim_waiting', note({ entityType: 'hr_claim' }), 'hr_claims', { status: 'cancelled' }, { status: 'pending' }],
@@ -180,6 +182,15 @@ describe('peopleCreateAgentNote', () => {
     expect(await peopleCreateAgentNote(inactive.ctx, input)).toEqual(stale);
     const deleted = fake({ agent_proposals: proposal(check), [table]: row(still) });
     expect(await peopleCreateAgentNote(deleted.ctx, input)).toEqual(stale);
+  });
+
+  it('a soon-note approved after the document expired no longer applies (its text says "expires")', async () => {
+    const input = { ...docNote, stage: 'soon:2026-10-20' };
+    const { ctx, rpc } = fake({ agent_proposals: proposal('document_expiring'), hr_employees: activeEmployee, hr_documents: row({ expires_on: '2026-10-20' }) });
+    expect(await peopleCreateAgentNote(ctx, input)).toEqual(stale);
+    expect(rpc).not.toHaveBeenCalled();
+    const today = fake({ agent_proposals: proposal('document_expiring'), hr_employees: activeEmployee, hr_documents: row({ expires_on: '2026-10-23' }) });
+    expect((await peopleCreateAgentNote(today.ctx, { ...docNote, stage: 'soon:2026-10-23' })).ok).toBe(true);
   });
 
   it('approving a leave decided since the scan writes nothing and says it no longer applies', async () => {

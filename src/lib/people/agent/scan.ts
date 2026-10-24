@@ -48,6 +48,8 @@ export type PeopleNoteInput = {
 
 /** Longest name or goal title put into a label or body. */
 const NAME_MAX = 80;
+/** document_expiring skips documents that expired longer ago than this many days. */
+export const EXPIRED_LOOKBACK_DAYS = 120;
 /** absent_streak looks at this many calendar days, today included. */
 const STREAK_WINDOW_DAYS = 14;
 
@@ -122,8 +124,9 @@ export function scanPeople(raw: PeopleAgentRaw, now: Date): Candidate[] {
 
     if (check.key === 'document_expiring') {
       const last = addDays(today, days);
+      const first = addDays(today, -EXPIRED_LOOKBACK_DAYS);
       const rows = ofActive(raw.documents)
-        .filter(({ row }) => isDay(row.expiresOn) && (row.expiresOn as string) <= last)
+        .filter(({ row }) => isDay(row.expiresOn) && (row.expiresOn as string) >= first && (row.expiresOn as string) <= last)
         .sort((a, b) => (a.row.expiresOn as string).localeCompare(b.row.expiresOn as string));
       for (const { row, name } of rows) {
         const on = row.expiresOn as string;
@@ -143,7 +146,8 @@ export function scanPeople(raw: PeopleAgentRaw, now: Date): Candidate[] {
             entityLabel: name,
             body: `${docPhrase(row.docType, name)} ${expired ? 'expired' : 'expires'} ${formatDate(on)}.`,
             target: row.id,
-            stage: expired ? 'expired' : 'soon',
+            // The date is part of the stage, so a renewed document (same row, new expiry) is raised again.
+            stage: `${expired ? 'expired' : 'soon'}:${on}`,
             days,
           },
           title,
@@ -168,7 +172,8 @@ export function scanPeople(raw: PeopleAgentRaw, now: Date): Candidate[] {
             entityLabel: name,
             body: `${name}'s goal "${cut(row.title)}" was due ${formatDate(row.dueDate as string)} and is ${progress}% done.`,
             target: row.id,
-            stage: String(doublingStage(late, n)),
+            // The due date is part of the stage, so moving it later starts the reminders afresh.
+            stage: `${row.dueDate}:${doublingStage(late, n)}`,
           },
           `Goal overdue · ${progress}% done · ${daysText(late)} late`,
         );
