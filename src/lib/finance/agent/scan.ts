@@ -3,6 +3,10 @@ import type { FinanceAgentRaw, FinanceAgentTaxType } from '@/lib/finance/agent/c
 import { money, rm } from '@/lib/finance/format';
 import { sstPeriodFor, sstPeriodLabel } from '@/lib/finance/sst';
 import { formatDate, todayInMalaysia } from '@/lib/people/dates';
+import { doublingStage } from '@/lib/agents/focus/stage';
+
+// Kept importable from here: it moved to the product-neutral focus module.
+export { doublingStage };
 
 /** The audit trail's names for what a note is about. */
 export const FINANCE_NOTE_ENTITY_TYPES = [
@@ -56,17 +60,6 @@ function klDayOf(iso: string): string | null {
 }
 
 const isDay = (v: string | null): v is string => v !== null && /^\d{4}-\d{2}-\d{2}$/.test(v);
-
-/**
- * The doubling bucket a count of days is in, past the threshold `n`: n, 2n, 4n, 8n… So a check
- * with a 14-day threshold is raised at 14 days, again at 28, then 56, 112. Null below `n`.
- */
-export function doublingStage(days: number, n: number): number | null {
-  if (n < 1 || days < n) return null;
-  let stage = n;
-  while (stage * 2 <= days) stage *= 2;
-  return stage;
-}
 
 const TAX_NAMES: Record<FinanceAgentTaxType, string> = { service: 'service tax', sales: 'sales tax' };
 
