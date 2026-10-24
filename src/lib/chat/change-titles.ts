@@ -2430,7 +2430,7 @@ export function approvalDetail(
   }
   if (toolName === 'postInvoice') return 'Posting gives the invoice a number and locks it; record its e-Invois status afterwards for LHDN.';
   if (toolName === 'postBill') return 'Posting locks the bill so it can no longer be edited.';
-  if (toolName === 'setEInvoice') return 'This records the e-Invois (MyInvois) status submitted to LHDN.';
+  if (toolName === 'setEInvoice') return 'This records the e-Invois (MyInvois) status and UUID from LHDN. Nothing is sent to LHDN from here.';
   if (toolName === 'voidInvoice' || toolName === 'voidBill' || toolName === 'voidCreditNote') {
     return 'Voiding keeps the document for the record but cancels its effect.';
   }

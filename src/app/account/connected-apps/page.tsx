@@ -6,6 +6,8 @@ type App = {
   category: string;
   description: string;
   connected: boolean;
+  /** Not built yet: shown, but it cannot be connected. */
+  comingSoon?: boolean;
 };
 
 const APPS: App[] = [
@@ -36,8 +38,9 @@ const APPS: App[] = [
   {
     name: 'LHDN MyInvois',
     category: 'Compliance',
-    description: 'Submit e-Invoices to the LHDN MyInvois portal.',
-    connected: true,
+    description: 'Send e-Invoices to LHDN MyInvois from Bendahara.',
+    connected: false,
+    comingSoon: true,
   },
   {
     name: 'Telegram',
@@ -75,7 +78,7 @@ export default function ConnectedAppsPage() {
                     : 'bg-muted text-muted-foreground',
                 )}
               >
-                {a.connected ? 'Connected' : 'Not connected'}
+                {a.connected ? 'Connected' : a.comingSoon ? 'Coming soon' : 'Not connected'}
               </span>
             </div>
             <div>
@@ -83,8 +86,8 @@ export default function ConnectedAppsPage() {
               <p className="text-xs text-muted-foreground">{a.category}</p>
             </div>
             <p className="text-sm text-muted-foreground">{a.description}</p>
-            <Button variant="outline" size="sm" className="w-full">
-              {a.connected ? 'Manage' : 'Connect'}
+            <Button variant="outline" size="sm" className="w-full" disabled={a.comingSoon}>
+              {a.connected ? 'Manage' : a.comingSoon ? 'Coming soon' : 'Connect'}
             </Button>
           </div>
         ))}
