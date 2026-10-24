@@ -1,6 +1,6 @@
 import 'server-only';
 import { getAllGuides, type Guide } from './content';
-import { queryWords, type DocsIndexEntry } from './search-core';
+import { queryWords, scoreFields, type DocsIndexEntry } from './search-core';
 
 /** Compact index for the browser: titles, descriptions and headings, no body text. */
 export function buildDocsIndex(): DocsIndexEntry[] {
@@ -50,18 +50,16 @@ export function searchDocsPassages(query: string, limit = 4): DocsPassage[] {
   const hits: { passage: DocsPassage; score: number; order: number }[] = [];
   let order = 0;
   for (const guide of getAllGuides()) {
-    const title = guide.title.toLowerCase();
-    const description = guide.description.toLowerCase();
     for (const section of splitSections(guide)) {
-      const heading = (section.heading ?? '').toLowerCase();
-      const body = section.text.toLowerCase();
-      let score = 0;
-      for (const word of words) {
-        if (title.includes(word)) score += 5;
-        if (heading.includes(word)) score += 3;
-        if (description.includes(word)) score += 2;
-        if (body.includes(word)) score += 1;
-      }
+      const score = scoreFields(
+        {
+          title: guide.title,
+          headings: section.heading ? [section.heading] : [],
+          description: guide.description,
+          body: section.text,
+        },
+        words,
+      );
       order += 1;
       if (score === 0) continue;
       hits.push({
