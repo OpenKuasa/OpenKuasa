@@ -11,7 +11,6 @@ describe('sitemap', () => {
         'https://openkuasa.com',
         'https://openkuasa.com/pricing',
         'https://openkuasa.com/privacy',
-        'https://openkuasa.com/login',
       ]),
     );
     for (const u of urls) expect(u.startsWith('https://openkuasa.com')).toBe(true);
@@ -23,6 +22,15 @@ describe('sitemap', () => {
       expect(u).not.toMatch(
         /\/(api|oauth|careers|account|crm|reach|people|hire|finance|mfa|invite|f|p|u)(\/|$)/,
       );
+    }
+  });
+
+  it('lists nothing robots.txt disallows', () => {
+    const rules = [robots().rules].flat();
+    const blocked = rules.flatMap((r) => [r?.disallow ?? []].flat());
+    for (const u of urls) {
+      const path = new URL(u).pathname;
+      for (const b of blocked) expect(path === b || (b.endsWith('/') && path.startsWith(b)), `${u} vs ${b}`).toBe(false);
     }
   });
 
