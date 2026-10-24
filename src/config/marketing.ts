@@ -12,7 +12,7 @@ import {
 export const NAV_LINKS: { label: string; href: string }[] = [
   { label: 'Home', href: '/' },
   { label: 'Pricing', href: '/pricing' },
-  { label: 'Tutorials & Docs', href: '/account/docs' },
+  { label: 'Tutorials & Docs', href: '/docs' },
   { label: 'Contact Support', href: '/account/support' },
 ];
 

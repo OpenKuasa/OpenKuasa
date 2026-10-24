@@ -21,7 +21,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 
 const HELP_LINKS = [
-  { label: 'Tutorials & Docs', href: '/account/docs' },
+  { label: 'Tutorials & Docs', href: '/docs' },
   { label: 'Contact Support', href: '/account/support' },
   { label: 'Product Changelog', href: '/account/changelog' },
   { label: 'Feature Requests', href: '/account/feedback' },
