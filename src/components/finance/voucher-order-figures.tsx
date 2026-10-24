@@ -1,3 +1,4 @@
+import Link from 'next/link';
 import { money } from '@/lib/finance/format';
 import type { VoucherFigures } from '@/lib/finance/voucher-order-figures';
 import { displayDate } from '@/lib/finance/view-helpers';
@@ -32,14 +33,14 @@ export function VoucherOrderFigures({ figures }: { figures: VoucherFigures }) {
     <div role="group" aria-label="The purchase orders behind this payment" className="mt-2 space-y-3 border-t pt-2">
       {figures.orders.map((order) => (
         <div key={order.orderId} className="space-y-1">
-          <a
+          <Link
             href={order.href}
             title={`Open ${order.poNo ?? 'the purchase order'} on Purchase orders`}
             className="group flex flex-wrap items-baseline justify-between gap-x-3 text-xs"
           >
             <span className="font-medium underline-offset-2 group-hover:underline">{order.poNo ?? 'Purchase order'}</span>
             <span className="text-muted-foreground">Line by line</span>
-          </a>
+          </Link>
           <dl className="grid grid-cols-[auto_auto] gap-x-4 gap-y-0.5 text-xs tabular-nums">
             <dt className="text-muted-foreground">Ordered</dt>
             <dd className="text-right">{money(order.ordered, order.currency)}</dd>

@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { useState } from 'react';
 import {
   Ban,
@@ -706,7 +707,7 @@ function OpenedOrderCard({ order }: { order: PurchaseOrderDetail }) {
       icon={ClipboardCheck}
       action={
         <Button asChild variant="outline" size="sm">
-          <a href="/finance/purchase-orders">Show all orders</a>
+          <Link href="/finance/purchase-orders">Show all orders</Link>
         </Button>
       }
       className="col-span-2 md:col-span-12"
