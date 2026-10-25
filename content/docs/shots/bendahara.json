@@ -108,5 +108,25 @@
       800
     ],
     "clip": "main"
+  },
+  {
+    "file": "bendahara/invoices.png",
+    "path": "/finance/invoices",
+    "as": "demo",
+    "viewport": [
+      1280,
+      800
+    ],
+    "clip": "main"
+  },
+  {
+    "file": "bendahara/quotations.png",
+    "path": "/finance/quotations",
+    "as": "demo",
+    "viewport": [
+      1280,
+      800
+    ],
+    "clip": "main"
   }
 ]
