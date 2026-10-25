@@ -37,7 +37,7 @@ The next number can only go up, so no number is ever given twice. Each document 
 - **Legal details** shows your SST number, TIN and address, which are printed on invoices and reports. Change them under Account, Company.
 - **SST** links to the SST settings.
 - **Bank accounts** links to [Banking](/docs/bendahara/banking).
-- **Base currency** is MYR (Malaysian ringgit). Every report and the ledger are kept in ringgit.
+- **Base currency** is MYR (Malaysian ringgit). Every report and the ledger are kept in ringgit. The same card shows the **Exchange rate** the books use: Bank Negara Malaysia's 5 pm selling rate, fetched every working day. Customs (Public Ruling 3/2026) requires a selling rate from one source, used for at least a year. See [Foreign currency](/docs/bendahara/foreign-currency).
 - **Integrations & notifications** are **Coming soon**: MyInvois integration, auto-submit of validated invoices, FPX auto-reconciliation, e-Invois alerts, overdue reminders and SST due reminders. Their switches are turned off and cannot be used yet.
 
 ## Common problems

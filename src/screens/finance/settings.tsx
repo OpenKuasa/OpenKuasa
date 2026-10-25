@@ -196,9 +196,22 @@ function CompanyCard({ company, canEditCompany }: { company: Part<Company>; canE
 
 function CurrencyCard() {
   return (
-    <BentoCard title="Base currency" subtitle="What the books are kept in" icon={Coins} className="col-span-2 md:col-span-6">
+    <BentoCard
+      title="Base currency"
+      subtitle="What the books are kept in, and the rate for other currencies"
+      icon={Coins}
+      className="col-span-2 md:col-span-6"
+    >
       <p className="text-sm font-medium">MYR (Malaysian ringgit)</p>
       <p className="mt-1 text-sm text-muted-foreground">Every report and the ledger are kept in ringgit.</p>
+      <div className="mt-4 space-y-1 border-t pt-3">
+        <p className="text-sm font-medium">Exchange rate</p>
+        <p className="text-sm">Bank Negara Malaysia&apos;s 5 pm selling rate, fetched every working day.</p>
+        <p className="text-sm text-muted-foreground">
+          Customs (Public Ruling 3/2026) requires a selling rate from one source, used for at least a year.
+        </p>
+        <CardLink href="/docs/bendahara/foreign-currency">How foreign currency works</CardLink>
+      </div>
     </BentoCard>
   );
 }

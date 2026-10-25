@@ -70,6 +70,11 @@ describe('Accounting Settings without a database', () => {
     }
     expect(text).toContain('MYR (Malaysian ringgit)');
     expect(text).toContain('Every report and the ledger are kept in ringgit.');
+    // The exchange-rate rule the books follow, read-only, with the guide linked.
+    expect(text).toContain('Exchange rate');
+    expect(text).toContain("Bank Negara Malaysia's 5 pm selling rate, fetched every working day.");
+    expect(text).toContain('Public Ruling 3/2026');
+    expect(html).toContain('href="/docs/bendahara/foreign-currency"');
     expect(html).toContain('href="/finance/sst-report"');
     expect(html).toContain('href="/finance/banking"');
     expect(html).not.toContain('Edit in Account');
