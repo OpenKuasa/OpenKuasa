@@ -42,3 +42,4 @@ Weekly Studio runs on your workspace's own AI key. Without one, a run fails. See
 - [Approve or reject Weekly Studio's suggestions](/docs/jebat/agent-suggestions)
 - [Set Weekly Studio's schedules and spend caps](/docs/jebat/agent-schedules)
 - [Add your OpenRouter key](/docs/getting-started/openrouter-key)
+- [AI agents and their focus in the other products](/docs/tuah/ai-agents): Jebat's **AI Agents** screen runs Weekly Studio only, with no focus to set

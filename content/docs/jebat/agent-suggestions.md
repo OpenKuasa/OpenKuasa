@@ -38,3 +38,4 @@ Weekly Studio picks its suggestions from these checks on your data:
 - [Turn on and run Weekly Studio](/docs/jebat/weekly-studio)
 - [Promote a lead to a Kasturi contact](/docs/jebat/promote-lead)
 - [Create and share a lead form](/docs/jebat/lead-forms)
+- [AI agents and their focus in the other products](/docs/tuah/ai-agents): Jebat's **AI Agents** screen runs Weekly Studio only, with no focus to set

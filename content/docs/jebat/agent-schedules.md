@@ -55,3 +55,4 @@ A schedule is marked **Completed** by itself when it reaches its **Stop after (r
 
 - [Turn on and run Weekly Studio](/docs/jebat/weekly-studio)
 - [Approve or reject Weekly Studio's suggestions](/docs/jebat/agent-suggestions)
+- [AI agents and their focus in the other products](/docs/tuah/ai-agents): Jebat's **AI Agents** screen runs Weekly Studio only, with no focus to set
