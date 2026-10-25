@@ -1,6 +1,14 @@
 import 'server-only';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import type { PushDevice } from '@/components/account/push-device-card';
+
+/** One of the person's devices with push on (their own push_subscriptions rows). */
+export type PushDevice = {
+  id: string;
+  endpoint: string;
+  label: string | null;
+  /** When it was added, already formatted on the server. */
+  added: string;
+};
 
 /** "3 Oct 2026" in the person's timezone. Formatted here so server and browser agree. */
 export function formatAddedDate(iso: string, timeZone: string): string {

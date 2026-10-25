@@ -16,15 +16,7 @@ import {
   unsubscribeThisDevice,
   type PushSupport,
 } from '@/lib/push/client';
-
-/** One of the person's devices with push on (their own push_subscriptions rows). */
-export type PushDevice = {
-  id: string;
-  endpoint: string;
-  label: string | null;
-  /** When it was added, already formatted on the server. */
-  added: string;
-};
+import type { PushDevice } from '@/lib/push/devices';
 
 type Support = PushSupport | 'checking';
 

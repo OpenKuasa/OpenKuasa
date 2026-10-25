@@ -20,6 +20,7 @@ export type PushResult = { ok: true } | { ok: false; error: string };
 
 const SW_PATH = '/sw.js';
 const API = '/api/push/subscriptions';
+const REFUSAL_CODES = new Set(['PUSH_DEMO', 'PUSH_TOO_MANY', 'PUSH_NOT_SIGNED_IN', 'PUSH_BAD_SUBSCRIPTION']);
 
 const isIos = (userAgent: string, maxTouchPoints: number) =>
   /iPhone|iPad|iPod/.test(userAgent) || (/Macintosh/.test(userAgent) && maxTouchPoints > 1);
@@ -126,8 +127,9 @@ export function sameKey(current: ArrayBuffer | null | undefined, key: Uint8Array
  */
 async function registration(): Promise<ServiceWorkerRegistration> {
   const existing = await navigator.serviceWorker.getRegistration('/');
-  if (existing) return existing;
-  return navigator.serviceWorker.register(SW_PATH, { scope: '/', updateViaCache: 'none' });
+  if (!existing) await navigator.serviceWorker.register(SW_PATH, { scope: '/', updateViaCache: 'none' });
+  // Subscribing needs an active worker; right after register() it is still installing.
+  return navigator.serviceWorker.ready;
 }
 
 async function currentSubscription(): Promise<PushSubscription | null> {
@@ -170,6 +172,8 @@ export async function subscribeThisDevice(publicKey: string): Promise<PushResult
   }
 
   let sub: PushSubscription;
+  // Only a subscription made by this call is undone when saving fails; a reused one was on already.
+  let created = false;
   try {
     const reg = await registration();
     const key = urlBase64ToUint8Array(publicKey);
@@ -178,10 +182,12 @@ export async function subscribeThisDevice(publicKey: string): Promise<PushResult
     if (existing && !sameKey(existing.options.applicationServerKey, key)) {
       await existing.unsubscribe().catch(() => false);
     }
-    sub =
-      existing && sameKey(existing.options.applicationServerKey, key)
-        ? existing
-        : await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: key });
+    if (existing && sameKey(existing.options.applicationServerKey, key)) {
+      sub = existing;
+    } else {
+      sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: key });
+      created = true;
+    }
   } catch {
     return { ok: false, error: "This browser couldn't turn push on. Please try again." };
   }
@@ -199,13 +205,16 @@ export async function subscribeThisDevice(publicKey: string): Promise<PushResult
       }),
     });
   } catch {
+    // No answer at all: don't leave a subscription the server never heard of.
+    if (created) await sub.unsubscribe().catch(() => false);
     return { ok: false, error: "Couldn't reach OpenKuasa. Check your connection and try again." };
   }
   if (res.ok) return { ok: true };
 
-  // The server refused it, so don't leave this browser subscribed on its own.
+  // A coded refusal means the server won't keep this device, so don't leave the browser
+  // subscribed on its own. Other failures (429, 500) are temporary and leave it for a retry.
   const body = (await res.json().catch(() => null)) as { code?: string } | null;
-  await sub.unsubscribe().catch(() => false);
+  if (created && body?.code && REFUSAL_CODES.has(body.code)) await sub.unsubscribe().catch(() => false);
   return { ok: false, error: pushErrorMessage(body?.code) };
 }
 

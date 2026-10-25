@@ -13,7 +13,8 @@ vi.mock('@/app/account/actions', () => ({
 }));
 vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh: vi.fn() }) }));
 
-import { PushDeviceCardView, type PushDevice } from '@/components/account/push-device-card';
+import { PushDeviceCardView } from '@/components/account/push-device-card';
+import type { PushDevice } from '@/lib/push/devices';
 import { NotificationsForm } from '@/components/account/notifications-form';
 import { DEFAULT_NOTIFICATION_PREFS } from '@/config/account';
 

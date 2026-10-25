@@ -23,7 +23,8 @@ import {
   type NotifyChannel,
 } from '@/config/account';
 import { updateNotificationsAction } from '@/app/account/actions';
-import { PushDeviceCard, type PushDevice } from './push-device-card';
+import { PushDeviceCard } from './push-device-card';
+import type { PushDevice } from '@/lib/push/devices';
 import { ReadOnlyNotice, SaveBar, useSettingsForm } from './settings-form';
 
 const CHANNEL_LABELS: Record<NotifyChannel, string> = {

@@ -77,7 +77,6 @@ To stop push on a device, click **Turn off** on that device, or click **Remove**
 - **Add OpenKuasa to your Home Screen first.** On an iPhone or iPad, push only works from the Home Screen app.
 - **Notifications are blocked for this site.** Allow notifications for OpenKuasa in your browser settings, then click **Turn on** again.
 - **You can have push on up to 10 devices.** Remove a device you no longer use, then try again.
-
 - **Please choose valid quiet hours.** Pick a time from each list.
 - **The demo workspace is read-only. Sign up to save changes.** Demo choices cannot be changed.
 
