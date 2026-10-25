@@ -45,6 +45,8 @@ The answer can be changed until an invoice is made from the quotation.
 2. Confirm with **Make invoice**. A draft invoice is made with the same customer, notes and lines, dated today.
 3. Check it and post it on [Invoices](/docs/bendahara/invoices). The quotation's **Invoice** column shows it.
 
+A quotation in another currency becomes an invoice in that currency, at Bank Negara Malaysia's selling rate for the new invoice's date. The note says "Invoice drafted in … at Bank Negara Malaysia's selling rate of …", or, when Bank Negara has no rate, "Invoice drafted in …. Enter its exchange rate before posting."
+
 ## Common problems
 
 - **"A quotation needs at least one line with an amount."**

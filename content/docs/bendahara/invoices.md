@@ -27,7 +27,7 @@ The customer must be in [Customers and suppliers](/docs/bendahara/customers-supp
 2. Click **New Invoice**.
 3. Choose the **Customer**. The **Due date** follows the customer's payment terms until you change it.
 4. Set the **Invoice date** and check the **Due date**. The due date cannot be before the invoice date.
-5. If the goods were sold or the service provided on another day, set the **Date of supply (if not the invoice date)**. It sets the exchange rate on a foreign invoice and, for service tax, when the 12 months for an unpaid invoice start.
+5. If the goods were sold or the service provided on another day, set the **Date of supply (if not the invoice date)**. On an invoice in another currency it sets the exchange rate. It is saved with the invoice, but the SST Report does not use it yet: the return counts an invoice by its invoice date.
 6. If the invoice is in another currency, choose its **Currency**. See [Foreign currency](/docs/bendahara/foreign-currency).
 7. Fill in the **Lines**: pick a **Product** to fill the line at its selling price, or type a **Description**, **Qty**, **Unit**, **Unit price** and **SST %**. Each line can have a **Discount**, in % or in the invoice's currency.
 8. To take something off the whole invoice, use **Discount on the whole invoice**.
@@ -59,6 +59,7 @@ Use the status and customer lists and the search box to find invoices, and **Exp
 - **"A contra entry sets this off. Void the contra entry first."**
 - **"e-Invois details can be recorded once the invoice is posted."**
 - **"This date is in a closed period: the books are locked to …"** See [Accounting settings](/docs/bendahara/settings).
+- **"Only an owner or admin can post, pay or void. Ask one of them to do this."** Members still see **Post**, **Void** and **Record payment** in the row menus, but only an owner or admin can use them.
 
 ## Related
 

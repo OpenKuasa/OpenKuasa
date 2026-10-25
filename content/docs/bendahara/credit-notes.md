@@ -34,8 +34,8 @@ When it is issued, the credit note gets its number and the invoice owes that muc
 
 From the row menu:
 
-- **Refund** on an issued credit note pays the credit back. See [Refunds](/docs/bendahara/refunds).
-- **Void** on an issued credit note. The invoice owes that amount again. It stays in the list as Void. This cannot be undone.
+- **Refund** on an issued credit note pays the credit back. It shows only while the customer is in credit, so something can still be paid out. See [Refunds](/docs/bendahara/refunds).
+- **Void** on an issued credit note, confirmed with **Void credit note**. The invoice owes that amount again. It stays in the list as Void. This cannot be undone.
 - **Edit**, **Issue** or **Delete** on a draft.
 
 ## Common problems
@@ -45,6 +45,7 @@ From the row menu:
 - **"A refund depends on this credit note. Void or delete that refund on Refunds before voiding it."**
 - **"That cannot be done to this credit note as it now stands. …"** It was issued or voided since the page was loaded.
 - **"This date is in a closed period: the books are locked to …"** See [Accounting settings](/docs/bendahara/settings).
+- **"Only an owner or admin can post, pay or void. Ask one of them to do this."** Members still see **Issue** and **Void** in the row menus, but only an owner or admin can use them.
 
 ## Related
 

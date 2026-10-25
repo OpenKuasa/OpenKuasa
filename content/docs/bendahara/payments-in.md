@@ -27,7 +27,7 @@ The invoices must be posted. See [Invoices](/docs/bendahara/invoices).
 5. Choose the account it was **Paid into**, the **Date received**, the **Method** and, if you have one, a **Reference**.
 6. Click **Record payment**.
 
-If the invoices are in another currency, type the amounts in that currency. The form then asks for **Ringgit received**: what arrived in the account, in RM. It shows about how much the invoices carry for what is paid, and the realised exchange gain or loss. See [Foreign currency](/docs/bendahara/foreign-currency).
+If the invoices are in another currency, type the amounts in that currency. Paid into a ringgit account, the form then asks for **Ringgit received**: what arrived in the account, in RM. Paid into an account in that currency, it asks for the exchange rate instead. It shows about how much the invoices carry for what is paid, and the realised exchange gain or loss. See [Foreign currency](/docs/bendahara/foreign-currency).
 
 ### Void a payment
 

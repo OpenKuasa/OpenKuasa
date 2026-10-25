@@ -19,8 +19,8 @@ The SST Report is a summary of your SST-02 return, to copy into MySST. Nothing i
 
 1. Open **SST Report** under **Compliance** in the Bendahara menu.
 2. In **SST settings**, choose the pair of months under **Periods follow**: the two months of each taxable period, from your Customs (JKDM) registration.
-3. Under **Service tax counted on**, choose **Payment received** or **Invoice issued (approved by Customs)**.
-4. Type your **Service tax no.** and **Sales tax no.** If your company details have an SST number, you can click **Use for service tax** or **Use for sales tax**.
+3. Under **Service tax counted on**, choose **Payment received** or **Invoice issued (approved by Customs)**. **Payment received** is the default, so a workspace that never changes it gets **Not ready yet** for service tax (see below).
+4. Type your **Service tax no.** and **Sales tax no.** If your company details have an SST number and both numbers here are still empty, you can click **Use for service tax** or **Use for sales tax**.
 5. Click **Save**.
 
 Until the taxable period is set, the screen asks you to set it to see your return.
@@ -34,6 +34,16 @@ Until the taxable period is set, the screen asks you to set it to see your retur
 **Payment basis is not ready yet.** If service tax is counted on **Payment received**, the service tax return shows **Not ready yet** in place of Parts B1 and B2 and items 12 to 14, with the note "Not ready yet: service tax on payment basis is counted from payments received, which comes in the next step." Its payable amount in **Periods** also reads "not ready yet".
 
 Part D (exempt items) is worked out once invoice lines can carry an exemption reason. Imported services and debit notes are not counted yet. Items 15 and 16 (late payment penalty) are worked out by Customs in MySST, so they are not shown.
+
+### Before you file
+
+Under the return, Bendahara may show "Not on the form" notes. Check each one before you copy the figures into MySST:
+
+- "… at a rate with no item on this return. Fix their rate or tax type before you file."
+- "… no SST tax type. Set one before you file."
+- "13(a) is below zero because a credit note counted in an earlier return was voided this period."
+- "13(a) includes … of tax on invoices from earlier returns that were voided this period."
+- "item 14 is below zero because this period's deductions are more than its tax. Check with Customs (JKDM) how to claim it before you file."
 
 ### Type in figures from Customs
 

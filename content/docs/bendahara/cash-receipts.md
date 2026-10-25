@@ -25,6 +25,8 @@ Cash Receipts lists every payment in: money against customers' invoices and othe
 6. Choose the account it was **Paid into**, the **Date received**, the **Method** and any **Reference** and **Notes**.
 7. Click **Save draft**. An owner or admin can click **Post receipt** to post it at once.
 
+Income paid into an account in another currency has no draft. It is recorded as received and posted at once with **Record receipt**, at the rate shown, and only an owner or admin can do it. A member is told: "Income on an account in another currency is recorded as received, by an owner or admin."
+
 While a draft receipt for invoices waits, it holds its part of each invoice, so nobody else can receive that part. A draft has no number and counts as nothing received until it is posted.
 
 ### Post, edit, delete or void

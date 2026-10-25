@@ -15,14 +15,14 @@ Refunds holds the money you pay back to customers who are in credit. A customer 
 
 ## Before you start
 
-You need a posted invoice whose customer is in credit, or an issued credit note. See [Credit notes](/docs/bendahara/credit-notes).
+You need a posted invoice whose customer is in credit on it: more paid and credited than the invoice came to. The refund goes against that invoice, or against one of its issued credit notes. A credit note on an invoice that is not yet paid only lowers what is still owed; it leaves nothing to refund. See [Credit notes](/docs/bendahara/credit-notes).
 
 ## Steps
 
 ### Record a refund
 
 1. Open **Refunds** under **Sales** in the Bendahara menu.
-2. Click **New Refund**. You can also choose **Refund** on an invoice's row in Invoices, or on an issued credit note's row in Credit Notes.
+2. Click **New Refund**. You can also choose **Refund** on an invoice's row in Invoices, or on an issued credit note's row in Credit Notes. Both show only while the customer is in credit.
 3. Choose what it is for under **Refund for**: an invoice or a credit note.
 4. Enter the **Amount refunded** and choose a **Reason**: **Order cancelled**, **Damaged goods**, **Wrong item**, **Overpayment** or **Other**.
 5. Choose the account it is **Paid from**, the **Date paid out** (or **Planned date** when paying later), the **Method** and any **Reference** and **Notes**.
@@ -46,6 +46,7 @@ From the row menu:
 - **"This refund can no longer be paid out: its invoice is no longer posted, or its credit note is no longer issued. Delete it."**
 - **"This refund no longer fits in what the customer is in credit, … so it cannot be paid out. Delete it. …"** The credit has gone since the refund was saved, often because a payment was voided.
 - **"This date is in a closed period: the books are locked to …"** See [Accounting settings](/docs/bendahara/settings).
+- **"Only an owner or admin can post, pay or void. Ask one of them to do this."** Members still see **Mark as paid** and **Void** in the row menus, but only an owner or admin can use them.
 
 ## Related
 
