@@ -15,7 +15,7 @@ Anyone reading or changing the code.
 - Next.js 16 (App Router, Turbopack) and React 19. Next.js 16 differs from earlier versions: read `AGENTS.md` before touching its APIs.
 - TypeScript and Tailwind CSS v4, with shadcn/ui components.
 - Supabase (`@supabase/ssr`) for data, sign-in, workspaces and file storage, with row-level security on every table.
-- The Vercel AI SDK with OpenRouter for the assistants and agents.
+- The AI SDK with OpenRouter for the assistants and agents.
 - Vitest for tests.
 
 ## The products and their routes
@@ -70,7 +70,7 @@ Nothing in the app imports `src/screens/registry.ts`: that would put every scree
 
 ## Tests
 
-`pnpm test` runs the tests once. Unit tests do not reach the network: `tests/setup/no-network.ts` refuses any `fetch` to anything but this machine and fails the file that tried. A test is live (it runs against the Supabase project in `.env.local`) when its name contains `.rls.` or `.live.`, or when it imports `tests/setup/supabase.ts`.
+`pnpm test` runs the tests once. Unit tests do not reach the network: `tests/setup/no-network.ts` refuses any `fetch` to anything but this machine and fails the file that tried. A test is live (it runs against a real Supabase project) when its name contains `.rls.` or `.live.`, or when it imports `tests/setup/supabase.ts`. Live tests use the Supabase values exported in your shell first, and `.env.local` only for what the shell does not set. `pnpm test` runs the live tests too whenever those values are set, and they write test workspaces into that project, so point them at a project made for testing.
 
 ## Related
 

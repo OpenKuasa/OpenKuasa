@@ -38,7 +38,7 @@ Appointments use the shared `appointments` table, the same one Jebat uses.
 
 An active lead form has a public page at `/f/<form id>`. It sits outside the signed-in app and is marked `noindex, nofollow`.
 
-A visitor has no rights on `forms`, `form_submissions` or `crm_contacts`. Everything goes through `SECURITY DEFINER` functions with an empty `search_path`: `get_public_form`, `record_form_view` and `submit_public_form`.
+A visitor has no rights on `forms`, `form_submissions` or `crm_contacts`. Everything goes through `SECURITY DEFINER` functions with an empty `search_path`: `get_public_form`, `record_form_view` and `submit_public_form`. Only `get_public_form` is granted to `anon`. `record_form_view` and `submit_public_form` are granted to `service_role` alone, so the server calls them through `serverWriteClient`, after its own per-client limit and honeypot check. Don't grant them back to `anon`.
 
 `submit_public_form`, in one transaction:
 

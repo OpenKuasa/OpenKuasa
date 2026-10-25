@@ -30,7 +30,7 @@ Never put a secret in a file you commit or share. `SUPABASE_SERVICE_ROLE_KEY` an
 | Variable | What it is for |
 | --- | --- |
 | `SUPABASE_SERVICE_ROLE_KEY` | Server-only work: scheduled agents, file clean-ups, reading a workspace's stored keys, and test clean-up. Never expose it to the browser. |
-| `AI_KEYS_ENCRYPTION_SECRET` | 32+ characters. Seals each workspace's OpenRouter and Resend keys, and the sessions behind MCP API keys. Without it a workspace cannot save its own keys. Use the same value on every host: changing it makes stored keys unreadable. |
+| `AI_KEYS_ENCRYPTION_SECRET` | 32+ characters. Seals each workspace's OpenRouter and Resend keys, and the sessions behind MCP API keys. Without it a workspace cannot save its own keys. It also signs the unsubscribe links in Kasturi broadcasts, so broadcasts can't send without it. Use the same value on every host: changing it makes stored keys unreadable and breaks the unsubscribe links in broadcasts already sent. |
 | `AUTH_COOKIE_SECRET` | Optional, 32+ characters. Signs the short-lived cookie a password-reset link leaves. Without it the app uses a key made from `AI_KEYS_ENCRYPTION_SECRET`, or else a random key made when the server starts. |
 | `RATE_LIMIT_PEPPER` | Keys the hashes the rate limiter stores, so they cannot be tested against guesses. |
 
@@ -57,7 +57,7 @@ Never put a secret in a file you commit or share. `SUPABASE_SERVICE_ROLE_KEY` an
 | Variable | What it is for |
 | --- | --- |
 | `MCP_SIGN_IN_ENABLED` | `true` turns on "Sign in with OpenKuasa" for MCP apps. Off by default, so AI tools connect with API keys only. See [Turn on Sign in with OpenKuasa](/docs/developers/mcp-sign-in). |
-| `NEXT_PUBLIC_DEMO_ENABLED` | `1` shows the **Try the demo** button on the login page. |
+| `NEXT_PUBLIC_DEMO_ENABLED` | `1` shows the **Try the demo** button on the login page and lets the demo sign-in run. Unset, the demo sign-in answers "Demo is not available." |
 | `PUBLIC_SITE_URL` | The lasting address written into broadcast unsubscribe links. Without it, the address the request came in on is used. |
 | `OPENKUASA_PREVIEW` | `1` serves the sample-data preview from a production build. Read only when the Supabase values are missing. |
 
@@ -72,7 +72,7 @@ Email broadcasts use each workspace's own Resend key, entered in the app, so the
 ## Common problems
 
 - **Chat says "Your workspace key could not be used on this server. Ask an owner to save it again."** The workspace's key was sealed with a different `AI_KEYS_ENCRYPTION_SECRET`, for example after a move to a new host. Set the old value again. If it is lost, an owner or admin saves the key again on **AI key**.
-- **The scheduled endpoints answer `401`.** `CRON_SECRET` is unset, empty or shorter than 32 characters, or the scheduler sends a different value.
+- **The scheduled endpoints answer `401`.** `CRON_SECRET` is unset, empty or shorter than 32 characters, or the scheduler sends a different value. Or `CRON_ALLOW_LEGACY_KEY` is `false` while the scheduler still sends the service-role key.
 - **Password-reset links are sometimes refused.** You run several instances or a serverless host and set neither `AUTH_COOKIE_SECRET` nor `AI_KEYS_ENCRYPTION_SECRET`. Set one of them.
 
 ## Related

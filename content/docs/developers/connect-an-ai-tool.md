@@ -100,7 +100,7 @@ The tool that used it can no longer connect.
 - **"Give the key a name of 1 to 60 characters."** The key name is empty or too long.
 - **"Enter the 6-digit code from your authenticator app to make a key."** You use two-step sign-in. Type the code from your authenticator app.
 - **"That code did not work. Check your authenticator app and try again."** The code was wrong or expired.
-- **"The demo workspace is read-only. Sign up to make keys and connect AI tools."** You are in the demo workspace.
+- **"The demo workspace is read-only. Sign up to make API keys."** You are in the demo workspace, which shows this in place of the form for making a key.
 - **"Two-step sign-in was turned on after this key was made. Make a new key in Account → Developers."** Make a new key, with your authenticator code.
 - **"That API key or sign-in is not valid any more. Sign in to OpenKuasa again, or make a new API key."** The key was revoked or is wrong. Make a new one.
 - **"You are no longer a member of this workspace, so this connection cannot act in it."** You were removed from the workspace the key belongs to.

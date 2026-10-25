@@ -55,7 +55,7 @@ It asks you to type the project ref before it writes anything. See [Keep the dat
 In the Supabase dashboard, under Authentication:
 
 - **Enable Anonymous sign-ins.** It powers the demo workspace and the tests.
-- **Confirm email** is your choice. With it off, signup signs the person in at once and lands on `/command`. With it on, signup stops at a "check your email" message, and the person confirms and then signs in.
+- **Confirm email** is your choice. With it off, signup signs the person in at once and lands on `/command`. With it on, signup stops at a "check your email" message, and the person confirms and then signs in. Either way, an already-registered address always gets that same "check your email" message, so the form never says which addresses have an account.
 - **Leave hCaptcha off.** The sign-in forms do not send a captcha token yet, so turning hCaptcha on breaks sign-in and signup.
 
 The sign-in email templates are in `supabase/email-templates/`. They are not set by the migrations: paste each file into the matching template in the Supabase dashboard (Authentication → Emails → Templates). Every link in them points at the app's `/auth/confirm` route.
@@ -75,10 +75,11 @@ Some background work runs only when your scheduler calls it. See [Scheduled jobs
 
 ## Common problems
 
-- **Every request answers `503 Service unavailable`.** A production server (`pnpm start`, or any host) refuses to serve when `NEXT_PUBLIC_SUPABASE_URL` or `NEXT_PUBLIC_SUPABASE_ANON_KEY` is missing. The server log names the missing variables. This is on purpose: a deployment that loses a variable fails visibly instead of turning into the sample app.
+- **Every request answers `503 Service unavailable`.** A production server (`pnpm start`, or any host) refuses to serve when `NEXT_PUBLIC_SUPABASE_URL` or `NEXT_PUBLIC_SUPABASE_ANON_KEY` is missing. The server log names the two required variables. This is on purpose: a deployment that loses a variable fails visibly instead of turning into the sample app.
 - **You want the sample-data preview on a production build.** Set `OPENKUASA_PREVIEW=1`. It is read only when the Supabase values are missing, so it does nothing on a configured deployment. Do not set it on the deployment that serves your real data.
 - **Some pages show sample data instead of yours.** The database is missing a table or column that the code needs. Run `pnpm db:migrate` to see which migrations your project lacks.
-- **Rate limits count everyone together.** The app tells clients apart by the `X-Real-IP` header that Railway's edge sets. On a host or proxy that does not set it, every request counts against one shared counter, which has its own, wider limit.
+- **Rate limits count everyone together.** The app tells clients apart by the `X-Real-IP` header that Railway's edge sets. On a host or proxy that does not set it, every request counts against one shared counter, which has its own, wider limit. A proxy that passes on an `X-Real-IP` the client sent is worse: each client can pick its own counter and dodge the per-client limits. Have the proxy set the header itself, from the connection.
+- **MCP limits don't add up across servers.** The per-key limits on the MCP endpoint are counted in each server process's memory, so with several instances each one counts on its own, and a restart starts the count again.
 - **Password-reset links are sometimes refused.** If you run several instances or a serverless host, set `AUTH_COOKIE_SECRET` (32+ characters). See [Environment variables](/docs/developers/environment-variables).
 
 ## Related

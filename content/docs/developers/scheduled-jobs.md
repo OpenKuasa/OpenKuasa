@@ -65,7 +65,7 @@ Some jobs run on `pg_cron` inside Supabase and need no scheduler: the nightly cl
 
 ## Common problems
 
-- **Every call answers `401` with `{"error": "Unauthorized"}`.** `CRON_SECRET` is unset, empty or shorter than 32 characters, or the scheduler sends a different value. A short `CRON_SECRET` accepts nothing.
+- **Every call answers `401` with `{"error": "Unauthorized"}`.** `CRON_SECRET` is unset, empty or shorter than 32 characters, or the scheduler sends a different value. A short `CRON_SECRET` accepts nothing. It also happens when `CRON_ALLOW_LEGACY_KEY` is `false` but the scheduler still sends the service-role key: move the scheduler to `CRON_SECRET` first.
 - **Agents never run.** `AGENTS_ENABLED` is not `true` or `1`, or a workspace has no schedule that is due.
 - **Do not reuse a Supabase key as `CRON_SECRET`.** Use a value made for this alone.
 
