@@ -1,37 +1,8 @@
 import Link from 'next/link';
 import Markdown, { type Components } from 'react-markdown';
-import remarkGfm from 'remark-gfm';
 import type { Guide } from '@/lib/docs/content';
+import { GUIDE_REMARK_PLUGINS, remarkHeadingIds } from '@/lib/docs/markdown';
 import { cn } from '@/lib/utils';
-
-type MdNode = {
-  type: string;
-  depth?: number;
-  children?: unknown[];
-  position?: { start: { column: number; offset?: number } };
-  data?: { hProperties?: Record<string, unknown> };
-};
-
-/**
- * Gives each ## / ### heading the id the loader worked out, in the same order.
- * Same rule as the loader: a non-empty `##`/`###` line that starts at column 0
- * (such a line is always top-level; fenced code is skipped by the parser).
- */
-function headingIds(ids: string[]) {
-  return () => (tree: { children: MdNode[] }, file: { value: unknown }) => {
-    const source = String(file.value);
-    let i = 0;
-    for (const node of tree.children) {
-      if (node.type !== 'heading' || (node.depth !== 2 && node.depth !== 3)) continue;
-      const start = node.position?.start;
-      if (!start || start.column !== 1 || source[start.offset ?? -1] !== '#') continue;
-      if (!node.children?.length) continue;
-      const id = ids[i++];
-      if (!id) continue;
-      node.data = { ...node.data, hProperties: { ...node.data?.hProperties, id } };
-    }
-  };
-}
 
 const HEADING = 'scroll-mt-24 font-semibold tracking-tight text-mk-fg';
 
@@ -126,14 +97,14 @@ const components: Components = {
   ),
 };
 
-/** A guide's Markdown. Raw HTML in the source is not rendered. */
-export function GuideBody({ guide }: { guide: Pick<Guide, 'body' | 'headings'> }) {
+/**
+ * A guide's Markdown. Raw HTML in the source is not rendered. Heading ids come from the same parse and rule the
+ * loader uses for `guide.headings` (src/lib/docs/markdown.ts), so the two always agree.
+ */
+export function GuideBody({ guide }: { guide: Pick<Guide, 'body'> }) {
   return (
     <div className="text-[1.0625rem] break-words text-mk-fg/85">
-      <Markdown
-        remarkPlugins={[remarkGfm, headingIds(guide.headings.map((h) => h.id))]}
-        components={components}
-      >
+      <Markdown remarkPlugins={[...GUIDE_REMARK_PLUGINS, remarkHeadingIds]} components={components}>
         {guide.body}
       </Markdown>
     </div>

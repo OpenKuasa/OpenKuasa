@@ -31,11 +31,16 @@ describe('which paths the proxy runs on', () => {
   const runs = (path: string, headers?: Record<string, string>) =>
     unstable_doesMiddlewareMatch({ config, url: `https://openkuasa.com${path}`, headers });
 
-  /** Every image the public folder serves, as its URL path. */
+  /**
+   * Every image the public folder serves, as its URL path, except docs screenshots. Those go through the proxy
+   * on purpose: there are many, and the matcher must stay a literal, so `/docs-media/` never appears in it.
+   */
   const publicImages = (dir = 'public', prefix = ''): string[] =>
     readdirSync(dir, { withFileTypes: true }).flatMap((entry) =>
       entry.isDirectory()
-        ? publicImages(join(dir, entry.name), `${prefix}/${entry.name}`)
+        ? `${prefix}/${entry.name}` === '/docs-media'
+          ? []
+          : publicImages(join(dir, entry.name), `${prefix}/${entry.name}`)
         : /\.(?:svg|png|jpe?g|gif|webp|ico)$/i.test(entry.name)
           ? [`${prefix}/${entry.name}`]
           : [],
@@ -62,6 +67,12 @@ describe('which paths the proxy runs on', () => {
       expect(runs(path), path).toBe(true);
       expect(runs(path, { 'next-action': 'abc123' }), `${path} with Next-Action`).toBe(true);
     }
+  });
+
+  test('docs screenshots go through the proxy and are not named in the matcher', () => {
+    expect(runs('/docs-media/x/y.png')).toBe(true);
+    expect(publicImages().filter((path) => path.startsWith('/docs-media/'))).toEqual([]);
+    expect(config.matcher[0]).not.toContain('docs-media');
   });
 
   test('pages and APIs go through the proxy', () => {

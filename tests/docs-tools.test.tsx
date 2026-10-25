@@ -8,6 +8,7 @@ import {
   KASTURI_SYSTEM,
   LEKIR_SYSTEM,
   LEKIU_SYSTEM,
+  SPECIALIST_DOCS_HINT,
   TUAH_SYSTEM,
   subAgentSystem,
   tuahSystem,
@@ -66,11 +67,18 @@ describe('the docs hint', () => {
       tuahSystem(screen),
       tuahTeamSystem(team, true, null),
       tuahTeamSystem(team, false, screen),
-      subAgentSystem('reach', true),
-      subAgentSystem('finance', false),
     ]) {
       expect(s).toContain(DOCS_HINT);
       expect(s).toContain('searchDocs');
+    }
+  });
+
+  test('specialists put the guide path in their report for Tuah to pass on', () => {
+    for (const s of [subAgentSystem('reach', true), subAgentSystem('finance', false)]) {
+      expect(s).toContain(SPECIALIST_DOCS_HINT);
+      expect(s).toContain('include its /docs/ path in your report for Tuah to pass on');
+      expect(s).toContain('searchDocs');
+      expect(s).not.toContain(DOCS_HINT);
     }
   });
 

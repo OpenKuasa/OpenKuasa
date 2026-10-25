@@ -16,30 +16,16 @@ export function buildDocsIndex(): DocsIndexEntry[] {
 export type DocsPassage = { title: string; url: string; heading: string | null; text: string };
 
 const MAX_TEXT = 1200;
-const H2 = /^##\s+(.+?)\s*#*\s*$/;
 
 type Section = { heading: string | null; id: string | null; text: string };
 
-/** Split a guide body at its ## headings; ids come from guide.headings. */
+/** Split a guide body at its ## headings, taken from guide.headings (the parsed Markdown). */
 function splitSections(guide: Guide): Section[] {
-  const h2Ids = guide.headings.filter((h) => h.depth === 2).map((h) => h.id);
-  const sections: Section[] = [{ heading: null, id: null, text: '' }];
-  let fence: string | null = null;
-  let n = 0;
-  for (const line of guide.body.split('\n')) {
-    const marker = /^\s*(`{3,}|~{3,})/.exec(line)?.[1];
-    if (marker) {
-      if (fence === null) fence = marker[0];
-      else if (marker[0] === fence) fence = null;
-    } else if (!fence) {
-      const m = H2.exec(line);
-      if (m) {
-        sections.push({ heading: m[1], id: h2Ids[n++] ?? null, text: '' });
-        continue;
-      }
-    }
-    sections[sections.length - 1].text += `${line}\n`;
-  }
+  const h2s = guide.headings.filter((h) => h.depth === 2);
+  const sections: Section[] = [{ heading: null, id: null, text: guide.body.slice(0, h2s[0]?.start ?? guide.body.length) }];
+  h2s.forEach((h, i) => {
+    sections.push({ heading: h.text, id: h.id, text: guide.body.slice(h.end, h2s[i + 1]?.start ?? guide.body.length) });
+  });
   return sections.map((s) => ({ ...s, text: s.text.trim() })).filter((s) => s.text || s.heading);
 }
 

@@ -30,10 +30,6 @@ test('guide headings render with the ids search links to', async () => {
     createElement(GuideBody, {
       guide: {
         body: 'Intro\n\n## Same\n\n```\n## not a heading\n```\n\n### Same\n\n<b>raw</b> [out](https://example.com)\n\n![A chart](/x.png)',
-        headings: [
-          { depth: 2, text: 'Same', id: 'same' },
-          { depth: 3, text: 'Same', id: 'same-2' },
-        ],
       },
     }),
   );
@@ -94,5 +90,6 @@ test('the loader and GuideBody agree on what counts as a heading', async () => {
   const html = renderToStaticMarkup(createElement(GuideBody, { guide }));
   const ids = [...html.matchAll(/<h[23] id="([^"]+)"/g)].map((m) => m[1]);
   expect(ids).toEqual(guide.headings.map((h) => h.id));
-  expect(ids).toEqual(['real-code-bold', 'sub']);
+  // Parsed Markdown: an indented `##` is still a heading; one inside a list or empty is not.
+  expect(ids).toEqual(['indented-one', 'real-code-bold', 'sub']);
 });

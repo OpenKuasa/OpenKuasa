@@ -3,7 +3,6 @@ title: Get the app
 description: Put OpenKuasa on your phone or computer, with its own icon and window.
 order: 1
 ask: How do I install OpenKuasa as an app?
-screen: /
 ---
 You can install OpenKuasa from the website. It opens in its own window with its own icon. You do not need an app store or a download.
 
