@@ -3,7 +3,8 @@ import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
 import { liveScreenPaths } from '@/lib/docs/rules';
 import { DOC_SECTIONS } from '@/lib/docs/sections';
-import { isDeniedClick, isLocalBase } from '../scripts/docs-shots-lib.mjs';
+import { ASSISTANT } from '@/config/nav';
+import { HIDE_ASSISTANT_FAB_CSS, isDeniedClick, isLocalBase, shotContextOptions } from '../scripts/docs-shots-lib.mjs';
 
 const DIR = join('content', 'docs', 'shots');
 const sections = new Set<string>(DOC_SECTIONS.map((s) => s.key));
@@ -59,5 +60,21 @@ describe('docs screenshot config', () => {
     for (const n of ['Address', 'Payroll', 'Payslips', 'Postcode', 'Savings', 'Sender details', 'Creative Bank', 'Applications']) {
       expect(isDeniedClick(n), n).toBe(false);
     }
+  });
+
+  test('hides the floating assistant button by the label it is drawn with', () => {
+    expect(HIDE_ASSISTANT_FAB_CSS).toContain(`button[aria-label="Ask ${ASSISTANT.name}"]`);
+    expect(HIDE_ASSISTANT_FAB_CSS).toContain('display: none !important');
+    const fab = readFileSync(join('src', 'components', 'app', 'assistant-fab.tsx'), 'utf8');
+    expect(fab).toContain('aria-label={`Ask ${ASSISTANT.name}`}');
+  });
+
+  test('each shot gets its own viewport, and demo shots reuse the one saved sign-in', () => {
+    const state = { cookies: [{ name: 'sb', value: 'x' }], origins: [] };
+    const demo = shotContextOptions('demo', { width: 390, height: 844 }, state);
+    expect(demo).toEqual({ viewport: { width: 390, height: 844 }, colorScheme: 'light', deviceScaleFactor: 1, storageState: state });
+    const preview = shotContextOptions('preview', { width: 1280, height: 800 }, state);
+    expect(preview).toEqual({ viewport: { width: 1280, height: 800 }, colorScheme: 'light', deviceScaleFactor: 1 });
+    expect(() => shotContextOptions('demo', { width: 1280, height: 800 }, null)).toThrow();
   });
 });

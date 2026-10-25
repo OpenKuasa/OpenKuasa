@@ -35,3 +35,14 @@ export function isDeniedClick(name) {
     .split(/[^a-z]+/);
   return words.some((w) => DENIED_WORD.test(w));
 }
+
+/** Hides the floating "Ask Sari" button, which would cover part of every shot. Matches assistant-fab.tsx. */
+export const HIDE_ASSISTANT_FAB_CSS = 'button[aria-label="Ask Taming Sari"] { display: none !important; }';
+
+/** Browser context options for one shot: its own viewport, plus the saved demo sign-in for a demo shot. */
+export function shotContextOptions(as, viewport, demoState) {
+  const options = { viewport, colorScheme: 'light', deviceScaleFactor: 1 };
+  if (as !== 'demo') return options;
+  if (!demoState) throw new Error('A demo shot needs the saved demo sign-in.');
+  return { ...options, storageState: demoState };
+}

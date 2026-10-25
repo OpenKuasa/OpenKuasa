@@ -4,7 +4,7 @@
 import { createRequire } from 'node:module';
 import { mkdirSync, readFileSync, readdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { isDeniedClick, isLocalBase } from './docs-shots-lib.mjs';
+import { HIDE_ASSISTANT_FAB_CSS, isDeniedClick, isLocalBase, shotContextOptions } from './docs-shots-lib.mjs';
 
 const CHROME = process.env.CHROME_PATH ?? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const base = (process.env.DOCS_SHOTS_BASE ?? 'http://localhost:3000').replace(/\/$/, '');
@@ -40,31 +40,46 @@ if (shots.length === 0) {
 const browser = await chromium.launch({ executablePath: CHROME, headless: true });
 let failed = 0;
 
-/** One signed-in context for the shared demo workspace, one plain one for preview mode. */
-async function newContext(as, viewport) {
-  const context = await browser.newContext({ viewport, colorScheme: 'light', deviceScaleFactor: 1 });
-  if (as === 'demo') {
+/** Signs in to the demo once (each sign-in makes a new demo user) and returns the saved session. */
+async function signInToDemo() {
+  const context = await browser.newContext({ colorScheme: 'light' });
+  try {
     const page = await context.newPage();
     await page.goto(`${base}/login`, { waitUntil: 'networkidle' });
     await page.getByRole('button', { name: 'Try the demo', exact: true }).click();
     await page.waitForURL((u) => !u.pathname.startsWith('/login'), { timeout: 60_000 });
-    await page.close();
+    return await context.storageState();
+  } finally {
+    await context.close();
   }
-  return context;
 }
 
+let demoState = null;
+if (shots.some((s) => s.as === 'demo')) {
+  try {
+    demoState = await signInToDemo();
+  } catch (err) {
+    console.error(`Demo sign-in failed: ${err instanceof Error ? err.message.split('\n')[0] : err}`);
+    await browser.close();
+    process.exit(1);
+  }
+}
+
+// Each shot gets a fresh context with its own viewport; demo shots share the one saved sign-in.
 for (const s of shots) {
   const [w, h] = s.viewport ?? [1280, 800];
   const viewport = { width: Math.min(w, 1280), height: h };
   let context;
   try {
-    context = await newContext(s.as, viewport);
+    context = await browser.newContext(shotContextOptions(s.as, viewport, demoState));
     const page = await context.newPage();
     await page.goto(base + s.path, { waitUntil: 'networkidle' });
     for (const step of s.steps ?? []) {
       if (step.click !== undefined) await page.getByRole('button', { name: step.click, exact: true }).click();
       if (step.wait !== undefined) await page.waitForTimeout(step.wait);
     }
+    // After the steps, since a step may click the button to open the panel.
+    await page.addStyleTag({ content: HIDE_ASSISTANT_FAB_CSS });
     await page.waitForTimeout(500);
     const out = join('public/docs-media', s.file);
     mkdirSync(dirname(out), { recursive: true });
