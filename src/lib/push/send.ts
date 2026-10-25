@@ -83,12 +83,16 @@ export async function sendPending(
       tag: row.notification_id,
     };
     let outcome: Outcome;
+    let cutOffHit = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
     try {
       // Race the send against the remaining budget so one that never settles cannot hold the run open.
       // A send that was started and cut off is recorded as one failed attempt (push_result 'failed').
       const cutOff = new Promise<never>((_, reject) => {
-        timer = setTimeout(() => reject(new Error('run deadline')), remaining);
+        timer = setTimeout(() => {
+          cutOffHit = true;
+          reject(new Error('run deadline'));
+        }, remaining);
       });
       const sent = await Promise.race([
         sender({ endpoint: row.endpoint, keys: { p256dh: row.p256dh, auth: row.auth } }, payload),
@@ -109,6 +113,11 @@ export async function sendPending(
 
     const recorded = await db.rpc('push_result', { p_outbox: row.outbox_id, p_outcome: outcome });
     if (recorded.error) console.error(`[push] could not record item ${row.outbox_id}:`, recorded.error.code);
+    if (cutOffHit) {
+      // The budget is spent: stop here instead of starting a send with a near-zero budget.
+      result.deferred += rows.slice(i + 1).filter((r) => !gone.has(r.subscription_id)).length;
+      break;
+    }
   }
   return result;
 }
