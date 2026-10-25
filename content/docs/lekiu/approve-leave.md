@@ -25,7 +25,7 @@ _Shown from the sample workspace, where editing is switched off._
 
 1. Open **Lekiu**, then **Leave** under **Approvals**.
 2. Find the request in **Leave requests**. A pending request has a live dot and the **Pending** status. If it asks for more days than the balance, it shows **Over balance by** and the number of days.
-3. Click **Approve**. Or click **Reject**, type a **Note (optional)** and click **Confirm reject**. The employee sees the note on their **Leave** screen.
+3. Click **Approve**. Or click **Reject**, type a note in the note box if you want, and click **Confirm reject**. The employee sees the note on their **Leave** screen.
 
 ### Add leave for an employee
 

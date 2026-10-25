@@ -21,7 +21,7 @@ An admin cannot decide their own overtime. The workspace owner can.
 
 1. Open **Lekiu**, then **Overtime** under **Approvals**.
 2. Find the claim in **Overtime claims**. The **Details** column shows the kind of day and the rate. "Set a salary to work this out" means no salary is on file, so there is no amount yet.
-3. Click **Approve**. Or click **Reject**, type a **Note (optional)** and click **Confirm reject**.
+3. Click **Approve**. Or click **Reject**, type a note in the note box if you want, and click **Confirm reject**.
 
 ### Add overtime for an employee
 

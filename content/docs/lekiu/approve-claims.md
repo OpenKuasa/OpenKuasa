@@ -25,7 +25,7 @@ _Shown from the sample workspace, where editing is switched off._
 
 1. Open **Lekiu**, then **Financial Claims** under **Approvals**.
 2. Find the claim in **Expense claims**. The **Details** column shows the receipt, if there is one, and how much was already approved or paid that year in the same category.
-3. Click **Approve**. Or click **Reject**, type a **Note (optional)** and click **Confirm reject**.
+3. Click **Approve**. Or click **Reject**, type a note in the note box if you want, and click **Confirm reject**.
 
 ### Mark a claim as paid
 

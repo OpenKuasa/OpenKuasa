@@ -28,7 +28,6 @@ Each card saves only its own part. You see **Saved.** when it has gone through.
 
 - **"Connecting Meta is coming soon."** The **Connected account** card shows **Meta Business** as **Not connected**. Jebat does not run ads on Meta yet, so these settings are saved for your workspace but no ads are run from them yet.
 - **The Health check card says "Coming soon".** The setup checklist is not built for your own workspace yet. Only the demo shows a sample.
-- **"You do not have permission to make changes here."** Viewers cannot save settings.
 
 ## Related
 

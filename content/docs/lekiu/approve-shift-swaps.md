@@ -20,7 +20,7 @@ Shift swaps are not part of the demo workspace.
 
 1. Open **Lekiu**, then **Shift Swaps** under **Approvals**.
 2. Look at **Waiting for a decision**. These are swaps both people have agreed to. Each row shows **Asked by**, **Gives**, **Swaps with** and **Takes**.
-3. Click **Approve**. Or click **Reject**, type a **Note (optional)** and click **Confirm reject**.
+3. Click **Approve**. Or click **Reject**, type a note in the note box if you want, and click **Confirm reject**.
 
 **Waiting for the colleague** lists swaps the colleague has not answered yet. There is nothing to decide there. **Recent** lists swaps that were decided, declined, cancelled or expired.
 

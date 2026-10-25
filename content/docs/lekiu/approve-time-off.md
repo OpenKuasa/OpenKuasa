@@ -19,7 +19,7 @@ An admin cannot decide their own request. The workspace owner can.
 
 1. Open **Lekiu**, then **Time-Off** under **Approvals**.
 2. Find the request in **Time-off requests**.
-3. Click **Approve**. Or click **Reject**, type a **Note (optional)** and click **Confirm reject**.
+3. Click **Approve**. Or click **Reject**, type a note in the note box if you want, and click **Confirm reject**.
 4. To cancel a request (owners and admins), click **Cancel**, then **Confirm**.
 
 There is no "add for someone" button on this screen.
