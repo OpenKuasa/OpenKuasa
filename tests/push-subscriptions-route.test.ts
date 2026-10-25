@@ -2,7 +2,11 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const getUser = vi.fn();
 const rpc = vi.fn();
-const fake = { auth: { getUser }, rpc };
+const maybeSingle = vi.fn();
+const eq = vi.fn(() => ({ maybeSingle }));
+const select = vi.fn(() => ({ eq }));
+const from = vi.fn(() => ({ select }));
+const fake = { auth: { getUser }, rpc, from };
 
 vi.mock('@/lib/supabase/server', () => ({ createClient: vi.fn(async () => fake) }));
 vi.mock('@/lib/auth/viewer', () => ({ hasSupabaseEnv: vi.fn(() => true) }));
@@ -27,6 +31,7 @@ beforeEach(() => {
   getUser.mockResolvedValue({ data: { user: { id: 'u1', is_anonymous: false } } });
   rpc.mockResolvedValue({ data: 'sub-1', error: null });
   vi.mocked(pushSubscribeLimited).mockResolvedValue(null);
+  maybeSingle.mockResolvedValue({ data: { device_label: 'Chrome on Mac' }, error: null });
 });
 
 describe('POST /api/push/subscriptions', () => {
@@ -43,6 +48,29 @@ describe('POST /api/push/subscriptions', () => {
   it('sends a null label when none is given', async () => {
     await POST(req('POST', { endpoint: good.endpoint, keys: good.keys }));
     expect(rpc).toHaveBeenCalledWith('push_subscribe', expect.objectContaining({ p_label: null }));
+  });
+
+  it('on a renewal, removes the old address first and keeps its device name', async () => {
+    const OLD = 'https://fcm.googleapis.com/fcm/send/old';
+    const res = await POST(req('POST', { endpoint: ENDPOINT, keys: good.keys, replaces: OLD }));
+    expect(res.status).toBe(200);
+    expect(eq).toHaveBeenCalledWith('endpoint', OLD);
+    expect(rpc.mock.calls.map((c) => c[0])).toEqual(['push_unsubscribe', 'push_subscribe']);
+    expect(rpc).toHaveBeenCalledWith('push_unsubscribe', { p_endpoint: OLD });
+    expect(rpc).toHaveBeenCalledWith('push_subscribe', expect.objectContaining({ p_endpoint: ENDPOINT, p_label: 'Chrome on Mac' }));
+  });
+
+  it('on a renewal, still saves the new address when the old one is not found', async () => {
+    maybeSingle.mockResolvedValue({ data: null, error: null });
+    const res = await POST(req('POST', { endpoint: ENDPOINT, keys: good.keys, replaces: 'https://fcm.googleapis.com/fcm/send/gone' }));
+    expect(res.status).toBe(200);
+    expect(rpc).toHaveBeenCalledWith('push_subscribe', expect.objectContaining({ p_label: null }));
+  });
+
+  it('ignores replaces when it is the same address', async () => {
+    await POST(req('POST', { ...good, replaces: ENDPOINT }));
+    expect(rpc).not.toHaveBeenCalledWith('push_unsubscribe', expect.anything());
+    expect(from).not.toHaveBeenCalled();
   });
 
   it('refuses a request from another site, or one that is not JSON', async () => {

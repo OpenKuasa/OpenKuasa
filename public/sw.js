@@ -98,6 +98,39 @@ self.addEventListener('notificationclick', (event) => {
   );
 });
 
+/*
+ * The browser can renew a device's push address on its own; the old one then stops
+ * working. Save the new one in its place, keeping the device's name. The request carries
+ * the person's sign-in like any page on the site; signed out, nothing is saved and push
+ * can be turned on again from Account → Notifications.
+ */
+self.addEventListener('pushsubscriptionchange', (event) => {
+  event.waitUntil(
+    (async () => {
+      const old = event.oldSubscription || null;
+      let sub = event.newSubscription || (await self.registration.pushManager.getSubscription());
+      if (!sub) {
+        const key = old && old.options && old.options.applicationServerKey;
+        if (!key) return;
+        sub = await self.registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: key });
+      }
+      if (old && old.endpoint === sub.endpoint) return;
+      const keys = (sub.toJSON() || {}).keys || {};
+      if (!keys.p256dh || !keys.auth) return;
+      await fetch('/api/push/subscriptions', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          endpoint: sub.endpoint,
+          keys: { p256dh: keys.p256dh, auth: keys.auth },
+          replaces: old ? old.endpoint : null,
+        }),
+      });
+    })().catch(() => {}),
+  );
+});
+
 self.addEventListener('fetch', (event) => {
   const request = event.request;
   if (request.mode !== 'navigate' || request.method !== 'GET') return;

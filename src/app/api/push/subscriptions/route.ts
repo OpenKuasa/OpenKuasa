@@ -6,7 +6,10 @@ import { createClient } from '@/lib/supabase/server';
 export const dynamic = 'force-dynamic';
 
 /**
- * POST   /api/push/subscriptions  saves this browser's push subscription for the signed-in person
+ * POST   /api/push/subscriptions  saves this browser's push subscription for the signed-in person.
+ *                                  With `replaces` (sent by the service worker when the browser
+ *                                  renews its push address), the old address is removed first and
+ *                                  its device name carried over.
  * DELETE /api/push/subscriptions  removes it
  *
  * Both take JSON from this site only, and refuse the signed out and the demo
@@ -21,6 +24,7 @@ const subscribeSchema = z.object({
   endpoint,
   keys: z.object({ p256dh: key, auth: key }),
   label: z.string().trim().max(80).nullish(),
+  replaces: z.string().min(1).max(1000).nullish(),
 });
 
 const unsubscribeSchema = z.object({ endpoint: z.string().min(1).max(1000) });
@@ -79,11 +83,28 @@ export async function POST(request: Request) {
   const limited = await pushSubscribeLimited(g.userId);
   if (limited) return json(429, { error: limited });
 
+  let label = body.data.label || null;
+  const replaces = body.data.replaces;
+  if (replaces && replaces !== body.data.endpoint) {
+    // Row-level security keeps both the read and the removal to the person's own devices.
+    // Removing first frees its place, so a renewal never hits the 10-device limit.
+    if (!label) {
+      const { data: old } = await g.supabase
+        .from('push_subscriptions')
+        .select('device_label')
+        .eq('endpoint', replaces)
+        .maybeSingle();
+      if (typeof old?.device_label === 'string' && old.device_label) label = old.device_label;
+    }
+    const removed = await g.supabase.rpc('push_unsubscribe', { p_endpoint: replaces });
+    if (removed.error) console.error('[push] could not remove the replaced subscription:', removed.error.code);
+  }
+
   const { error } = await g.supabase.rpc('push_subscribe', {
     p_endpoint: body.data.endpoint,
     p_p256dh: body.data.keys.p256dh,
     p_auth: body.data.keys.auth,
-    p_label: body.data.label || null,
+    p_label: label,
   });
   if (error) return failed(error);
   return json(200, { ok: true });

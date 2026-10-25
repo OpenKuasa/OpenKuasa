@@ -17,11 +17,16 @@ let listeners: Record<string, Listener>;
 let shown: { title: string; options: Record<string, unknown> }[];
 let windows: FakeClient[];
 let opened: string[];
+let posted: { url: string; init: { method: string; credentials: string; body: string } }[];
+let current: unknown;
+let subscribed: unknown[];
 
 function load() {
   listeners = {};
   shown = [];
   opened = [];
+  posted = [];
+  subscribed = [];
   const self = {
     location: new URL(`${ORIGIN}/sw.js`),
     addEventListener: (type: string, fn: Listener) => {
@@ -30,6 +35,13 @@ function load() {
     registration: {
       showNotification: async (title: string, options: Record<string, unknown>) => {
         shown.push({ title, options });
+      },
+      pushManager: {
+        getSubscription: async () => current,
+        subscribe: async (opts: unknown) => {
+          subscribed.push(opts);
+          return fakeSub('https://fcm.googleapis.com/fcm/send/fresh');
+        },
       },
     },
     clients: {
@@ -42,7 +54,23 @@ function load() {
     },
     skipWaiting: () => {},
   };
-  runInNewContext(source, { self, URL, Response, fetch: () => Promise.reject(new Error('no network')) });
+  const fetch = async (url: string, init: { method: string; credentials: string; body: string }) => {
+    posted.push({ url, init });
+    return new Response('{}');
+  };
+  runInNewContext(source, { self, URL, Response, fetch });
+}
+
+const fakeSub = (endpoint: string, key: unknown = 'server-key') => ({
+  endpoint,
+  options: { applicationServerKey: key },
+  toJSON: () => ({ endpoint, keys: { p256dh: 'p-' + endpoint.slice(-3), auth: 'a' } }),
+});
+
+async function renew(event: Record<string, unknown>) {
+  const pending: Promise<unknown>[] = [];
+  listeners.pushsubscriptionchange({ ...event, waitUntil: (p: Promise<unknown>) => pending.push(p) });
+  await Promise.all(pending);
 }
 
 async function push(data: unknown) {
@@ -76,6 +104,7 @@ const client = (url: string, navigateOk = true): FakeClient => ({
 
 beforeEach(() => {
   windows = [];
+  current = null;
   load();
 });
 
@@ -140,5 +169,37 @@ describe('the service worker', () => {
     await click('https://evil.example/');
     await click('//evil.example/');
     expect(opened).toEqual([`${ORIGIN}/command`, `${ORIGIN}/command`]);
+  });
+
+  it('when the browser renews its push address, saves the new one in place of the old', async () => {
+    const OLD = 'https://fcm.googleapis.com/fcm/send/old';
+    const NEW = 'https://fcm.googleapis.com/fcm/send/new';
+    await renew({ oldSubscription: fakeSub(OLD), newSubscription: fakeSub(NEW) });
+    expect(posted).toHaveLength(1);
+    expect(posted[0].url).toBe('/api/push/subscriptions');
+    expect(posted[0].init.method).toBe('POST');
+    expect(posted[0].init.credentials).toBe('same-origin');
+    expect(JSON.parse(posted[0].init.body)).toEqual({ endpoint: NEW, keys: { p256dh: 'p-new', auth: 'a' }, replaces: OLD });
+  });
+
+  it('re-subscribes with the old server key when the browser gives no new address', async () => {
+    const OLD = 'https://fcm.googleapis.com/fcm/send/old';
+    await renew({ oldSubscription: fakeSub(OLD, 'the-key'), newSubscription: null });
+    expect(subscribed).toEqual([{ userVisibleOnly: true, applicationServerKey: 'the-key' }]);
+    expect(JSON.parse(posted[0].init.body)).toMatchObject({ endpoint: 'https://fcm.googleapis.com/fcm/send/fresh', replaces: OLD });
+  });
+
+  it('uses the subscription the browser already has, with no old address to replace', async () => {
+    current = fakeSub('https://fcm.googleapis.com/fcm/send/cur');
+    await renew({});
+    expect(subscribed).toEqual([]);
+    expect(JSON.parse(posted[0].init.body)).toMatchObject({ endpoint: 'https://fcm.googleapis.com/fcm/send/cur', replaces: null });
+  });
+
+  it('does nothing when there is nothing to save', async () => {
+    await renew({});
+    const same = fakeSub('https://fcm.googleapis.com/fcm/send/same');
+    await renew({ oldSubscription: same, newSubscription: same });
+    expect(posted).toEqual([]);
   });
 });
