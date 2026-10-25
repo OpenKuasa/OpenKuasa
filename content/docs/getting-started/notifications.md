@@ -23,7 +23,7 @@ Every signed-in person chooses their own notifications, whatever their role. In 
 ### Choose what you get
 
 1. Open [Notifications](/account/notifications). You can also find it in the account side menu under **Account**.
-2. Under **Delivery channels**, turn **In-app** on or off. With **In-app** off, nothing new reaches your bell, except security alerts.
+2. Under **Delivery channels**, turn **In-app** or **Push** on or off. With **In-app** off, nothing new reaches your bell, except security alerts.
 3. Under **What you get notified about**, tick or untick the **In-app** box for each event:
    - **New leads**
    - **Deal stage changes**
@@ -44,10 +44,27 @@ You see **Notification preferences saved.**
 
 _Shown from the sample workspace, where editing is switched off._
 
+### Get push on your phone or computer
+
+Push shows a notification on your device even when OpenKuasa isn't open. Turn it on separately on each phone or computer you use.
+
+1. Open [Notifications](/account/notifications) on the device you want push on.
+2. Under **Push on this device**, click **Turn on**.
+3. When your browser asks, allow notifications.
+
+You see **Push is on for this device.** The **Push** channel under **Delivery channels** turns on too. Your device is listed under **Your devices**.
+
+Push follows the **Push** ticks under **What you get notified about**. **Requests from your team** has push ticked to start with, so requests waiting for your approval reach you right away.
+
+On an iPhone or iPad, add OpenKuasa to your Home Screen first (**Share** → **Add to Home Screen**), open it from there, then turn push on.
+
+To stop push on a device, click **Turn off** on that device, or click **Remove** next to it under **Your devices**.
+
 ## What works today
 
 - **In-app** notifications are live and follow your choices.
-- **Email** and **Push** are not connected yet. You can tick them, and the page saves your choice for later, but nothing is sent by email or push.
+- **Push** works on each device where you turn it on. It can take up to 5 minutes to arrive.
+- **Email** is not connected yet. You can tick it, and the page saves your choice for later, but nothing is sent by email.
 - **Security alerts are always on and can't be turned off.** These include a changed password and two-step sign-in being turned on or off.
 
 ## Not working yet
@@ -55,6 +72,11 @@ _Shown from the sample workspace, where editing is switched off._
 - **Quiet hours** (**Pause notifications overnight**, **From**, **To**) are marked **Coming soon**. Your choice is saved for later, but it does not hold or pause any notifications yet. Times are shown in the timezone from your profile.
 
 ## Common problems
+
+- **Push isn't set up on this server.** The people who run your OpenKuasa haven't set push up yet.
+- **Add OpenKuasa to your Home Screen first.** On an iPhone or iPad, push only works from the Home Screen app.
+- **Notifications are blocked for this site.** Allow notifications for OpenKuasa in your browser settings, then click **Turn on** again.
+- **You can have push on up to 10 devices.** Remove a device you no longer use, then try again.
 
 - **Please choose valid quiet hours.** Pick a time from each list.
 - **The demo workspace is read-only. Sign up to save changes.** Demo choices cannot be changed.

@@ -1,9 +1,15 @@
 import { NotificationsForm } from '@/components/account/notifications-form';
 import { getProfile } from '@/lib/account/data';
-import { getViewer } from '@/lib/auth/viewer';
+import { getViewer, hasSupabaseEnv } from '@/lib/auth/viewer';
+import { listPushDevices } from '@/lib/push/devices';
+import { createClient } from '@/lib/supabase/server';
 
 export default async function NotificationsPage() {
   const [viewer, profile] = await Promise.all([getViewer(), getProfile()]);
+  const devices =
+    hasSupabaseEnv() && !viewer.isDemo
+      ? await listPushDevices(await createClient(), profile.timezone)
+      : [];
 
   return (
     <div className="mx-auto w-full max-w-3xl px-6 py-8">
@@ -19,6 +25,8 @@ export default async function NotificationsPage() {
         email={profile.email}
         timezone={profile.timezone}
         readOnly={viewer.isDemo}
+        pushKey={process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY || null}
+        devices={devices}
       />
     </div>
   );

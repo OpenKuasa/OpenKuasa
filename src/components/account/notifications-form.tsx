@@ -1,5 +1,6 @@
 'use client';
 
+import { useState } from 'react';
 import { AppWindow, Mail, Smartphone, type LucideIcon } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardAction, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -22,6 +23,7 @@ import {
   type NotifyChannel,
 } from '@/config/account';
 import { updateNotificationsAction } from '@/app/account/actions';
+import { PushDeviceCard, type PushDevice } from './push-device-card';
 import { ReadOnlyNotice, SaveBar, useSettingsForm } from './settings-form';
 
 const CHANNEL_LABELS: Record<NotifyChannel, string> = {
@@ -35,15 +37,22 @@ export function NotificationsForm({
   email,
   timezone,
   readOnly,
+  pushKey,
+  devices,
 }: {
   prefs: NotificationPrefs;
   email: string | null;
   timezone: string;
   readOnly: boolean;
+  /** The server's VAPID public key, or null when push isn't set up. */
+  pushKey: string | null;
+  devices: PushDevice[];
 }) {
   const { state, onSubmit, pending } = useSettingsForm(
     updateNotificationsAction,
   );
+  // Turning push on for this device also switches this channel on.
+  const [pushChannel, setPushChannel] = useState(prefs.channels.push);
 
   const channels: { id: NotifyChannel; icon: LucideIcon; help: string }[] = [
     {
@@ -51,7 +60,11 @@ export function NotificationsForm({
       icon: Mail,
       help: email ? `Sent to ${email}` : 'Sent to your sign-in email',
     },
-    { id: 'push', icon: Smartphone, help: 'Mobile push notifications' },
+    {
+      id: 'push',
+      icon: Smartphone,
+      help: 'On the phones and computers where you turn push on below',
+    },
     {
       id: 'inapp',
       icon: AppWindow,
@@ -68,9 +81,8 @@ export function NotificationsForm({
         </ReadOnlyNotice>
       ) : (
         <ReadOnlyNotice>
-          In-app notifications are live and follow these choices. Email and
-          push delivery are not connected yet, so those columns are saved for
-          later.
+          In-app and push notifications are live and follow these choices.
+          Email isn&apos;t connected yet, so that column is saved for later.
         </ReadOnlyNotice>
       )}
 
@@ -97,7 +109,9 @@ export function NotificationsForm({
                 </div>
                 <Switch
                   name={`channel.${c.id}`}
-                  defaultChecked={prefs.channels[c.id]}
+                  {...(c.id === 'push'
+                    ? { checked: pushChannel, onCheckedChange: setPushChannel }
+                    : { defaultChecked: prefs.channels[c.id] })}
                   disabled={readOnly}
                   aria-label={CHANNEL_LABELS[c.id]}
                 />
@@ -106,6 +120,13 @@ export function NotificationsForm({
           })}
         </CardContent>
       </Card>
+
+      <PushDeviceCard
+        pushKey={pushKey}
+        devices={devices}
+        readOnly={readOnly}
+        onTurnedOn={() => setPushChannel(true)}
+      />
 
       <Card>
         <CardHeader>

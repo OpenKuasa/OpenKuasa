@@ -22,6 +22,7 @@ import {
   NOTIFY_EVENTS,
   QUIET_TIMES,
   TIMEZONES,
+  resolveNotificationPrefs,
   type NotificationPrefs,
 } from '@/config/account';
 
@@ -207,6 +208,45 @@ export async function updateNotificationsAction(
 
   revalidatePath('/account/notifications');
   return { notice: 'Notification preferences saved.' };
+}
+
+/**
+ * Called after this device subscribes: switches the Push channel on and keeps every other
+ * saved choice. What is written is the preferences as the screen shows them (stored values
+ * over the defaults), so push follows the ticks the person can see.
+ */
+export async function turnOnPushChannelAction(): Promise<SettingsState> {
+  const viewer = await getViewer();
+  if (viewer.isDemo) return { error: DEMO_ERROR };
+
+  const failed = { error: 'Could not switch push on. Please try again.' };
+  const supabase = await createClient();
+  const { data: row, error: readError } = await supabase
+    .from('profiles')
+    .select('notification_prefs')
+    .eq('user_id', viewer.userId)
+    .maybeSingle();
+  if (readError) return failed;
+
+  const current = resolveNotificationPrefs(row?.notification_prefs);
+  const prefs: NotificationPrefs = {
+    ...current,
+    channels: { ...current.channels, push: true },
+  };
+  const { data, error } = await supabase
+    .from('profiles')
+    .update({ notification_prefs: prefs })
+    .eq('user_id', viewer.userId)
+    .select('user_id');
+  if (error || !data?.length) return failed;
+
+  await recordEvent(supabase, {
+    action: 'Updated notification preferences',
+    category: 'data',
+  });
+
+  revalidatePath('/account/notifications');
+  return { notice: 'Push is on for this device.' };
 }
 
 const passwordSchema = z

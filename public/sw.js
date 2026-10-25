@@ -31,6 +31,73 @@ const OFFLINE_PAGE = `<!doctype html>
 </style></head>
 <body><main><div class="mark"></div><h1>You're offline</h1><p>OpenKuasa needs an internet connection. Check yours and try again.</p><a href="">Try again</a></main></body></html>`;
 
+/*
+ * Push notifications. The server sends { title, body, url, tag }; each notification has its
+ * own tag, so three requests show as three. A link is only ever a path on this site: anything
+ * else becomes /command.
+ */
+const PUSH_FALLBACK_PATH = '/command';
+const PUSH_ICON = '/icons/icon-192.png';
+const UNSAFE_PATH_CHARS = /[\s\u0000-\u001f\u007f-\u009f\\]/;
+
+/** The full URL for a same-site path, or null. */
+function sameSiteUrl(path) {
+  if (typeof path !== 'string' || !path.startsWith('/') || path.startsWith('//')) return null;
+  if (UNSAFE_PATH_CHARS.test(path)) return null;
+  try {
+    const url = new URL(path, self.location.origin);
+    return url.origin === self.location.origin ? url.href : null;
+  } catch {
+    return null;
+  }
+}
+
+self.addEventListener('push', (event) => {
+  let data = {};
+  try {
+    data = (event.data && event.data.json()) || {};
+  } catch {
+    data = {};
+  }
+  const title = typeof data.title === 'string' && data.title ? data.title : 'OpenKuasa';
+  const options = {
+    body: typeof data.body === 'string' ? data.body : '',
+    icon: PUSH_ICON,
+    badge: PUSH_ICON,
+    data: { url: sameSiteUrl(data.url) ? data.url : PUSH_FALLBACK_PATH },
+  };
+  if (typeof data.tag === 'string' && data.tag) options.tag = data.tag;
+  event.waitUntil(self.registration.showNotification(title, options));
+});
+
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  const data = event.notification.data || {};
+  const target = sameSiteUrl(data.url) || sameSiteUrl(PUSH_FALLBACK_PATH);
+  event.waitUntil(
+    (async () => {
+      const windows = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+      const open = windows.find((w) => {
+        try {
+          return new URL(w.url).origin === self.location.origin;
+        } catch {
+          return false;
+        }
+      });
+      if (open) {
+        try {
+          await open.focus();
+          await open.navigate(target);
+          return;
+        } catch {
+          // A window this worker doesn't control can't be moved; open a new one instead.
+        }
+      }
+      await self.clients.openWindow(target);
+    })(),
+  );
+});
+
 self.addEventListener('fetch', (event) => {
   const request = event.request;
   if (request.mode !== 'navigate' || request.method !== 'GET') return;

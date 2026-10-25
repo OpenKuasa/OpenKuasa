@@ -12,10 +12,9 @@ describe('the manager notification events', () => {
     expect(ids).toContain(DECIDED);
   });
 
-  it('defaults both to in-app only', () => {
-    for (const id of [FILED, DECIDED] as const) {
-      expect(DEFAULT_NOTIFICATION_PREFS.events[id]).toEqual({ email: false, push: false, inapp: true });
-    }
+  it('defaults a request waiting for you to in-app and push, and a decision to in-app only', () => {
+    expect(DEFAULT_NOTIFICATION_PREFS.events[FILED]).toEqual({ email: false, push: true, inapp: true });
+    expect(DEFAULT_NOTIFICATION_PREFS.events[DECIDED]).toEqual({ email: false, push: false, inapp: true });
   });
 
   it('resolves both on for a workspace that stored nothing', () => {
@@ -35,8 +34,13 @@ describe('the manager notification events', () => {
       channels: { email: true, push: false, inapp: true },
       events: { new_leads: { email: true, push: true, inapp: true } },
     });
-    expect(prefs.events[FILED]).toEqual({ email: false, push: false, inapp: true });
+    expect(prefs.events[FILED]).toEqual({ email: false, push: true, inapp: true });
     expect(prefs.events[DECIDED]).toEqual({ email: false, push: false, inapp: true });
+  });
+
+  it('keeps a stored push switch-off for requests waiting for you', () => {
+    const prefs = resolveNotificationPrefs({ events: { hr_request_filed: { push: false } } });
+    expect(prefs.events[FILED]).toEqual({ email: false, push: false, inapp: true });
   });
 });
 

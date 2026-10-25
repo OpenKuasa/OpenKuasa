@@ -89,7 +89,7 @@ export const DEFAULT_NOTIFICATION_PREFS: NotificationPrefs = {
     deal_stages: { email: true, push: false, inapp: true },
     payments: { email: true, push: true, inapp: true },
     team_activity: { email: false, push: false, inapp: true },
-    hr_request_filed: { email: false, push: false, inapp: true },
+    hr_request_filed: { email: false, push: true, inapp: true },
     hr_request_decided: { email: false, push: false, inapp: true },
     hr_roster_changed: { email: false, push: false, inapp: true },
     hr_shift_swap: { email: false, push: false, inapp: true },
