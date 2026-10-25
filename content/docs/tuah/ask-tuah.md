@@ -15,7 +15,7 @@ In the demo, Tuah gives sample answers and nothing is saved.
 
 ## Before you start
 
-Without an OpenRouter key, each person gets 3 free questions a week. To chat without that limit, an owner or admin adds a key. See [Add your OpenRouter key](/docs/getting-started/openrouter-key).
+Without an OpenRouter key, each person gets 3 free questions a week. They come back every Monday at 8 am Malaysia time (midnight UTC). To chat without that limit, an owner or admin adds a key. See [Add your OpenRouter key](/docs/getting-started/openrouter-key).
 
 ## Steps
 

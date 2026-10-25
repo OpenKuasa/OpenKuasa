@@ -11,6 +11,8 @@ Tuah leads a team. For each part of your question, it asks the specialist for th
 
 Anyone who can ask Tuah. The team is on by default.
 
+The demo gives sample answers, so no specialist cards appear there.
+
 ## Steps
 
 ### See who is working

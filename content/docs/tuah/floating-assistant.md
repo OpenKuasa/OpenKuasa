@@ -28,7 +28,9 @@ At the top of the panel:
 - the panel icon at the left (**Open your chats**) shows your saved chats;
 - **New chat** starts a fresh chat;
 - **Open in Tuah** opens the same chat on the full Tuah page;
-- **Close** closes the panel. Pressing Escape, or clicking outside the panel, also closes it.
+- **Close** closes the panel. Pressing Escape also closes it.
+
+The panel slides in from the right and dims the screen behind it. Clicking the dimmed part also closes the panel.
 
 In your own workspace, the panel remembers its chat while you move between screens in the same browser tab. Close it and open it again, and your chat is still there.
 

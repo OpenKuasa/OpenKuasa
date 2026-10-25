@@ -48,7 +48,7 @@ Deleting a chat removes its messages and any files sent in it. It cannot be brou
 
 ## Common problems
 
-- **A chat about HR is not in the list.** When Tuah looks at HR data (staff, leave, claims, attendance, payroll and the like) to answer, that question and its answer are not saved. This keeps HR details out of saved chats.
+- **A question about HR is missing from a saved chat.** When Tuah looks at HR data (staff, leave, claims, attendance, payroll and the like) to answer, that question and its answer are not saved. Your other questions in the chat are kept. This keeps HR details out of saved chats. If every question in a new chat was about HR, the chat does not appear in the list.
 - **"That chat is no longer available, so here is a new one."** The chat was deleted, or it belongs to another workspace.
 - **"This chat could not be opened".** It is still saved. Check your connection and click **Try again**.
 - **"Your chats could not be loaded".** Nothing is lost. Click **Try again**.

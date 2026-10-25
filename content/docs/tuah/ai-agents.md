@@ -12,7 +12,7 @@ In **Kasturi**, **Lekir** and **Bendahara**:
 
 - owners and admins set the focus, confirm it, and change the schedule and limits;
 - owners, admins and members can press **Run now**, approve or dismiss suggestions, and, where there are notes, delete them;
-- everyone else can look but not change anything. The focus box says **Only an owner or admin can set the focus.**
+- everyone else can look but not change anything. Before a focus is saved, the focus box says **Only an owner or admin can set the focus.** After it is saved, it says **Waiting for an owner or admin to confirm.** until an owner or admin confirms it.
 
 In **Lekiu**, the **AI Agents** screen is for owners and admins only. Anyone else sees **This page is for owners and admins of the workspace.** Owners and admins can do everything on it.
 
@@ -75,11 +75,12 @@ In Lekir, Lekiu and Bendahara, approved notes are listed under **Notes from the 
 - **"Write what the agent should watch for (up to 500 characters)."** The focus is empty or too long.
 - **"I couldn't match this to anything I can watch for".** None of your words matched a check this agent can run. **Looks right** stays greyed out. Click **Edit** and try other words, or start from an example.
 - **"You have changed the focus 10 times today. Try again tomorrow."** The focus can be saved 10 times a day.
-- **"Save and confirm a focus first."** **Run now** needs a focus that someone has confirmed with **Looks right**.
-- **"The agent is turned off. An owner or admin can turn it on."** **How often** was set to **Off**. Pick **Daily** or **Weekly**.
+- **"The agent is turned off. An owner or admin can turn it on."** Usually a focus was saved but **Looks right** was never clicked. An owner or admin clicks **Looks right** to confirm the focus, which turns the agent on. If **How often** was later set to **Off**, pick **Daily** or **Weekly** instead.
+- **"Save and confirm a focus first."** The focus was edited and saved again, so it needs confirming again. An owner or admin clicks **Looks right**.
 - **"Pick daily or weekly so the agent runs on its own, or press Run now."** The focus is confirmed, but no schedule is set yet.
 - **"A run is already in progress. Please wait for it to finish."** A workspace runs one agent at a time.
-- **"The workspace daily spend cap has been reached."** or **"The workspace weekly spend cap has been reached."** Wait, or ask an owner or admin to raise the limit.
+- **"The workspace daily spend cap has been reached. Try again tomorrow, or ask an owner or admin to raise it."**
+- **"The workspace weekly spend cap has been reached. Ask an owner or admin to raise it."**
 - **"Enter a per-run limit between RM 0 and RM 100."** or **"Enter daily and weekly limits between RM 0 and RM 10,000."** A limit is outside its range.
 
 ## Related

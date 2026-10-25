@@ -28,6 +28,7 @@ The card is the check. Tuah does not ask "are you sure?" as well.
 
 - **"Approve or reject the change above first."** A card is waiting. Answer it before you send another question.
 - **The change did not go through.** If the change is refused when it runs, Tuah tells you the error and how to fix it. Nothing was saved.
+- **Tuah only shows one hiring change at a time.** Changes to a hiring application, a candidate, an interview or the talent pool, and hiring deletions, come one card at a time. Answer the card, then ask for the next one. Deleting an application or a candidate cannot be undone.
 - **Tuah asks you for one more detail.** Some changes need something you did not give, such as an email for a new contact. Tuah asks only for that.
 
 ## Related
