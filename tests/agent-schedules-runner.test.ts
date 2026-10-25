@@ -56,6 +56,8 @@ type Opts = {
   spendFor?: (agentKey: unknown) => number;
 };
 
+const ON = { enabled: true, daily_cap_cents: 500, weekly_cap_cents: 2000 };
+
 type Write = {
   table: string;
   kind: 'update' | 'insert';
@@ -69,7 +71,8 @@ function fakeClient(schedules: Sched[], opts: Opts = {}) {
   const rpcCalls: { name: string; args: { p_org_id: string; p_since: string; p_agent_key?: string } }[] = [];
   let runRowListReads = 0;
   const configReads: [string, unknown][][] = [];
-  const o = { claim: true, cfg: null, recentRuns: [], runCost: 0, newData: false, ...opts };
+  // Default: a saved, switched-on config. Tests that need "no saved settings" pass cfg: null.
+  const o = { claim: true, cfg: ON, recentRuns: [], runCost: 0, newData: false, ...opts };
   const client = {
     // The workspace spend is one database-side sum per window, never a row fetch.
     async rpc(name: string, args: { p_org_id: string; p_since: string; p_agent_key?: string }) {
@@ -171,7 +174,7 @@ describe('runSchedules', () => {
 
   it('pauses the org schedules with a reason when over the weekly ceiling, without running', async () => {
     const { client, writes, rpcCalls, runRowListReads } = fakeClient([sched()], {
-      cfg: { daily_cap_cents: 5000, weekly_cap_cents: 1000 },
+      cfg: { enabled: true, daily_cap_cents: 5000, weekly_cap_cents: 1000 },
       recentRuns: [{ cost_cents: 1500 }],
     });
     const out = await runSchedules(client);
@@ -194,7 +197,7 @@ describe('runSchedules', () => {
 
   it('pauses on the daily ceiling when only the daily window is over', async () => {
     const { client, writes } = fakeClient([sched()], {
-      cfg: { daily_cap_cents: 100, weekly_cap_cents: 100000 },
+      cfg: { enabled: true, daily_cap_cents: 100, weekly_cap_cents: 100000 },
       runsFor: (age) => (age < 2 * 24 * 3600_000 ? [{ cost_cents: 150 }] : [{ cost_cents: 50 }]),
     });
     const out = await runSchedules(client);
@@ -296,6 +299,21 @@ describe('runSchedules', () => {
     expect(out).toMatchObject({ skipped: 1, ran: 0, paused: 0, failed: 0 });
   });
 
+  it('enable-gate: no saved settings skips the schedule like a switched-off agent', async () => {
+    const { client, writes } = fakeClient([sched()], { cfg: null });
+    const out = await runSchedules(client);
+    expect(runAgent).not.toHaveBeenCalled();
+    expect(writes).toHaveLength(0);
+    expect(out).toMatchObject({ skipped: 1, ran: 0, paused: 0, failed: 0 });
+  });
+
+  it('startRefusal: no saved settings is refused as turned off, before any spend read', async () => {
+    const { client, rpcCalls } = fakeClient([], { cfg: null });
+    expect(await startRefusal(client, ORG, 'weekly-studio')).toBe('disabled');
+    expect(await startRefusal(client, ORG, 'weekly-studio', null)).toBe('disabled');
+    expect(rpcCalls).toHaveLength(0);
+  });
+
   it('enable-gate: enabled true runs, and the org config is read once per org', async () => {
     let cfgReads = 0;
     const { client } = fakeClient([sched({ id: 's1' }), sched({ id: 's2' })], {
@@ -352,7 +370,7 @@ describe('runSchedules', () => {
 
   it('startRefusal passes the agent key to the spend sum', async () => {
     const { client, rpcCalls } = fakeClient([], {});
-    await startRefusal(client, ORG, 'crm-focus', null);
+    await startRefusal(client, ORG, 'crm-focus', ON);
     expect(rpcCalls).toHaveLength(2);
     expect(rpcCalls.every((c) => c.args.p_agent_key === 'crm-focus')).toBe(true);
   });

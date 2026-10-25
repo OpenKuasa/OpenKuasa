@@ -69,8 +69,9 @@ async function readOrgConfig(
  * The one gate every run passes before it starts, scheduled or manual: the
  * workspace's off switch, then its rolling daily and weekly spend caps. Returns
  * why the run is refused, or null when it may start. A workspace with no saved
- * settings is not switched off and uses the default caps. Throws when the
- * settings or the spend cannot be read (callers treat that as "do not run").
+ * settings is off, as the agents screens show it: nothing runs until an owner or
+ * admin switches it on. Throws when the settings or the spend cannot be read
+ * (callers treat that as "do not run").
  */
 export async function startRefusal(
   client: SupabaseClient,
@@ -79,7 +80,8 @@ export async function startRefusal(
   config?: OrgConfig | null,
 ): Promise<StartRefusal | null> {
   const cfg = config === undefined ? await readOrgConfig(client, orgId, agentKey) : config;
-  if (cfg && cfg.enabled === false) return 'disabled';
+  // Fail closed: only a saved, switched-on setting may run.
+  if (!cfg || cfg.enabled !== true) return 'disabled';
   return overBudget(client, orgId, agentKey, cfg);
 }
 
@@ -160,10 +162,10 @@ export async function runSchedules(
         continue;
       }
 
-      // Off switch: leave the schedule untouched so re-enabling resumes it.
-      // No config row keeps the default behavior (proceed).
+      // Off switch: leave the schedule untouched so switching on resumes it.
+      // No saved settings counts as off, the same as the screen shows.
       const config = await configFor(s.org_id, s.agent_key);
-      if (config && config.enabled === false) {
+      if (!config || config.enabled !== true) {
         summary.skipped += 1;
         continue;
       }

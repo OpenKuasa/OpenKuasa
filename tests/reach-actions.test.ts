@@ -110,7 +110,8 @@ beforeEach(() => {
   ctl.created = [];
   svc.run.mockReset();
   svc.run.mockResolvedValue({ runId: 'r1', status: 'done' });
-  svc.cfg = null;
+  // A saved, switched-on Weekly Studio unless a test says otherwise.
+  svc.cfg = { enabled: true, daily_cap_cents: 500, weekly_cap_cents: 2000 };
   svc.spent = () => 0;
   svc.spendError = false;
   svc.rpcCalls = [];
@@ -292,6 +293,12 @@ describe('runAgentNowAction', () => {
   });
   it('refuses when Weekly Studio is switched off and does not run', async () => {
     svc.cfg = { enabled: false, daily_cap_cents: 500, weekly_cap_cents: 2000 };
+    const res = await runAgentNowAction({});
+    expect(res).toMatchObject({ ok: false, error: expect.stringContaining('turned off') });
+    expect(svc.run).not.toHaveBeenCalled();
+  });
+  it('refuses as turned off when the workspace has no saved settings, and does not run', async () => {
+    svc.cfg = null;
     const res = await runAgentNowAction({});
     expect(res).toMatchObject({ ok: false, error: expect.stringContaining('turned off') });
     expect(svc.run).not.toHaveBeenCalled();
