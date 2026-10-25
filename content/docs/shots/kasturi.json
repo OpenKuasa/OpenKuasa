@@ -1,0 +1,12 @@
+[
+  { "file": "kasturi/overview.png", "path": "/crm/assistant", "as": "demo", "viewport": [1280, 900], "clip": "main" },
+  { "file": "kasturi/contacts.png", "path": "/crm/contacts", "as": "demo", "viewport": [1280, 900], "clip": "main" },
+  { "file": "kasturi/deals.png", "path": "/crm/deals", "as": "demo", "viewport": [1280, 900], "clip": "main" },
+  { "file": "kasturi/lead-forms.png", "path": "/crm/lead-forms", "as": "demo", "viewport": [1280, 900], "clip": "section:has(h3:text-is(\"Your forms\"))" },
+  { "file": "kasturi/broadcast.png", "path": "/crm/broadcast", "as": "demo", "viewport": [1280, 900], "clip": "main" },
+  { "file": "kasturi/automations.png", "path": "/crm/automations", "as": "demo", "viewport": [1280, 900], "clip": "main" },
+  { "file": "kasturi/calendar.png", "path": "/crm/calendar", "as": "demo", "viewport": [1280, 900], "clip": "main" },
+  { "file": "kasturi/billings.png", "path": "/crm/billings", "as": "demo", "viewport": [1280, 900], "clip": "main" },
+  { "file": "kasturi/reports.png", "path": "/crm/reports", "as": "demo", "viewport": [1280, 900], "clip": "main" },
+  { "file": "kasturi/plugins.png", "path": "/crm/plugins", "as": "demo", "viewport": [1280, 900], "clip": "section:has(h3:text-is(\"Connected services\"))" }
+]
