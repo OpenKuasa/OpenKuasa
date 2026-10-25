@@ -34,7 +34,7 @@ const TEXT_CLASS = 'whitespace-pre-wrap leading-relaxed text-primary-foreground'
 const DOCS_PATH = /(^|\s)(\/docs\/[a-z0-9-]+\/[a-z0-9-]+(?:#[a-z0-9-]+)?)(?![\w/#-])/g;
 
 /** Text with each docs guide path drawn as a link to it. Text without one comes back as the same string. */
-function withDocsLinks(text: string, links: boolean, key: string | number = 0): ReactNode {
+export function withDocsLinks(text: string, links: boolean, key: string | number = 0): ReactNode {
   if (!links || !text.includes('/docs/')) return text;
   const out: ReactNode[] = [];
   let from = 0;
