@@ -1,0 +1,10 @@
+[
+  { "file": "tuah/command.png", "path": "/command", "as": "demo", "viewport": [1280, 800] },
+  {
+    "file": "tuah/floating-assistant.png",
+    "path": "/crm/contacts",
+    "as": "demo",
+    "viewport": [1280, 800],
+    "steps": [{ "click": "Ask Taming Sari" }, { "wait": 2000 }]
+  }
+]
