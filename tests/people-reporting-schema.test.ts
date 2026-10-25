@@ -28,6 +28,15 @@ function fn(text: string, qualified: string): { header: string; body: string } {
   return { header: text.slice(start, open), body: text.slice(open, close) };
 }
 const sql = FILE === 'missing' ? '' : statements(FILE);
+/** The statements of the newest migration that defines `qualified`: the definition the database keeps. */
+function newest(qualified: string): string {
+  const defining = files.filter((f) => statements(f).includes(`create or replace function ${qualified}(`));
+  expect(defining.length, qualified).toBeGreaterThan(0);
+  return statements(defining[defining.length - 1]);
+}
+/** Redefined after this slice (20261125200600_hr_request_filed_owners.sql); read where it now lives. */
+const REDEFINED = new Set(['private.hr_notify_request_filed']);
+const source = (name: string) => (REDEFINED.has(name) ? newest(name) : sql);
 
 const DECIDERS: [string, 'leave' | 'time_off' | 'claim' | 'overtime', 'LEAVE' | 'PAY'][] = [
   ['public.hr_decide_leave', 'leave', 'LEAVE'],
@@ -95,10 +104,10 @@ describe('the reporting-lines migration', () => {
     ['private.hr_notify_request_decided', null],
     ['private.hr_reports_to_guard', null],
   ])('%s is a definer function on a fixed search path, executable by %s only', (name, role) => {
-    const { header } = fn(sql, name);
+    const { header } = fn(source(name), name);
     expect(header).toContain('security definer');
     expect(header).toContain('set search_path = public');
-    const text = flat(sql);
+    const text = flat(source(name));
     const bare = name.replace('.', '\\.');
     expect(text).toMatch(new RegExp(`revoke (all|execute) on function ${bare}\\([^)]*\\) from public, anon`));
     const granted = new RegExp(`grant execute on function ${bare}\\([^)]*\\) to authenticated`).test(text);
@@ -258,7 +267,7 @@ describe('the reporting-lines migration', () => {
 
   test('a notification names the kind and the person, and nothing about the request', () => {
     for (const name of ['private.hr_notify_request_filed', 'private.hr_notify_request_decided']) {
-      const body = fn(sql, name).body;
+      const body = fn(source(name), name).body;
       for (const word of ['amount', 'reason', 'note', 'days', 'hours', 'category', 'description', '_date', 'cents']) {
         expect(body, `${name}: ${word}`).not.toContain(word);
       }

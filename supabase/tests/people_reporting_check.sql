@@ -415,15 +415,19 @@ begin
     fails := fails || pg_temp.t(adm2, format('an admin updates %s as before', r.col), format('update public.hr_employees set %I = %s where id = %L', r.col, r.val, z), 'ok');
   end loop;
   if pg_temp.locked(org2) then fails := fails || 'a write that names no manager took the reporting-line lock'::text; end if;
-  -- Filing and deciding with no line: as before, and nobody is told that a request was filed.
+  -- Filing and deciding with no line: as before, except that the owner and admin are now told a request was filed.
   w := '{}';
   foreach k in array kinds loop
     fails := fails || pg_temp.t(m2, format('with no line anywhere, a member files %s', k), pg_temp.fq(k, e2a), '*');
     execute format('select id from public.%I where employee_id = %L', pg_temp.tbl(k), e2a) into x;
     w := w || x;
   end loop;
+  -- With no manager, the workspace's owners and admins are told (20261125200600_hr_request_filed_owners.sql), never the one who filed.
   a := pg_temp.inbox();
-  if a <> '' then fails := fails || format('with no line anywhere, filing told someone: %s', a); end if;
+  select string_agg(format('%s|hr_request_filed|%s from Before Member|~|%s', u.who, v.label, v.href), ' ; ' order by u.who, v.label || ' from Before Member') into b
+  from (values ('adm2'), ('own2')) u(who) cross join (values ('Leave request', '/people/approve-leave'), ('Time-off request', '/people/approve-time-off'),
+    ('Claim', '/people/approve-claims'), ('Overtime request', '/people/approve-overtime')) v(label, href);
+  if a is distinct from b then fails := fails || format('with no line anywhere, filing tells the owner and the admin and nobody else: wanted "%s", got "%s"', b, a); end if;
   for i in 1..4 loop
     k := kinds[i]; ctx := case when i <= 2 then 'LEAVE' else 'PAY' end;
     fails := fails
@@ -460,8 +464,8 @@ begin
     a := pg_temp.inbox();
     if a <> '' then fails := fails || format('a manager who files %s for their own report is told nothing: got "%s"', r.kind, a); end if;
     fails := fails || pg_temp.t(peer, format('a member with no manager files %s', r.kind), pg_temp.fq(r.kind, e_peer), '*');
-    a := pg_temp.inbox();
-    if a <> '' then fails := fails || format('a %s filed by someone with no manager tells nobody: got "%s"', r.kind, a); end if;
+    a := pg_temp.inbox(); b := format('adm|hr_request_filed|%s from Peer Check|~|%s ; own|hr_request_filed|%s from Peer Check|~|%s', r.label, r.href, r.label, r.href);
+    if a is distinct from b then fails := fails || format('a %s filed by someone with no manager tells the owner and the admin: wanted "%s", got "%s"', r.kind, b, a); end if;
   end loop;
   fails := fails || pg_temp.t(rep2, 'the admin''s report files leave', pg_temp.fq('leave', e_rep2), '*');
   a := pg_temp.inbox();
@@ -637,7 +641,9 @@ begin
       || pg_temp.t(mgr, format('a manager now %s does not read the receipt', r.how), format('(select count(*) from storage.objects o where o.name = %L)', f_rep), '=0')
       || pg_temp.t(rep, format('rep files while their manager is %s', r.how), pg_temp.fq('leave', e_rep), '*');
     a := pg_temp.inbox();
-    if a <> '' then fails := fails || format('a manager now %s is told nothing: got "%s"', r.how, a); end if;
+    if a is distinct from 'adm|hr_request_filed|Leave request from Rep Check|~|/people/approve-leave ; own|hr_request_filed|Leave request from Rep Check|~|/people/approve-leave' then
+      fails := fails || format('a manager now %s is told nothing; the owner and the admin are: got "%s"', r.how, a);
+    end if;
     if (select count(*) from public.hr_employees x where x.id in (e_rep, e_unl) and x.reports_to = e_mgr) <> 2 then fails := fails || format('the line itself went when the manager became %s', r.how); end if;
     fails := fails || pg_temp.t(adm, format('an admin decides while the manager is %s', r.how), pg_temp.dq('leave', w[1]) || ' ->> ''status''', '="approved"');
     perform pg_temp.inbox();
