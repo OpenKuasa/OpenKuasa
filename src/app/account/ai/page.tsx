@@ -8,6 +8,7 @@ import { AiKeyForm, RemoveAiKeyForm } from '@/components/account/ai-key-form';
 import { ReadOnlyNotice } from '@/components/account/settings-form';
 import { getChatStatus } from '@/lib/ai/gate';
 import { hasKeySecret } from '@/lib/ai/key-crypto';
+import { WORKSPACE_KEY_TURNS_PER_DAY } from '@/lib/ai/rate-limit';
 import { can } from '@/lib/auth/permissions';
 import { getViewer, hasSupabaseEnv } from '@/lib/auth/viewer';
 import { createClient } from '@/lib/supabase/server';
@@ -35,8 +36,12 @@ export default async function AiKeyPage() {
           <CardContent className="space-y-2 text-sm text-muted-foreground">
             <p>
               Add one OpenRouter key for {viewer.orgName} and everyone in the
-              workspace chats on it, billed to your OpenRouter account with no
-              limit from us. Set a spending limit on the key in OpenRouter.
+              workspace chats on it, billed to your OpenRouter account. Set a
+              spending limit on the key in OpenRouter.
+            </p>
+            <p>
+              {`As a safety net, each person can send up to ${WORKSPACE_KEY_TURNS_PER_DAY} chat requests a day on the key.`}{' '}
+              The count resets at midnight UTC (8 am Malaysia time).
             </p>
             <p>
               Without a key, each person gets{' '}
