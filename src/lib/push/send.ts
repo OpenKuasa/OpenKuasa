@@ -15,7 +15,7 @@ export type PushSender = (
   payload: PushPayload,
 ) => Promise<{ ok: true } | { ok: false; status: number | null }>;
 
-export type SendResult = { sent: number; removed: number; failed: number; skipped: number; error?: true };
+export type SendResult = { sent: number; removed: number; failed: number; deferred: number; error?: true };
 
 /** Where a notification with no link, or an unsafe one, opens. */
 const FALLBACK_URL = '/command';
@@ -56,7 +56,7 @@ export async function sendPending(
   { batch = 100, deadlineMs = DEADLINE_MS, now = Date.now }: { batch?: number; deadlineMs?: number; now?: () => number } = {},
 ): Promise<SendResult> {
   const deadline = now() + deadlineMs;
-  const result: SendResult = { sent: 0, removed: 0, failed: 0, skipped: 0 };
+  const result: SendResult = { sent: 0, removed: 0, failed: 0, deferred: 0 };
   const pending = await db.rpc('push_pending', { p_limit: batch });
   if (pending.error) {
     console.error('[push] could not read the queue:', pending.error.code);
@@ -73,7 +73,7 @@ export async function sendPending(
     const remaining = deadline - now();
     if (remaining <= 0) {
       // Untried items get no push_result: they wait out their lease and no attempt is counted.
-      result.skipped += rows.slice(i).filter((r) => !gone.has(r.subscription_id)).length;
+      result.deferred += rows.slice(i).filter((r) => !gone.has(r.subscription_id)).length;
       break;
     }
     const payload: PushPayload = {

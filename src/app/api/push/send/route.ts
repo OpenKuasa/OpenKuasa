@@ -20,6 +20,6 @@ export async function POST(req: Request) {
   const cfg = pushConfig();
   if (!cfg) return NextResponse.json({ skipped: 'not-configured' });
 
-  const { sent, removed, failed, skipped, error } = await sendPending(serviceClient(), webPushSender(cfg));
-  return NextResponse.json({ ok: !error, sent, removed, failed, skipped });
+  const { sent, removed, failed, deferred, error } = await sendPending(serviceClient(), webPushSender(cfg));
+  return NextResponse.json({ ok: !error, sent, removed, failed, deferred });
 }
