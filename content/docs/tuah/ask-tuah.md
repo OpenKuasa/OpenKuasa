@@ -9,7 +9,7 @@ Tuah is your command centre. It answers questions about your whole business in o
 
 ## Who can do this
 
-Anyone signed in to a workspace can ask Tuah. It looks things up as you, so it only sees what your role lets you see. A viewer can ask questions but cannot change anything through Tuah.
+Anyone signed in to a workspace can ask Tuah. It looks things up as you, so it only sees what your role lets you see. A viewer can look things up, and can ask for their own leave, claims, overtime and similar requests if their account is linked to an employee record. Other changes need a member, admin or owner.
 
 In the demo, Tuah gives sample answers and nothing is saved.
 

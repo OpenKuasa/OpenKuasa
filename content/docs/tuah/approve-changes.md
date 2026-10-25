@@ -9,7 +9,7 @@ Tuah can make changes for you, such as adding a lead or moving a deal to another
 
 ## Who can do this
 
-Owners, admins and members can ask Tuah to make changes. A viewer can only look things up. If a viewer asks for a change, Tuah says it cannot and points to the screen where someone with access can do it.
+Owners, admins and members can ask Tuah to make changes. A viewer can look things up, and can ask for their own leave, claims, overtime and similar requests if their account is linked to an employee record. If a viewer asks for any other change, Tuah says it cannot and points to the screen where someone with access can do it.
 
 Each change runs as you. The same rules apply as on the product screens. For example, in HR a manager can only decide leave, time off, claims and overtime for their own direct reports.
 
