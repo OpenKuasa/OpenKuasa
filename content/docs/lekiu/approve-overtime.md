@@ -15,6 +15,10 @@ screen: /people/approve-overtime
 
 An admin cannot decide their own overtime. The workspace owner can.
 
+## Who is told
+
+When someone files a overtime request, their manager is told. If the person has no active manager, every owner and admin is told instead. The person who filed it is never told about their own overtime request.
+
 ## Steps
 
 ### Approve or reject

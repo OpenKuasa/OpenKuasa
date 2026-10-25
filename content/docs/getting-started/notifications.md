@@ -9,7 +9,7 @@ Notifications tell you when something needs you, such as a request waiting for y
 
 ## Who can do this
 
-Every signed-in person chooses their own notifications, whatever their role. In the demo workspace the choices are read-only.
+Every signed-in person chooses their own notifications, whatever their role. In the demo workspace the choices are read-only, and push can't be turned on.
 
 ## Steps
 
@@ -52,13 +52,22 @@ Push shows a notification on your device even when OpenKuasa isn't open. Turn it
 2. Under **Push on this device**, click **Turn on**.
 3. When your browser asks, allow notifications.
 
-You see **Push is on for this device.** The **Push** channel under **Delivery channels** turns on too. Your device is listed under **Your devices**.
+You see **Push is on for this device.** The **Push** channel under **Delivery channels** turns on too. Your device is listed under **Your devices**, with **This device** next to the one you are using.
 
-Push follows the **Push** ticks under **What you get notified about**. **Requests from your team** has push ticked to start with, so requests waiting for your approval reach you right away.
+Where it works:
 
-On an iPhone or iPad, add OpenKuasa to your Home Screen first (**Share** → **Add to Home Screen**), open it from there, then turn push on.
+- **Laptop or desktop:** Chrome, Edge or Firefox.
+- **Android:** Chrome or Firefox.
+- **iPhone or iPad:** you need iOS 16.4 or later. Add OpenKuasa to your Home Screen first (**Share** → **Add to Home Screen**), open it from there, then turn push on.
 
-To stop push on a device, click **Turn off** on that device, or click **Remove** next to it under **Your devices**.
+Push follows the **Push** ticks under **What you get notified about**. **Requests from your team** has push ticked to start with, so approvals waiting on you reach you without any setup.
+
+A notification can arrive up to 5 minutes after the event. If you already read it in the app, it is not pushed.
+
+### Stop push or remove a device
+
+- To stop push on the device you are using, click **Turn off**.
+- To remove any device, click **Remove** next to it under **Your devices**. Use this for a phone you no longer have.
 
 ## What works today
 

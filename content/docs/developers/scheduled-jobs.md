@@ -4,7 +4,7 @@ description: Call OpenKuasa's background endpoints from your own scheduler, with
 order: 4
 ask: How do I set up the scheduled jobs for my self-hosted OpenKuasa?
 ---
-Six endpoints do background work. Nothing in the app calls them: your own scheduler does, for example a cron job every five minutes.
+Seven endpoints do background work. Nothing in the app calls them: your own scheduler does, for example a cron job every five minutes.
 
 ## Who can do this
 
@@ -24,6 +24,7 @@ Anyone running their own copy, with access to the server's environment and to a 
 | `POST /api/finance/fx-rates/fetch` | Stores Bank Negara Malaysia's exchange rates. It reaches BNM only when a rate is missing, and spends at most 20 seconds a call. |
 | `POST /api/hire/cv-cleanup` | Removes stored CV files of deleted applications. |
 | `POST /api/finance/receipt-cleanup` | Removes Receipts Inbox files of deleted receipts, and uploads nobody recorded within the hour. |
+| `POST /api/push/send` | Sends queued push notifications to people's devices. Run it every five minutes. One call stops sending after 4 minutes. |
 | `POST /api/maintenance/sweep-files` | Removes document and logo files nothing points at. Once a day is plenty. A call attempts at most 500 removals, so a large backlog takes several calls. |
 
 They take no body and no parameters, and answer with counts only.
@@ -60,12 +61,14 @@ Some jobs run on `pg_cron` inside Supabase and need no scheduler: the nightly cl
 
 - `/api/finance/receipt-cleanup` answers `{"ok": true, "queued": n, "removed": n}`: how many unrecorded uploads it listed and how many files it removed. `"ok": false` means part of the work is left for the next call. It stops after 20 seconds.
 - `/api/finance/fx-rates/fetch` answers `{"ok", "stored", "pending"}`: how many rates it stored, and how many currency back-fills are left. `ok: false` with status 200 means something was left for the next call. Status 500 means the rates table or its state could not be read or written; the next call starts again.
+- `/api/push/send` answers `{"ok", "sent", "removed", "failed", "deferred"}`: how many pushes went out, how many dead devices were dropped, how many failed, and how many were left for the next call. On a server without the push keys it answers `{"skipped": "not-configured"}` and sends nothing.
 - `/api/hire/cv-cleanup` answers `{"ok", "removed"}`.
 - `"ok": false` needs attention only if it stays that way for many calls in a row.
 
 ## Common problems
 
 - **Every call answers `401` with `{"error": "Unauthorized"}`.** `CRON_SECRET` is unset, empty or shorter than 32 characters, or the scheduler sends a different value. A short `CRON_SECRET` accepts nothing. It also happens when `CRON_ALLOW_LEGACY_KEY` is `false` but the scheduler still sends the service-role key: move the scheduler to `CRON_SECRET` first.
+- **Push never arrives.** The three push variables are not all set (the job answers `skipped`), or the scheduler isn't calling `/api/push/send` every five minutes.
 - **Agents never run.** `AGENTS_ENABLED` is not `true` or `1`, or a workspace has no schedule that is due.
 - **Do not reuse a Supabase key as `CRON_SECRET`.** Use a value made for this alone.
 

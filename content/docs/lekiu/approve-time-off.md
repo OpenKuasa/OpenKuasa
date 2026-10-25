@@ -15,6 +15,10 @@ screen: /people/approve-time-off
 
 An admin cannot decide their own request. The workspace owner can.
 
+## Who is told
+
+When someone files a time-off request, their manager is told. If the person has no active manager, every owner and admin is told instead. The person who filed it is never told about their own time-off request.
+
 ## Steps
 
 1. Open **Lekiu**, then **Time-Off** under **Approvals**.

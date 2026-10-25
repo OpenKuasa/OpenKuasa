@@ -52,6 +52,22 @@ Never put a secret in a file you commit or share. `SUPABASE_SERVICE_ROLE_KEY` an
 | `CRON_ALLOW_LEGACY_KEY` | A temporary switch for installs whose scheduler still sends the service-role key. Set it to `false`. See [Scheduled jobs](/docs/developers/scheduled-jobs). |
 | `AGENTS_ENABLED` | `true` (or `1`) lets scheduled agent runs happen. Off by default. |
 
+### Push notifications
+
+| Variable | What it is for |
+| --- | --- |
+| `NEXT_PUBLIC_VAPID_PUBLIC_KEY` | The public half of your push key pair. It is sent to browsers. |
+| `VAPID_PRIVATE_KEY` | The private half. Server-only: never share it or commit it. |
+| `VAPID_SUBJECT` | Who runs this server, as a `mailto:` address or an `https://` address. The push services refuse anything else. |
+
+Make the key pair once:
+
+```bash
+npx web-push generate-vapid-keys
+```
+
+Keep the same pair on every host. A new pair cuts off every device that turned push on. Without all three values, the Notifications page says push isn't set up and the rest of the app works as before. Push is sent by a scheduled job: see [Scheduled jobs](/docs/developers/scheduled-jobs).
+
 ### Features and sign-in
 
 | Variable | What it is for |

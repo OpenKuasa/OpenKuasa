@@ -16,6 +16,10 @@ When two employees agree to swap shifts, the swap comes to **Shift Swaps** for a
 
 Shift swaps are not part of the demo workspace.
 
+## Who is told
+
+When both people have agreed, the one manager they both report to is told. If they share no manager, every owner and admin is told instead. The two people in the swap are not asked to decide it.
+
 ## Steps
 
 1. Open **Lekiu**, then **Shift Swaps** under **Approvals**.

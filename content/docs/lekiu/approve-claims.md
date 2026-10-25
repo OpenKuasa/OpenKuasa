@@ -15,6 +15,10 @@ screen: /people/approve-claims
 
 An admin cannot approve, reject or mark as paid their own claim. The workspace owner can.
 
+## Who is told
+
+When someone files a claim, their manager is told. If the person has no active manager, every owner and admin is told instead. The person who filed it is never told about their own claim.
+
 ## Steps
 
 ![The Claim Approvals screen with expense claims, receipts and Mark paid](/docs-media/lekiu/approve-claims.png)

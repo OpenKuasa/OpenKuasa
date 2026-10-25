@@ -15,6 +15,10 @@ screen: /people/approve-leave
 
 An admin cannot approve or reject their own leave. Their row shows **Needs the owner or another admin**. The workspace owner can decide their own.
 
+## Who is told
+
+When someone files a leave request, their manager is told. If the person has no active manager, every owner and admin is told instead. The person who filed it is never told about their own leave request.
+
 ## Steps
 
 ![The Leave Approvals screen with pending requests and Approve, Reject and Cancel buttons](/docs-media/lekiu/approve-leave.png)
