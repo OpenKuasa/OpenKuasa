@@ -9,7 +9,7 @@ On the **Leave** screen you apply for your own leave, see your balance for the y
 
 ## Who can do this
 
-Any member of the workspace whose account is linked to their employee record, whatever their role. You can only apply for your own leave here. Owners and admins enter leave for someone else on the leave approvals screen.
+Anyone in the workspace whose account is linked to their employee record, whatever their role. You can only apply for your own leave here. Owners and admins enter leave for someone else on the leave approvals screen.
 
 ## Before you start
 

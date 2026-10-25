@@ -24,7 +24,7 @@ An admin cannot approve, reject or mark as paid their own request. The row shows
 
 ## Managers
 
-You are a manager in Lekiu when other employees have you in their **Reports to** field, and your account is linked to your own employee record. Only owners and admins can set **Reports to**.
+You are a manager in Lekiu when other employees have you in their **Reports to** field, your account is linked to your own employee record, and that record is active. Only owners and admins can set **Reports to**.
 
 A manager sees the approval screens and **Attendance** under **Management**. On them, a manager can:
 
@@ -36,14 +36,14 @@ A manager cannot cancel someone else's request, add a request for someone, mark 
 
 ## Everyone with a linked employee record
 
-Any member of the workspace whose account is linked to an employee record can, for themselves:
+Anyone in the workspace whose account is linked to an employee record can, for themselves, whatever their role:
 
 - apply for leave and time-off, make expense claims and claim overtime, and cancel them while the rules allow;
 - clock in and out, and record their own hours for this week and last week;
 - ask to swap a shift with a colleague, and accept or decline a swap asked of them;
 - see their own records, documents, letters, goals, reviews and training, upload some documents and acknowledge letters.
 
-Applying for and cancelling your own leave, time-off, claims and overtime works for the **Viewer** role too.
+All of these work for the **Viewer** role too, not only for members.
 
 ## If your account is not linked
 

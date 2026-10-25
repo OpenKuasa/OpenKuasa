@@ -40,7 +40,7 @@ An admin cannot approve or reject their own leave. Their row shows **Needs the o
 - **"You can't approve, reject or pay your own request. Ask the workspace owner or another admin."** You are an admin deciding your own request.
 - **"That request has already been decided or cancelled."** Someone else got there first. The page reloads to show where it stands.
 - **"Only owners, admins and the employee's manager can do that."** You are not an approver for this request.
-- **Export does nothing**: **Export** is not built yet.
+- **Export is greyed out**: it is a disabled button. It shows "Available in a later update".
 
 ## Related
 

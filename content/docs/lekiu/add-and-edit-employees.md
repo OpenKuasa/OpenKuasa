@@ -17,7 +17,7 @@ Nothing can be changed in the demo workspace.
 
 ## Steps
 
-![The Employees screen with headcount, departments and the staff directory](/docs-media/lekiu/employees.png)
+![The top of the Employees screen with headcount, department and tenure charts, and the Departments card](/docs-media/lekiu/employees.png)
 
 ### Add an employee
 

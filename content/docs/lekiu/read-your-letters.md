@@ -9,7 +9,7 @@ When HR issues a letter to you, it appears on **HR Letters** under **Your letter
 
 ## Who can do this
 
-Any member of the workspace whose account is linked to their employee record. You only see issued letters addressed to you. Drafts are never shown to you.
+Anyone in the workspace whose account is linked to their employee record, whatever their role. You only see issued letters addressed to you. Drafts are never shown to you.
 
 ## Steps
 

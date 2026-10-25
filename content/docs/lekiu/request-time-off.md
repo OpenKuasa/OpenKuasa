@@ -9,7 +9,7 @@ Time-off is for a few hours off on one day, such as a clinic visit. For whole da
 
 ## Who can do this
 
-Any member of the workspace whose account is linked to their employee record, whatever their role. You can only ask for your own time-off.
+Anyone in the workspace whose account is linked to their employee record, whatever their role. You can only ask for your own time-off.
 
 ## Before you start
 

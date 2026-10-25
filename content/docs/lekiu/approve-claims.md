@@ -28,7 +28,7 @@ An admin cannot approve, reject or mark as paid their own claim. The workspace o
 ### Mark a claim as paid
 
 1. On an approved claim, click **Mark paid**.
-2. Check the **Date paid** (today unless you change it). It cannot be before the claim's date or after today.
+2. Check the date in the date box. It is the date paid, today unless you change it. It cannot be before the claim's date or after today.
 3. Add a **Reference (optional)**, up to 100 characters.
 4. Click **Confirm paid**. The status changes to **Paid**.
 

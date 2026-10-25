@@ -9,7 +9,7 @@ On the **OT Claims** screen you claim the overtime you worked. The pay is worked
 
 ## Who can do this
 
-Any member of the workspace whose account is linked to their employee record, whatever their role. You can only claim your own overtime here. Owners and admins enter overtime for someone else on the overtime approvals screen.
+Anyone in the workspace whose account is linked to their employee record, whatever their role. You can only claim your own overtime here. Owners and admins enter overtime for someone else on the overtime approvals screen.
 
 ## Before you start
 

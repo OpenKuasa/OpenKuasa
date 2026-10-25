@@ -9,7 +9,7 @@ screen: /people/my-attendance
 
 ## Who can do this
 
-Any member of the workspace whose account is linked to their employee record, whatever their role. You only clock in and out for yourself. An owner's screen shows the owner's own attendance, not the team's.
+Anyone in the workspace whose account is linked to their employee record, whatever their role. You only clock in and out for yourself. An owner's screen shows the owner's own attendance, not the team's.
 
 ## Before you start
 
@@ -18,6 +18,8 @@ Your account must be linked to your employee record.
 ## Steps
 
 ![The My Attendance screen with the Today card and attendance figures](/docs-media/lekiu/my-attendance.png)
+
+This screenshot was taken on a day off, so the **Today** card shows "Today is not a working day." and no **Clock in** button. On a working day the button is there.
 
 1. Open **Lekiu**, then **My Attendance** under **General**.
 2. In the **Today** card, click **Clock in**. The card then says **In since** and the time.
@@ -29,8 +31,8 @@ Below **Today** you can see **Days present**, **Average clock-in**, **Late this 
 
 ## Common problems
 
-- **"Today is not a working day. Ask an owner or admin to record it if you worked."** There is no button on days off or public holidays.
-- **"You are on approved leave today."**
+- **The Today card says "Today is not a working day." or "Today is a public holiday: …"** There is no **Clock in** button on those days. If you worked, ask an owner or admin to record it.
+- **The Today card says "You are on approved leave today."** There is no **Clock in** button.
 - **"You have already clocked in today."** or **"You have already clocked out today."** Each happens once a day.
 - **"No clock-out"** in **Recent clock-ins**: you did not clock out that day. Ask an owner or admin to correct it.
 - **"This employee record is inactive, so attendance cannot be clocked."**

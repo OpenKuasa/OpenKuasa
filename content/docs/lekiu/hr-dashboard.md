@@ -22,7 +22,7 @@ If people report to you, you also see a **My team** card.
 
 ## Common problems
 
-- **Export does nothing**: **Export** is not built yet. It shows "Available in a later update".
+- **Export is greyed out**: it is a disabled button. It shows "Available in a later update".
 
 ## Related
 

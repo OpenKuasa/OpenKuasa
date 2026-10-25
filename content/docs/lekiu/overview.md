@@ -11,9 +11,9 @@ The Overview is the first screen in Lekiu. It shows your team at a glance and ha
 
 Everyone in the workspace can open the Overview. What you see depends on who you are:
 
-- Owners and admins see figures for the whole team, such as **Pending approvals**.
-- Everyone else sees their own figures. The approvals card is called **Your requests** and lists your own requests that are waiting.
-- The **HR AI agents** card is only filled in for owners and admins. Everyone else sees "Shown to HR admins".
+- **Headcount**, **Headcount over time**, **By department** and **Birthdays & anniversaries** cover the whole team for everyone.
+- Owners and admins see every card. Everyone else sees "Shown to HR admins", with no figure, on **Clocked in so far today**, **On leave today** (both the figure and the list), **Leave by type**, **Clocked in so far** and **HR AI agents**.
+- For owners and admins the approvals card is **Pending approvals**. For everyone else it is **Your requests**: your own requests that are waiting.
 
 ## Steps
 
@@ -22,9 +22,11 @@ Everyone in the workspace can open the Overview. What you see depends on who you
 1. Open **Lekiu**, then **Overview** under **General**.
 2. To ask a question, type it in the box that says **Ask Lekiu anything…**, or press one of the ready questions, such as **Who's on leave today?** or **Pending approvals**.
 3. Read the cards below the chat:
-   - **Headcount**, **Clocked in so far today** and **On leave today**.
-   - **Headcount over time**, **By department** and **Leave by type**.
-   - **On leave today**, the approvals card, and **Birthdays & anniversaries** in the next 30 days.
+   - **Headcount**, **Clocked in so far today**, **On leave today** and the approvals card.
+   - **Headcount over time**, **By department**, **Leave by type**, **Clocked in so far** and **HR AI agents**.
+   - **On leave today**, the approvals list, and **Birthdays & anniversaries** in the next 30 days.
+
+   Cards marked "Shown to HR admins" are filled in for owners and admins only.
 
 ## Common problems
 

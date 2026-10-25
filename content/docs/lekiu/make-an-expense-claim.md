@@ -9,7 +9,7 @@ On the **Financial Claims** screen you claim back what you spent for work, attac
 
 ## Who can do this
 
-Any member of the workspace whose account is linked to their employee record, whatever their role. You can only claim for yourself here. Owners and admins enter a claim for someone else on the claim approvals screen.
+Anyone in the workspace whose account is linked to their employee record, whatever their role. You can only claim for yourself here. Owners and admins enter a claim for someone else on the claim approvals screen.
 
 ## Before you start
 

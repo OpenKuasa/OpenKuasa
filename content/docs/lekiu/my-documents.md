@@ -9,7 +9,7 @@ screen: /people/my-documents
 
 ## Who can do this
 
-Any member of the workspace whose account is linked to their employee record. You only see your own documents. Uploading is not available in the demo workspace.
+Anyone in the workspace whose account is linked to their employee record, whatever their role. You only see your own documents. Uploading is not available in the demo workspace.
 
 ## Before you start
 

@@ -9,7 +9,7 @@ screen: /people/records
 
 ## Who can do this
 
-Any member of the workspace whose account is linked to their employee record. You only ever see your own record.
+Anyone in the workspace whose account is linked to their employee record, whatever their role. You only ever see your own record.
 
 ## Before you start
 

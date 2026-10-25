@@ -16,6 +16,8 @@ screen: /people/training
 
 ![The Training screen with courses, enrolments and completion](/docs-media/lekiu/training.png)
 
+This screenshot is from the demo workspace, where adding courses and enrolling are switched off and show "Available in a later update". In your own workspace they work as described below.
+
 ### Add a course
 
 1. Open **Lekiu**, then **Training** under **Performance**.
