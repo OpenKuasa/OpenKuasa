@@ -1,0 +1,5 @@
+[
+  { "file": "lekir/jobs.png", "path": "/hire/jobs", "as": "demo", "viewport": [1280, 1400], "clip": "main" },
+  { "file": "lekir/interviews.png", "path": "/hire/interviews", "as": "demo", "viewport": [1280, 1400], "clip": "main" },
+  { "file": "lekir/settings.png", "path": "/hire/settings", "as": "demo", "viewport": [1280, 900], "clip": "main" }
+]
