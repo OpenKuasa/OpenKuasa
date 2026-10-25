@@ -47,7 +47,6 @@ In the appointment's row, pick a new status from the **Status** list: **Schedule
 
 - **"Pick a valid date and time."** Fill in **When** before you save.
 - **"That appointment was not found."** Someone else deleted it. Refresh the page.
-- **"You do not have permission to make changes here."** Viewers cannot change appointments.
 
 ## Related
 

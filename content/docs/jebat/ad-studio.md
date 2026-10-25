@@ -47,7 +47,6 @@ _Shown from the sample workspace, where editing is switched off._
 - **"Reach", "Spend & leads", "Ad funnel" and "Budget used" say "Not available yet".** These figures are not built for your own workspace yet. Only the demo shows sample figures in them.
 - **Connecting a Meta account.** Ad Studio does not connect to Meta yet, so ads are not launched or synced from here. The **Connect Meta**, **Login with Facebook** and **Audiences** buttons do not do anything yet. Settings says "Connecting Meta is coming soon."
 - **"That campaign was not found."** Someone else deleted it. Refresh the page.
-- **"You do not have permission to make changes here."** Viewers cannot change campaigns.
 
 ## Related
 

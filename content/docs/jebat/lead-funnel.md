@@ -54,7 +54,6 @@ In the lead's row, pick the new stage from the **Stage** list. It saves straight
 
 - **A lead has no Stage list, only "Open in Kasturi".** It came in through a lead form, a landing page or the chatbot, and lives in Kasturi. Click **Open in Kasturi** and change its status there. (Viewers see neither the Stage list nor the button, only the stage.)
 - **"That lead was not found."** Someone else deleted it. Refresh the page.
-- **"You do not have permission to make changes here."** Viewers cannot change leads.
 
 ## Related
 

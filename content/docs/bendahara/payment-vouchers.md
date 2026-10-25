@@ -5,7 +5,7 @@ order: 11
 ask: How do I record a payment voucher for office rent in Bendahara?
 screen: /finance/payment-vouchers
 ---
-Payment Vouchers lists every movement of money out: payments to suppliers, refunds to customers, payments of expenses, and money out that settles no bill. It is part of the cash book. A voucher gets its payment voucher number when it is paid.
+Payment Vouchers lists every movement of money out: payments to suppliers, payments of expenses, money out that settles no bill, and customer refunds (see [Refunds](/docs/bendahara/refunds)). It is part of the cash book. A voucher gets its payment voucher number when it is paid.
 
 ## Who can do this
 
@@ -53,7 +53,7 @@ Open a voucher's row menu:
 - **Void** on a paid voucher. The money counts as back in the account and the books reverse it. This cannot be undone.
 - **Delete** on a voucher that is a draft, waiting or rejected, or one of this screen's own vouchers that is still to be paid.
 
-Payments to suppliers and refunds are marked paid and voided on their own screens, [Payments out](/docs/bendahara/payments-out) and Refunds.
+Payments to suppliers and refunds are marked paid and voided on their own screens, [Payments out](/docs/bendahara/payments-out) and [Refunds](/docs/bendahara/refunds).
 
 Use the **Period** list to see **This month**, **This quarter**, **This year** or **All time**.
 
