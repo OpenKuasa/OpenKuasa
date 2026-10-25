@@ -59,7 +59,8 @@ A form that is not active shows **Activate this form to get its link.**
 - **Another form already uses that short name.**: pick a different short name.
 - **Enter the sentence visitors tick to agree.** or **Keep the consent sentence to 300 characters or fewer.**: check the consent sentence.
 - Visitors see **This form is not accepting responses.** when the form is a draft or paused.
-- Visitors see **This form is receiving a lot of responses right now. Try again in a minute.** when a form gets many responses at once.
+- Visitors see **This form is receiving a lot of responses right now. Try again in a minute.** when a form gets many responses at once (30 in a minute), or when the workspace's forms have taken 1,000 responses in a day between them.
+- A visitor who sends many responses from one network sees **Too many attempts from your network. Please try again in … minutes.**
 - The demo workspace's forms do not take responses.
 
 ## Related

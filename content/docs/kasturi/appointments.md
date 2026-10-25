@@ -45,7 +45,6 @@ Appointments also show on the Calendar, except cancelled ones.
 
 - **Pick a valid date and time.**: choose a date and time in **When**.
 - The **Contact** field is typed, not picked from your contacts.
-- **You do not have permission to make changes here.**: viewers and the demo workspace cannot change appointments.
 
 ## Related
 

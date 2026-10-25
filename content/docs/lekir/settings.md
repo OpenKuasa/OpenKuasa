@@ -24,7 +24,7 @@ Lekir's Settings screen brings your recruiting preferences together. You change 
 
 ## Common problems
 
-- **Open jobs have no description.** The Careers page card warns when open jobs have no description. The page leaves those jobs out. Edit the job and add one.
+- **"N open jobs have no description, so the page leaves them out."** The Careers page card shows this with the number of jobs (it says "would leave" while the page is off). Edit each job and add a description.
 - **You do not have permission to change this.** Viewers cannot change the application form.
 - **Not available in the demo.** The demo's settings cannot be changed.
 - **Couldn't load your hiring data — please refresh.** A card could not be read. Refresh the page.

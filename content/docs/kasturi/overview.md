@@ -23,6 +23,7 @@ Everyone in the workspace can open the Overview. The figures come from the works
    - **Deals over time** shows deals created and won in each of the last 8 weeks.
    - **Deals by stage** and **Pipeline value** show your open deals in each stage of your default pipeline.
    - **Deals by owner** shows how many open deals each person has.
+   - **Win rate** shows the share of closed deals that were won, as a dial.
 4. Check **Deals closing soon**. It lists up to five open deals whose expected close date is in the next 7 days.
 5. Check **Recent activity**. It shows the latest deals added, won or lost, contacts added, logged calls and messages, and follow-ups done.
 6. Check **Follow-ups**. It lists open follow-ups, soonest first. An overdue one shows **Overdue** in red.

@@ -15,7 +15,7 @@ The Applications screen lists your applications, newest first. Each row opens a 
 ## Steps
 
 1. Open **Lekir** and choose **Applications**.
-2. In **Recent applications**, find the candidate and click **Details**.
+2. In **Recent applications**, find the candidate and click **Details**. Owners, admins and members see **Details** on every row. Viewers see it only where there is something to open: details the candidate sent, or interviews.
 3. Read what they sent: **Cover letter**, **CV file** (click **View CV**), **CV** link, **Portfolio** link and **Expected salary**. Only what they gave is shown.
 4. Under **Interviews**, see their interviews and any feedback. Interview feedback is separate from the application's own rating.
 5. Change where the application stands:

@@ -16,7 +16,7 @@ Owners, admins and members can import contacts. Viewers cannot.
 - Save your list as a .csv or .xlsx file. An older .xls file needs to be saved as .xlsx first.
 - The first line must be the column names.
 - Every contact needs a first name and an email.
-- One file can hold up to 500 contacts. Split a longer list into several files.
+- One file can hold up to 500 rows. Split a longer list into several files.
 
 A CSV file can use commas, semicolons or tabs between values. Kasturi works out which from the first line.
 

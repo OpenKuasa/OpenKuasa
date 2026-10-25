@@ -68,8 +68,6 @@ People who already received it should not get it again. This works for 23 hours 
 - **A broadcast can go to at most 500 recipients. Narrow the audience first.**: choose fewer statuses or tags.
 - **This broadcast has been sent, so it can no longer be changed or deleted.**: write a new broadcast instead.
 - **Add your Resend key and sender address in the email settings before sending.**: set up email sending first.
-- **Only owners and admins can send a broadcast.**: ask an owner or admin to send it.
-- **The demo workspace is read-only. Sign up to send broadcasts.**: the demo cannot send.
 
 ## Related
 

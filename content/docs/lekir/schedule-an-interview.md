@@ -36,9 +36,9 @@ For an interview that already took place, click **Record a past interview** inst
 
 ## Common problems
 
-- **That time has already passed in Kuala Lumpur.** Choose a later time, or use **Record a past interview**.
+- **That time has already passed in Kuala Lumpur. Choose a later one, or use “Record a past interview” if it already took place.**
 - **Choose a date within the next 12 months.**
-- **That time has not passed yet in Kuala Lumpur.** To plan an interview, use **Schedule interview**.
+- **That time has not passed yet in Kuala Lumpur. To plan an interview, use “Schedule interview”.**
 - **Choose a date within the last 12 months.** For a past interview.
 - **This application already has an interview at that time.**
 - **This application is no longer active. Reopen it before scheduling or changing an interview.**

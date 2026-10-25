@@ -10,7 +10,7 @@ Kasturi's agent watches your deals, contacts and follow-ups for what you ask, an
 ## Who can do this
 
 - Everyone in the workspace can see the agent's focus, its suggestions and its history.
-- Only owners and admins can write and confirm the focus, choose how often it runs, and set its spending limits.
+- Only owners and admins can write and confirm the focus, choose how often it runs, and set its spending limits. While no focus is saved, anyone else sees **Only an owner or admin can set the focus.** in the focus box.
 - Owners, admins and members can press **Run now**, and **Approve** or **Dismiss** a suggestion. Viewers cannot.
 
 ## Before you start
@@ -42,7 +42,6 @@ A suggestion either adds a follow-up task or leaves a note on a deal or contact.
 
 ## Common problems
 
-- **Only an owner or admin can set the focus.**: ask an owner or admin to write it.
 - **Save and confirm a focus first.**: click **Looks right** under **Focus** before you run the agent.
 - **A run is already in progress. Please wait for it to finish.**: a workspace runs one at a time.
 - **Enter a per-run limit between RM 0 and RM 100.** or **Enter daily and weekly limits between RM 0 and RM 10,000.**: change the limit and save again.

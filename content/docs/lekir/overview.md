@@ -22,7 +22,7 @@ Lekir can also prepare changes, such as moving an application or adding a candid
    - **Applications over time** for the last 8 weeks, and **Applications by source**.
    - **Hiring pipeline**, from Applied to Hired.
    - **Upcoming interviews**: the next three that are still scheduled.
-   - **Top candidates**: the highest-rated active applications.
+   - **Top candidates**: up to 5 of the highest-rated active applications, leaving out anyone already hired.
 
 ## Common problems
 

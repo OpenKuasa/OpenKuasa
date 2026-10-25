@@ -30,7 +30,6 @@ Weekly Studio picks its suggestions from these checks on your data:
 ## Common problems
 
 - **"No suggestions waiting — Jebat will add some after its next run."** There is nothing to decide. Run Weekly Studio again later; see [Turn on and run Weekly Studio](/docs/jebat/weekly-studio).
-- **"You do not have permission to make changes here."** Viewers cannot decide on suggestions. Ask an owner, admin or member.
 - **A suggestion shows Failed.** The change could not be made. You can make it yourself on the screen it is about.
 
 ## Related
