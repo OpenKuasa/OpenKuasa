@@ -52,7 +52,7 @@ _Shown from the sample workspace, where editing is switched off._
 
 ## Not working yet
 
-- **Quiet hours** (**Pause notifications overnight**, **From**, **To**) are saved for later, but they do not hold or pause any notifications yet. Times are shown in the timezone from your profile.
+- **Quiet hours** (**Pause notifications overnight**, **From**, **To**) are marked **Coming soon**. Your choice is saved for later, but it does not hold or pause any notifications yet. Times are shown in the timezone from your profile.
 
 ## Common problems
 

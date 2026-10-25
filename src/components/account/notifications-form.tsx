@@ -1,7 +1,8 @@
 'use client';
 
 import { AppWindow, Mail, Smartphone, type LucideIcon } from 'lucide-react';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
+import { Card, CardAction, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
 import {
@@ -155,15 +156,20 @@ export function NotificationsForm({
       </Card>
 
       <Card>
+        {/* Nothing reads these yet: the choice is saved, and the controls stay in the form for the one Save. */}
         <CardHeader>
           <CardTitle>Quiet hours</CardTitle>
+          <CardAction>
+            <Badge variant="secondary">Coming soon</Badge>
+          </CardAction>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="flex items-center justify-between gap-4">
             <div>
               <p className="font-medium">Pause notifications overnight</p>
               <p className="text-sm text-muted-foreground">
-                We&apos;ll hold non-urgent alerts during these hours.
+                Saved for later. Quiet hours don&apos;t hold or pause any
+                notifications yet.
               </p>
             </div>
             <Switch
