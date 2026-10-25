@@ -79,6 +79,13 @@ describe('the other account questions', () => {
     expect(ctl.asked).toEqual([[{ bucket: 'password_check_account', value: 'user-1', limit: 10, windowSeconds: 900 }]]);
   });
 
+  it('a push subscription save is counted per account', async () => {
+    await limits.pushSubscribeLimited('user-1');
+    expect(ctl.asked).toEqual([[{ bucket: 'push_subscribe', value: 'user-1', limit: 20, windowSeconds: 3600 }]]);
+    refuse(120);
+    expect(await limits.pushSubscribeLimited('user-1')).toBe('Too many attempts. Try again in 2 minutes.');
+  });
+
   it('a reset is counted per client and per target email', async () => {
     await limits.passwordResetLimited('Siti@Example.com');
     expect(ctl.asked).toEqual([[

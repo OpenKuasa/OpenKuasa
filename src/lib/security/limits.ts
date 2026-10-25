@@ -62,6 +62,8 @@ export const CHATBOT_PERSON_PER_CLIENT: Rule = { bucket: 'chatbot_person_client'
 
 /** Weather lookups for the greeting by one signed-in user (keyed by user id, not address). */
 export const WEATHER_PER_USER: Rule = { bucket: 'weather', limit: 30, windowSeconds: 10 * MINUTE };
+/** Push subscriptions saved by one signed-in user (keyed by user id): a browser re-saves on each visit at most. */
+export const PUSH_SUBSCRIBE_PER_USER: Rule = { bucket: 'push_subscribe', limit: 20, windowSeconds: HOUR };
 
 /** What a person is told once a limit on signing in, signing up or resetting is used up. */
 export const tooManyAttempts = (retryAfterSeconds: number) => {
@@ -172,6 +174,11 @@ export async function chatbotLimited(rule: Rule): Promise<'ok' | 'limited' | 'un
   const verdict = await consumeRateLimits([perClient(rule, client)]);
   if (!verdict.allowed) return 'limited';
   return verdict.enforced ? 'ok' : 'unavailable';
+}
+
+/** Before a signed-in person's browser subscription for push is saved. */
+export async function pushSubscribeLimited(userId: string): Promise<string | null> {
+  return asAttempts(await waitFor(() => [perValue(PUSH_SUBSCRIBE_PER_USER, userId)]));
 }
 
 /** Before a weather lookup for a signed-in user; the verdict says whether it may go ahead. */
