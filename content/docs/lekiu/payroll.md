@@ -21,7 +21,7 @@ Each employee needs a **Monthly base salary (RM)** on their record. Someone with
 
 ![The Payroll screen with a draft run, its totals and the payslips table](/docs-media/lekiu/payroll.png)
 
-This screenshot is from the demo workspace, where **Run payroll** is switched off and shows "Available in a later update". In your own workspace it opens the run dialog.
+This screenshot is from the demo workspace, where **Run payroll** is switched off and shows "Available in a later update". In your own workspace **Run payroll** opens the run dialog, unless a draft run is blocking the next month or there is no month left to run.
 
 ### Create a draft
 
@@ -48,9 +48,9 @@ Click **Recalculate** after changing salaries or overtime. It adds payslips for 
 
 1. Click **Mark as paid**, then **Confirm**. Employees can now see their payslips.
 
-To change a paid run, click **Undo paid**, then **Confirm**. The payslips go back to draft and employees no longer see them. Only the newest run can be undone: if a later month already has a run, delete that run first. To throw a draft away, click **Delete draft**, then **Confirm**.
+To change a paid run, click **Undo paid**, then **Confirm**. The run goes back to a draft, its payslips go back to pending, and employees no longer see them. Only the newest run can be undone: if a later month already has a run, delete that run first. Only a draft can be deleted, so if that later run is paid, click **Undo paid** on it first, then **Delete draft**. To throw a draft away, click **Delete draft**, then **Confirm**.
 
-Use the **Month** list at the top to open an earlier run. **Export** is not built yet.
+Use the **Month** list at the top to open an earlier run. **Export** is a disabled button that says "Available in a later update".
 
 ## Common problems
 
