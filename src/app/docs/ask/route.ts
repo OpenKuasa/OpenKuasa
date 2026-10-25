@@ -18,10 +18,16 @@ async function signedIn(): Promise<boolean> {
   return !(session && isOAuthClientToken(session.access_token));
 }
 
-function goTo(path: string, request: NextRequest): NextResponse {
-  const response = NextResponse.redirect(new URL(path, request.nextUrl));
-  response.headers.set('Cache-Control', 'no-store');
-  return response;
+/**
+ * A same-site redirect with a relative Location, so the browser stays on the address it used. Behind the host's
+ * proxy the request URL is the internal one (https://localhost:8080 on Railway), so an absolute URL built from it
+ * would send people there.
+ */
+function goTo(path: string): NextResponse {
+  return new NextResponse(null, {
+    status: 307,
+    headers: { Location: path, 'Cache-Control': 'no-store' },
+  });
 }
 
 /**
@@ -30,9 +36,9 @@ function goTo(path: string, request: NextRequest): NextResponse {
  */
 export async function GET(request: NextRequest) {
   const question = cleanAsk(request.nextUrl.searchParams.get('q'));
-  if (!question) return goTo('/docs', request);
+  if (!question) return goTo('/docs');
 
   const sari = sariAskPath(question);
-  if (await signedIn()) return goTo(sari, request);
-  return goTo(`/login?next=${encodeURIComponent(sari)}`, request);
+  if (await signedIn()) return goTo(sari);
+  return goTo(`/login?next=${encodeURIComponent(sari)}`);
 }

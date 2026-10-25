@@ -78,9 +78,7 @@ test('signed-out, anonymous demo and OAuth-token sessions go to sign-in with Sar
     fakeClient(session);
     const response = await GET(request(`?q=${encodeURIComponent(QUESTION)}`));
     expect(response.status).toBe(307);
-    const location = new URL(response.headers.get('location')!);
-    expect(location.origin).toBe('https://app.example');
-    expect(`${location.pathname}${location.search}`).toBe(login);
+    expect(response.headers.get('location')).toBe(login);
     expect(response.headers.get('cache-control')).toBe('no-store');
   }
 });
@@ -89,8 +87,7 @@ test('a signed-in person goes straight to Sari with the question', async () => {
   fakeClient({ user: { id: 'u1', is_anonymous: false } });
   const response = await GET(request(`?q=${encodeURIComponent(`  ${QUESTION}\n`)}`));
   expect(response.status).toBe(307);
-  const location = new URL(response.headers.get('location')!);
-  expect(`${location.pathname}${location.search}`).toBe(SARI);
+  expect(response.headers.get('location')).toBe(SARI);
   expect(response.headers.get('cache-control')).toBe('no-store');
 });
 
@@ -99,7 +96,7 @@ test('an empty question goes back to /docs and nothing is cached', async () => {
   for (const query of ['', '?q=', '?q=%20%0A', '?other=1']) {
     const response = await GET(request(query));
     expect(response.status).toBe(307);
-    expect(new URL(response.headers.get('location')!).pathname).toBe('/docs');
+    expect(response.headers.get('location')).toBe('/docs');
     expect(response.headers.get('cache-control')).toBe('no-store');
   }
   expect(createClient).not.toHaveBeenCalled();
@@ -108,6 +105,16 @@ test('an empty question goes back to /docs and nothing is cached', async () => {
 test('without a database configured, the visitor is sent to sign-in', async () => {
   vi.stubEnv('NEXT_PUBLIC_SUPABASE_URL', '');
   const response = await GET(request(`?q=${encodeURIComponent(QUESTION)}`));
-  expect(new URL(response.headers.get('location')!).pathname).toBe('/login');
+  expect(response.headers.get('location')).toMatch(/^\/login\?/);
   expect(createClient).not.toHaveBeenCalled();
+});
+
+test('behind a proxy the redirect stays on the public site, never the internal host', async () => {
+  // On Railway the request reaches the app as https://localhost:8080; the browser must not be sent there.
+  fakeClient({});
+  const nextUrl = new URL(`https://localhost:8080/docs/ask?q=${encodeURIComponent(QUESTION)}`);
+  const response = await GET({ nextUrl, url: nextUrl.toString() } as unknown as NextRequest);
+  const location = response.headers.get('location')!;
+  expect(location.startsWith('/') && !location.startsWith('//')).toBe(true);
+  expect(location).not.toContain('localhost');
 });
