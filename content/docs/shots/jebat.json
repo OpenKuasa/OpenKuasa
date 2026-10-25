@@ -1,0 +1,6 @@
+[
+  {"file": "jebat/ad-studio-campaigns.png", "path": "/reach/ad-studio", "as": "demo", "viewport": [1280, 900], "clip": "section:has-text(\"Live & paused\")"},
+  {"file": "jebat/creative-library.png", "path": "/reach/creative-bank", "as": "demo", "viewport": [1280, 900], "clip": "section:has-text(\"Creative library\")"},
+  {"file": "jebat/lead-funnel-leads.png", "path": "/reach/leads", "as": "demo", "viewport": [1280, 800]},
+  {"file": "jebat/lead-forms-table.png", "path": "/reach/lead-forms", "as": "demo", "viewport": [1280, 900], "clip": "section:has-text(\"Your forms\")"}
+]
