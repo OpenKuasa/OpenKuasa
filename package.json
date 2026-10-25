@@ -13,6 +13,7 @@
     "prebuild": "node scripts/gen-screen-routes.mjs",
     "build": "next build",
     "start": "next start",
+    "docs:shots": "node scripts/docs-shots.mjs",
     "lint": "eslint",
     "test": "vitest run",
     "test:watch": "vitest",

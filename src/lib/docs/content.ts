@@ -80,6 +80,8 @@ export function parseGuide(fileName: string, raw: string, section: DocSectionKey
 const ROOT = path.join(process.cwd(), 'content/docs');
 /** content/docs/held holds the held-topic lists (see rules.ts), not guides. */
 const HELD_FOLDER = 'held';
+/** Screenshot recipes live beside the guides but are not guides. */
+const SHOTS_FOLDER = 'shots';
 export const HELD_DIR = path.join(ROOT, HELD_FOLDER);
 const SECTION_KEYS = new Set<string>(DOC_SECTIONS.map((s) => s.key));
 let cache: Guide[] | null = null;
@@ -87,7 +89,7 @@ let cache: Guide[] | null = null;
 function loadAll(): Guide[] {
   const guides: Guide[] = [];
   for (const dir of fs.readdirSync(ROOT, { withFileTypes: true })) {
-    if (!dir.isDirectory() || dir.name === HELD_FOLDER) continue;
+    if (!dir.isDirectory() || dir.name === HELD_FOLDER || dir.name === SHOTS_FOLDER) continue;
     if (!SECTION_KEYS.has(dir.name)) throw new Error(`${dir.name}: not a known docs section`);
     const section = dir.name as DocSectionKey;
     for (const file of fs.readdirSync(path.join(ROOT, dir.name)).sort()) {

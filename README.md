@@ -407,8 +407,12 @@ pnpm test:watch    # run the tests again on every change
 pnpm smoke:routes  # check that every screen responds
 pnpm gen:routes    # write the route files for the screen registry (runs before dev and build)
 pnpm db:migrate    # list migrations the Supabase project lacks; --apply applies them
+pnpm docs:shots   # retake docs screenshots from sample data (local server only; set DOCS_SHOTS_BASE; --only <prefix>)
 pnpm eval:tuah     # run the assistant evals against real models (spends credits)
 ```
+
+`pnpm docs:shots` reads `content/docs/shots/*.json` and writes `public/docs-media/`. It refuses any host
+except localhost, signs in with **Try the demo**, and never clicks Save, Send, Delete or the like.
 
 `pnpm eval:tuah` is not part of `pnpm test`. It calls real models and writes
 to a real workspace, so it bills the OpenRouter key; `EVAL_RUNS` sets how many
