@@ -54,6 +54,18 @@ Be careful when undoing and deleting later runs: deleting a run deletes its pays
 
 Use the **Month** list at the top to open an earlier run. **Export** is a disabled button that says "Available in a later update".
 
+## Before you rely on these figures
+
+Lekiu's proposed figures are a starting point, not the official amounts. Where they differ from the official rules, type the correct amount so it is marked **set by HR**. The rules below are as they stand at the time of writing; check KWSP, PERKESO and LHDN for the current ones.
+
+- **EPF.** Lekiu takes a flat 11% of gross pay as an estimate. KWSP sets the amounts by wage band in the Third Schedule of the EPF Act. Staff aged 60 and over pay no employee EPF (the employer still pays 4%), and non-citizen staff have their own rates. Lekiu does not apply any of these.
+- **SOCSO.** Lekiu's figure is an estimate. Use PERKESO's contribution table. Staff aged 60 and over pay no employee SOCSO.
+- **EIS.** Lekiu's figure is an estimate. Use the official EIS contribution table.
+- **What counts as wages.** Lekiu works out all three from gross pay, including overtime and every earning line. The official rules count different things: EPF leaves out overtime but includes bonuses, while SOCSO and EIS include overtime but leave out an annual bonus. So Lekiu can take too much. Adjust the figures where it does.
+- **Employer shares.** Lekiu does not work these out. Work them out and pay them separately. At the time of writing they are EPF 13% for wages up to RM 5,000 and 12% above that, SOCSO 1.75% and EIS 0.2%; check KWSP and PERKESO before you pay.
+- **PCB.** Lekiu does not calculate PCB. Work it out each month with LHDN's PCB calculator or e-CP39 and enter it on each payslip. As the employer, you are responsible for deducting the correct amount.
+- **Unpaid leave and new joiners.** For unpaid leave, Lekiu takes off basic pay ÷ 26 for each working day of approved unpaid leave. For a new joiner, it pays basic pay in proportion to the workspace's working days from the join date to the month end. Since 1 January 2023, section 18A of the Employment Act sets its own formula for a month that is not worked in full, such as a new joiner's first month or unpaid leave. Lekiu's method may give a different amount, so check it against the Act.
+
 ## Common problems
 
 - **"Mark … as paid or delete it before running the next month."** Only one draft at a time.

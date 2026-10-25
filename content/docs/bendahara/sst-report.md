@@ -58,6 +58,16 @@ This card is not shown while the service tax return is not ready.
 
 Bendahara cannot see MySST, so you mark a return as filed yourself. In **Periods**, each period shows its due date and what is payable, with **Open**, **Not filed** or **Marked filed**. Once a period has ended, click **Mark as filed**. Click **Undo** to take the mark off.
 
+## Check before you file
+
+The return follows what Bendahara does, which is not always the same as the official rules. These are the rules at the time of writing; check with Customs (JKDM) for the current ones.
+
+- **Service tax by invoice date.** By law, service tax is due when payment is received, or once 12 months pass without payment. Counting it by invoice date needs written approval from Customs' Director General. Choose **Invoice issued (approved by Customs)** only if you have that approval.
+- **Exchange rate.** For an invoice in another currency, Customs Public Ruling 3/2026 asks for the selling rate at the time of supply, from one source, used consistently. Bendahara fills in Bank Negara Malaysia's 5 pm selling rate. If you type your own rates, keep to one source.
+- **Credit notes.** Bendahara splits a credit note's tax in the same proportion as its invoice. On an invoice with lines at both 6% and 8%, or with some lines exempt, check that the credit note's tax matches the lines you actually credited.
+- **Rounding.** SST is rounded line by line, so a total can differ by a few sen from tax worked out on the whole invoice.
+- **Specific-rate sales tax.** Goods taxed at a specific rate (item 17 on the SST-02 form, per litre or per kilogram) are not supported. Work those out yourself.
+
 ## Common problems
 
 - **"You can mark a return as filed once its period has ended."**

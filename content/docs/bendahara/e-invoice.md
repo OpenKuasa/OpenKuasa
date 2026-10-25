@@ -25,6 +25,10 @@ This only records what you did on the portal. Nothing is submitted from Bendahar
 
 The MyInvois integration, auto-submitting validated invoices and e-Invois alerts are listed as **Coming soon** in [Accounting settings](/docs/bendahara/settings).
 
+## Do you need e-Invoice yet
+
+At the time of writing, LHDN says businesses with a yearly turnover or revenue below RM 3 million do not have to use e-Invoice (updated 30 August 2026). For the last phase of businesses that must use it, LHDN gives a relaxation period that runs to 31 December 2027. These dates have changed before, so check LHDN's e-Invoice pages for where your business stands.
+
 ## Related
 
 - [Invoices](/docs/bendahara/invoices)

@@ -30,6 +30,8 @@ You need a posted invoice that has not been fully credited. See [Invoices](/docs
 
 When it is issued, the credit note gets its number and the invoice owes that much less from then on. If that is more than is still owed, the customer is in credit and can be refunded. After this it can no longer be edited or deleted, only voided.
 
+A credit note is one amount, so Bendahara splits its SST in the same proportion as the invoice's lines. On an invoice with lines at both 6% and 8%, or with some lines exempt, check that the credit note's tax matches the lines you actually credited before you file your SST return.
+
 ### Refund, void or delete
 
 From the row menu:

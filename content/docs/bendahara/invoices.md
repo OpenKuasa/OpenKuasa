@@ -51,6 +51,14 @@ From a posted invoice's row menu:
 
 Use the status and customer lists and the search box to find invoices, and **Export** to download them.
 
+## Check before you file
+
+These are the official rules at the time of writing; check with Customs (JKDM) for the current ones.
+
+- **Exchange rate.** Customs Public Ruling 3/2026 asks for the selling rate at the time of supply, from one source, used consistently. Bendahara fills in Bank Negara Malaysia's 5 pm selling rate. If you type your own rates, keep to one source.
+- **Service tax.** By law, service tax is due when payment is received, or once 12 months pass without payment. The SST Report can count service tax by invoice date, which needs written approval from Customs' Director General. Choose that only if you have the approval. See [SST report](/docs/bendahara/sst-report).
+- **Rounding.** SST is rounded line by line, so the invoice's tax can differ by a few sen from tax worked out on the whole invoice.
+
 ## Common problems
 
 - **"An invoice needs at least one line with an amount."**
