@@ -5,6 +5,7 @@ import { Bell, Wallet, Zap } from 'lucide-react';
 import type { AdSettings } from '@/lib/reach/types';
 import { updateAdSettingsAction } from '@/app/(app)/reach/actions';
 import { BentoCard } from '@/components/bento/bento';
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -66,6 +67,9 @@ function inputToCap(value: string): number | null {
 }
 
 type AdSettingsPatch = Parameters<typeof updateAdSettingsAction>[0];
+
+/** Shown on each card: the choices are saved, but nothing acts on them yet. */
+const COMING_SOON = <Badge variant="secondary">Coming soon</Badge>;
 
 /** One card's Save: pending, the last error, and whether the last save went through. */
 function useCardSave(canEdit: boolean) {
@@ -150,8 +154,9 @@ function BudgetCard({ settings, canEdit }: { settings: AdSettings | null; canEdi
   return (
     <BentoCard
       title="Budget & spend"
-      subtitle="Caps apply across all active campaigns"
+      subtitle="Saved for later. The caps don't stop any spend yet."
       icon={Wallet}
+      action={COMING_SOON}
       className="col-span-2 md:col-span-6"
     >
       <form
@@ -217,6 +222,7 @@ function BudgetCard({ settings, canEdit }: { settings: AdSettings | null; canEdi
               ))}
             </SelectContent>
           </Select>
+          <p className="text-sm text-muted-foreground">Saved for later. Amounts still show in RM.</p>
         </div>
         {save.footer}
       </form>
@@ -247,7 +253,7 @@ function TogglesCard({
   const save = useCardSave(canEdit);
   const [values, setValues] = useState(() => seedToggles(rows, saved));
   return (
-    <BentoCard title={title} subtitle={subtitle} icon={icon} className={className}>
+    <BentoCard title={title} subtitle={subtitle} icon={icon} action={COMING_SOON} className={className}>
       <form onSubmit={save.submit(() => ({ [field]: values }))}>
         <Toggles
           rows={rows}
@@ -264,14 +270,17 @@ function TogglesCard({
   );
 }
 
-/** Budget, Automation and Notifications: three cards, each saving only its own part. */
+/**
+ * Budget, Automation and Notifications: three cards, each saving only its own part. Nothing reads these choices
+ * yet (no ads run from Jebat), so each card is marked Coming soon; the controls stay usable so saved values keep.
+ */
 export function AdSettingsForm({ settings, canEdit }: { settings: AdSettings | null; canEdit: boolean }) {
   return (
     <>
       <BudgetCard settings={settings} canEdit={canEdit} />
       <TogglesCard
         title="Automation"
-        subtitle="Let Jebat optimise while you sleep"
+        subtitle="Saved for later. Nothing acts on these yet."
         icon={Zap}
         rows={AUTOMATION}
         saved={settings?.automation}
@@ -281,7 +290,7 @@ export function AdSettingsForm({ settings, canEdit }: { settings: AdSettings | n
       />
       <TogglesCard
         title="Notifications"
-        subtitle="Stay in the loop on spend & performance"
+        subtitle="Saved for later. Nothing acts on these yet."
         icon={Bell}
         rows={NOTIFICATIONS}
         saved={settings?.notifications}

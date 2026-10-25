@@ -5,7 +5,7 @@ order: 12
 ask: What can I change in Jebat's settings?
 screen: /reach/ad-settings
 ---
-Jebat's settings show your workspace details. They also store your ad budget caps and your automation and notification choices. These are saved for later: nothing acts on them yet.
+Jebat's settings show your workspace details. They also store your ad budget caps and your automation and notification choices. These are saved for later: nothing acts on them yet, so the **Budget & spend**, **Automation** and **Notifications** cards are marked **Coming soon**.
 
 ## Who can do this
 
