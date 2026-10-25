@@ -46,7 +46,7 @@ type Gate = { ok: true; supabase: Awaited<ReturnType<typeof createClient>>; user
 
 async function gate(request: Request): Promise<Gate> {
   if (!fromThisSite(request)) return { ok: false, response: json(403, { error: 'This request was not accepted.' }) };
-  if (!hasSupabaseEnv()) return { ok: false, response: json(401, { error: REFUSALS.PUSH_NOT_SIGNED_IN.error }) };
+  if (!hasSupabaseEnv()) return { ok: false, response: json(401, { error: REFUSALS.PUSH_NOT_SIGNED_IN.error, code: 'PUSH_NOT_SIGNED_IN' }) };
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { ok: false, response: json(401, { error: REFUSALS.PUSH_NOT_SIGNED_IN.error, code: 'PUSH_NOT_SIGNED_IN' }) };

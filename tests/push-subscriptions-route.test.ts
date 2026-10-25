@@ -9,6 +9,7 @@ vi.mock('@/lib/auth/viewer', () => ({ hasSupabaseEnv: vi.fn(() => true) }));
 vi.mock('@/lib/security/limits', () => ({ pushSubscribeLimited: vi.fn() }));
 
 import { DELETE, POST } from '@/app/api/push/subscriptions/route';
+import { hasSupabaseEnv } from '@/lib/auth/viewer';
 import { pushSubscribeLimited } from '@/lib/security/limits';
 
 const ENDPOINT = 'https://fcm.googleapis.com/fcm/send/abc';
@@ -54,6 +55,14 @@ describe('POST /api/push/subscriptions', () => {
     getUser.mockResolvedValue({ data: { user: null } });
     const res = await POST(req('POST', good));
     expect(res.status).toBe(401);
+    expect(rpc).not.toHaveBeenCalled();
+  });
+
+  it('401s with the sign-in code when Supabase is not configured', async () => {
+    vi.mocked(hasSupabaseEnv).mockReturnValueOnce(false);
+    const res = await POST(req('POST', good));
+    expect(res.status).toBe(401);
+    expect((await res.json()).code).toBe('PUSH_NOT_SIGNED_IN');
     expect(rpc).not.toHaveBeenCalled();
   });
 

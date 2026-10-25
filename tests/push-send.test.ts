@@ -53,7 +53,7 @@ describe('sendPending', () => {
     const sender = vi.fn<PushSender>(async () => ({ ok: true }));
     const out = await sendPending(db, sender, { batch: 50 });
     expect(rpc).toHaveBeenCalledWith('push_pending', { p_limit: 50 });
-    expect(out).toEqual({ sent: 2, removed: 0, failed: 0 });
+    expect(out).toEqual({ sent: 2, removed: 0, failed: 0, skipped: 0 });
     expect(results).toEqual([
       { p_outbox: 1, p_outcome: 'sent' },
       { p_outbox: 2, p_outcome: 'sent' },
@@ -75,7 +75,7 @@ describe('sendPending', () => {
     const statuses: Record<string, number | null> = { '1': 410, '2': 404, '3': 500, '4': null };
     const sender = vi.fn<PushSender>(async (sub) => ({ ok: false, status: statuses[sub.endpoint.split('/').pop()!] }));
     const out = await sendPending(db, sender);
-    expect(out).toEqual({ sent: 0, removed: 2, failed: 2 });
+    expect(out).toEqual({ sent: 0, removed: 2, failed: 2, skipped: 0 });
     expect(results).toEqual([
       { p_outbox: 1, p_outcome: 'gone' },
       { p_outbox: 2, p_outcome: 'gone' },
@@ -91,9 +91,47 @@ describe('sendPending', () => {
       .mockResolvedValueOnce({ ok: true });
     const err = vi.spyOn(console, 'error').mockImplementation(() => {});
     const out = await sendPending(db, sender);
-    expect(out).toEqual({ sent: 1, removed: 0, failed: 1 });
+    expect(out).toEqual({ sent: 1, removed: 0, failed: 1, skipped: 0 });
     expect(results.map((r) => r.p_outcome)).toEqual(['failed', 'sent']);
     err.mockRestore();
+  });
+
+  it('stops starting sends once the deadline passes, and records nothing for the untried', async () => {
+    const { db, results } = fakeDb([row(1), row(2), row(3)]);
+    let t = 1_000;
+    const sender = vi.fn<PushSender>(async () => {
+      t += 60_000;
+      return { ok: true };
+    });
+    const out = await sendPending(db, sender, { deadlineMs: 90_000, now: () => t });
+    expect(sender).toHaveBeenCalledTimes(2);
+    expect(out).toEqual({ sent: 2, removed: 0, failed: 0, skipped: 1 });
+    expect(results.map((r) => r.p_outbox)).toEqual([1, 2]);
+  });
+
+  it('cuts off a send that never settles at the deadline and records it as one failed attempt', async () => {
+    const { db, results } = fakeDb([row(1), row(2)]);
+    const sender = vi.fn<PushSender>(() => new Promise(() => {}));
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const out = await sendPending(db, sender, { deadlineMs: 30 });
+    expect(sender).toHaveBeenCalledTimes(1);
+    expect(out).toEqual({ sent: 0, removed: 0, failed: 1, skipped: 1 });
+    expect(results).toEqual([{ p_outbox: 1, p_outcome: 'failed' }]);
+    err.mockRestore();
+  });
+
+  it('skips later rows for a subscription already reported gone, without recounting', async () => {
+    const rows = [row(1), { ...row(2), subscription_id: 'sub-1' }, row(3)];
+    const { db, results } = fakeDb(rows);
+    const sender = vi.fn<PushSender>(async (sub) =>
+      sub.endpoint.endsWith('/1') ? { ok: false, status: 410 } : { ok: true });
+    const out = await sendPending(db, sender);
+    expect(sender).toHaveBeenCalledTimes(2);
+    expect(out).toEqual({ sent: 1, removed: 1, failed: 0, skipped: 0 });
+    expect(results).toEqual([
+      { p_outbox: 1, p_outcome: 'gone' },
+      { p_outbox: 3, p_outcome: 'sent' },
+    ]);
   });
 
   it.each([
@@ -122,7 +160,7 @@ describe('sendPending', () => {
     const sender = vi.fn<PushSender>();
     const err = vi.spyOn(console, 'error').mockImplementation(() => {});
     const out = await sendPending(db, sender);
-    expect(out).toEqual({ sent: 0, removed: 0, failed: 0, error: true });
+    expect(out).toEqual({ sent: 0, removed: 0, failed: 0, skipped: 0, error: true });
     expect(sender).not.toHaveBeenCalled();
     expect(JSON.stringify(err.mock.calls)).not.toContain('permission denied');
     err.mockRestore();

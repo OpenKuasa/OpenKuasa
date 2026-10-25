@@ -21,7 +21,7 @@ beforeEach(() => {
   vi.stubEnv('VAPID_PRIVATE_KEY', 'priv');
   vi.stubEnv('VAPID_SUBJECT', 'mailto:ops@example.com');
   vi.mocked(sendPending).mockReset();
-  vi.mocked(sendPending).mockResolvedValue({ sent: 3, removed: 1, failed: 2 });
+  vi.mocked(sendPending).mockResolvedValue({ sent: 3, removed: 1, failed: 2, skipped: 0 });
 });
 
 afterEach(() => {
@@ -49,15 +49,15 @@ describe('POST /api/push/send', () => {
   it('sends what is queued with the service client and the VAPID keys', async () => {
     const res = await POST(authed());
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ ok: true, sent: 3, removed: 1, failed: 2 });
+    expect(await res.json()).toEqual({ ok: true, sent: 3, removed: 1, failed: 2, skipped: 0 });
     expect(webPushSender).toHaveBeenCalledWith({ publicKey: 'pub', privateKey: 'priv', subject: 'mailto:ops@example.com' });
     expect(sendPending).toHaveBeenCalledWith({ tag: 'svc' }, 'sender');
   });
 
   it('reports ok false when the queue could not be read', async () => {
-    vi.mocked(sendPending).mockResolvedValue({ sent: 0, removed: 0, failed: 0, error: true });
+    vi.mocked(sendPending).mockResolvedValue({ sent: 0, removed: 0, failed: 0, skipped: 0, error: true });
     const res = await POST(authed());
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ ok: false, sent: 0, removed: 0, failed: 0 });
+    expect(await res.json()).toEqual({ ok: false, sent: 0, removed: 0, failed: 0, skipped: 0 });
   });
 });

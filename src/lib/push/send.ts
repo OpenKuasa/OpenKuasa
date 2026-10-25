@@ -15,13 +15,16 @@ export type PushSender = (
   payload: PushPayload,
 ) => Promise<{ ok: true } | { ok: false; status: number | null }>;
 
-export type SendResult = { sent: number; removed: number; failed: number; error?: true };
+export type SendResult = { sent: number; removed: number; failed: number; skipped: number; error?: true };
 
 /** Where a notification with no link, or an unsafe one, opens. */
 const FALLBACK_URL = '/command';
 
 /** How long a push service keeps a message for a device that is offline. */
 const TTL_SECONDS = 24 * 60 * 60;
+
+/** A run stops starting sends after this long: well inside the 5-minute cron and the 10-minute claim lease. */
+const DEADLINE_MS = 4 * 60_000;
 
 /** A push service that stops answering gives up the socket after this long (web-push has no default). */
 const TIMEOUT_MS = 10_000;
@@ -50,16 +53,29 @@ type Outcome = 'sent' | 'gone' | 'failed';
 export async function sendPending(
   db: SupabaseClient,
   sender: PushSender,
-  { batch = 100 }: { batch?: number } = {},
+  { batch = 100, deadlineMs = DEADLINE_MS, now = Date.now }: { batch?: number; deadlineMs?: number; now?: () => number } = {},
 ): Promise<SendResult> {
-  const result: SendResult = { sent: 0, removed: 0, failed: 0 };
+  const deadline = now() + deadlineMs;
+  const result: SendResult = { sent: 0, removed: 0, failed: 0, skipped: 0 };
   const pending = await db.rpc('push_pending', { p_limit: batch });
   if (pending.error) {
     console.error('[push] could not read the queue:', pending.error.code);
     return { ...result, error: true };
   }
 
-  for (const row of (pending.data ?? []) as PendingRow[]) {
+  const rows = (pending.data ?? []) as PendingRow[];
+  // Subscriptions the push service reported gone in this run: the database
+  // already deleted their queue, so later rows for them are not sent or recorded.
+  const gone = new Set<string>();
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i];
+    if (gone.has(row.subscription_id)) continue;
+    const remaining = deadline - now();
+    if (remaining <= 0) {
+      // Untried items get no push_result: they wait out their lease and no attempt is counted.
+      result.skipped += rows.slice(i).filter((r) => !gone.has(r.subscription_id)).length;
+      break;
+    }
     const payload: PushPayload = {
       title: row.title,
       body: row.body ?? '',
@@ -67,14 +83,26 @@ export async function sendPending(
       tag: row.notification_id,
     };
     let outcome: Outcome;
+    let timer: ReturnType<typeof setTimeout> | undefined;
     try {
-      const sent = await sender({ endpoint: row.endpoint, keys: { p256dh: row.p256dh, auth: row.auth } }, payload);
+      // Race the send against the remaining budget so one that never settles cannot hold the run open.
+      // A send that was started and cut off is recorded as one failed attempt (push_result 'failed').
+      const cutOff = new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error('run deadline')), remaining);
+      });
+      const sent = await Promise.race([
+        sender({ endpoint: row.endpoint, keys: { p256dh: row.p256dh, auth: row.auth } }, payload),
+        cutOff,
+      ]);
       outcome = sent.ok ? 'sent' : sent.status === 404 || sent.status === 410 ? 'gone' : 'failed';
       if (!sent.ok && outcome === 'failed') console.error(`[push] item ${row.outbox_id} failed:`, sent.status);
     } catch {
       console.error(`[push] item ${row.outbox_id} failed: the sender threw`);
       outcome = 'failed';
+    } finally {
+      clearTimeout(timer);
     }
+    if (outcome === 'gone') gone.add(row.subscription_id);
     if (outcome === 'sent') result.sent += 1;
     else if (outcome === 'gone') result.removed += 1;
     else result.failed += 1;
