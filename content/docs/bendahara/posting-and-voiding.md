@@ -12,7 +12,7 @@ Owners, admins and members can work on drafts. Only owners and admins can post, 
 
 ## Drafts
 
-- A new bill, journal, contra entry or credit note starts as a draft. A draft can be edited and deleted.
+- A new bill, journal, contra entry or supplier credit note starts as a draft. A draft can be edited and deleted.
 - A draft has no number yet and is not in your books.
 - Saving a draft never uses up a document number.
 

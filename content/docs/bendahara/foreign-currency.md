@@ -14,9 +14,9 @@ Anyone who can create a document can choose its currency. The usual role rules a
 
 - On a quotation, invoice, supplier bill, RFQ or purchase order, choose the **Currency**. You then type the amounts in that currency.
 - The **Exchange rate** box is ringgit per one unit of the currency, or per 100 units for some currencies, as Bank Negara Malaysia publishes them. The label says which, for example "Exchange rate (RM per 100 JPY)".
-- The box fills with Bank Negara Malaysia's 5 pm selling rate for the document's date: the newest rate on or before that date. The note under the box says so, with the date. On an invoice the rate is for the date of supply, if you give one.
+- The box fills with Bank Negara Malaysia's 5 pm selling rate for the document's date: the newest rate on or before that date. The note under the box says so, with the date.
 - Rates are fetched from Bank Negara Malaysia every working day after 5:30 pm, when your host runs the daily rates job. Bank Negara does not publish a rate for every currency. For one it does not, type the rate yourself.
-- You can type a different rate. The note then reads "Typed by hand." On an invoice or a bill you must also say **Where this rate comes from**, and for some sources the bank's name or the approval reference.
+- You can type a different rate. The note then reads "Typed by hand." On a bill you must also say **Where this rate comes from**, and for some sources the bank's name or the approval reference.
 - If your rate is more than 20% away from Bank Negara Malaysia's, you are asked once. Save again to keep it.
 - A document in another currency needs a rate before it is posted, sent or submitted.
 - For a currency with no cents, such as JPY, enter whole amounts.

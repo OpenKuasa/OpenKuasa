@@ -21,8 +21,8 @@ The demo workspace is read-only for everyone.
 These steps are an owner's or admin's only. A member who tries one is told so, usually with "Only an owner or admin can post, pay or void. Ask one of them to do this."
 
 - Posting a supplier bill, and voiding a bill or a payment.
-- Sales documents follow the same owner or admin sign-off; see their guides.
-- Paying now, or marking a scheduled payment, refund or voucher as paid.
+- Sales documents follow the same owner or admin sign-off.
+- Paying now, or marking a scheduled payment or voucher as paid.
 - Issuing and voiding supplier credit notes, and applying their credit to a bill.
 - Approving, rejecting or sending back expenses, approving or rejecting payment vouchers and purchase orders, and closing a purchase order.
 - Recording and voiding transfers between accounts, and setting an opening balance.
