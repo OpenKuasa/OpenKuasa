@@ -51,5 +51,5 @@ Search the **Ledger**, or filter it by source and by account. Sources include **
 ## Related
 
 - [Chart of accounts](/docs/bendahara/chart-of-accounts)
-- [Reports](/docs/bendahara/reports)
+- [Financial reports](/docs/bendahara/financial-reports)
 - [Drafts, posting and voiding](/docs/bendahara/posting-and-voiding)

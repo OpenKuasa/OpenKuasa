@@ -23,7 +23,7 @@ To mark an expense paid you need a ringgit bank or cash account on [Banking](/do
 2. Choose **Pending approval** in the status list.
 3. Open the row's menu and choose **Approve** or **Reject**, then confirm.
 
-An approved expense is locked. It can then be paid, and only sent back or rejected while nothing has been paid. A rejected expense stays in the list as **Rejected**. Whoever entered it can edit it and send it again.
+An approved expense is locked. It can then be paid, and only sent back or rejected while nothing has been paid. A rejected expense stays in the list as **Rejected**. Anyone who may edit can change it and send it again.
 
 ### Send back an approved expense
 

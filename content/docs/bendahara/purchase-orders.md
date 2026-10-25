@@ -11,7 +11,7 @@ Purchase Orders follows an order to a supplier from approval to delivery and bil
 
 - Owners, admins and members can create and edit drafts, submit them for approval, record deliveries and create a bill from an approved order.
 - Only owners and admins can approve, reject or close an order. See [Approve purchase orders](/docs/bendahara/approve-purchase-orders).
-- The person who raised an order can withdraw or cancel it. Owners and admins can withdraw or cancel anyone's.
+- While an order is a draft or awaiting approval, the person who raised it can withdraw or cancel it, and owners and admins can withdraw or cancel anyone's. Once an order is approved, only owners and admins can cancel it.
 - Viewers can only look. In the demo workspace nothing can be changed.
 
 ## Before you start
@@ -34,7 +34,7 @@ The supplier must be in [Customers and suppliers](/docs/bendahara/customers-supp
 
 ### Submit, withdraw or delete a draft
 
-- **Submit for approval** gives the order its number. An owner or admin other than you then has to approve it before anything is bought.
+- **Submit for approval** gives the order its number. An owner or admin then has to approve it before anything is bought. An admin cannot approve an order they raised or submitted; an owner can.
 - **Withdraw** takes an order that is awaiting approval back to a draft, so it can be changed and submitted again.
 - **Delete** removes a draft that has never been submitted. A draft that already has a number cannot be deleted; choose **Cancel order** instead. A cancelled order cannot be changed or reopened, and its number is not used again.
 

@@ -42,7 +42,7 @@ The bills must be posted. See [Supplier bills](/docs/bendahara/supplier-bills).
 
 ## Bills in another currency
 
-If the bills are in another currency, you type the amounts in that currency. The form then asks for **Ringgit paid out**: what left the account, in RM. Such a payment is always paid now, never scheduled. The form shows about how much the bills carry for what is paid, and the realised exchange gain or loss. See [Foreign currency](/docs/bendahara/foreign-currency).
+If the bills are in another currency, you type the amounts in that currency. The form then asks for **Ringgit paid out**: what left the account, in RM. Such a payment is always paid now, never scheduled: the form offers no **Schedule for later**, so only an owner or admin can pay bills in another currency. The form shows about how much the bills carry for what is paid, and the realised exchange gain or loss. See [Foreign currency](/docs/bendahara/foreign-currency).
 
 ## Common problems
 

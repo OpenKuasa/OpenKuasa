@@ -21,7 +21,7 @@ The demo workspace is read-only for everyone.
 These steps are an owner's or admin's only. A member who tries one is told so, usually with "Only an owner or admin can post, pay or void. Ask one of them to do this."
 
 - Posting a supplier bill, and voiding a bill or a payment.
-- On the sales side: posting and voiding invoices, issuing and voiding credit notes, recording and voiding payments in, and posting and voiding cash receipts.
+- Sales documents follow the same owner or admin sign-off; see their guides.
 - Paying now, or marking a scheduled payment, refund or voucher as paid.
 - Issuing and voiding supplier credit notes, and applying their credit to a bill.
 - Approving, rejecting or sending back expenses, approving or rejecting payment vouchers and purchase orders, and closing a purchase order.
@@ -38,7 +38,7 @@ A member does the day-to-day work and leaves the sign-off to an owner or admin:
 
 - On a form with **Save and post**, a member's document is saved as a draft, and they are told only an owner or admin can post it.
 - A member's expense waits as **Pending approval**.
-- A member's payment to a supplier is saved as **Schedule for later**, not paid.
+- A member paying a supplier must choose **Schedule for later**. **Pay now** is refused with "Only an owner or admin can record this as paid. Save it as scheduled or pending instead."
 - A member can submit a purchase order for approval. An admin cannot approve an order they raised or submitted themselves; an owner can.
 
 ## Related

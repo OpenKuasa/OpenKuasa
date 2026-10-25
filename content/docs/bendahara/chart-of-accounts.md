@@ -45,4 +45,4 @@ Tick **Show archived** to see archived accounts. Click **Export** to download th
 ## Related
 
 - [Journals](/docs/bendahara/journals)
-- [Reports](/docs/bendahara/reports)
+- [Financial reports](/docs/bendahara/financial-reports)
