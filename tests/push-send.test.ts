@@ -158,6 +158,7 @@ describe('webPushSender', () => {
     expect(s).toEqual(sub);
     expect(JSON.parse(body as string)).toEqual(payload);
     expect(options?.vapidDetails).toEqual({ subject: cfg.subject, publicKey: 'pub', privateKey: 'priv' });
+    expect(options?.timeout).toBe(10_000);
   });
 
   it('turns a rejected status code into a result', async () => {

@@ -23,6 +23,9 @@ const FALLBACK_URL = '/command';
 /** How long a push service keeps a message for a device that is offline. */
 const TTL_SECONDS = 24 * 60 * 60;
 
+/** A push service that stops answering gives up the socket after this long (web-push has no default). */
+const TIMEOUT_MS = 10_000;
+
 type PendingRow = {
   outbox_id: number;
   subscription_id: string;
@@ -89,6 +92,7 @@ export function webPushSender(cfg: PushConfig): PushSender {
       await webpush.sendNotification(target, JSON.stringify(payload), {
         vapidDetails: { subject: cfg.subject, publicKey: cfg.publicKey, privateKey: cfg.privateKey },
         TTL: TTL_SECONDS,
+        timeout: TIMEOUT_MS,
       });
       return { ok: true };
     } catch (error) {
