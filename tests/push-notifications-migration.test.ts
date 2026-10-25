@@ -55,16 +55,13 @@ describe('push subscriptions migration', () => {
     expect(text).toContain('revoke all on private.push_outbox from public, anon, authenticated;');
   });
 
-  test('the service role gets exactly what the sender needs (it holds no default grants here)', () => {
+  test('the service role gets the two sender functions and nothing else: no table or schema grant', () => {
     const grants = [...flat(push).matchAll(/grant [^;]* to service_role;/g)].map((m) => m[0]);
     expect(grants).toEqual([
-      'grant usage on schema private to service_role;',
-      'grant select, update, delete on private.push_outbox to service_role;',
-      'grant select, delete on public.push_subscriptions to service_role;',
-      'grant select (id, user_id, title, body, href, event, read_at) on public.notifications to service_role;',
       'grant execute on function public.push_pending(int) to service_role;',
       'grant execute on function public.push_result(bigint, text) to service_role;',
     ]);
+    expect(flat(push)).not.toMatch(/grant [^;]* on (schema private|private\.push_outbox|public\.push_subscriptions|public\.notifications)[^;]* to service_role/);
   });
 
   test.each([
@@ -88,6 +85,10 @@ describe('push subscriptions migration', () => {
 
   test('subscribing refuses guests, upserts on the endpoint and drops a previous owner\'s queue', () => {
     const body = flat(fn(push, 'public.push_subscribe').body);
+    expect(body).toContain("host := substring(lower(coalesce(p_endpoint, '')) from '^https://([^/?#]*)/');");
+    expect(body).toContain("host !~ '^[a-z0-9.-]+$'");
+    expect(body).toContain("not (host = 'fcm.googleapis.com' or host like '%.push.services.mozilla.com' or host like '%.push.apple.com' or host like '%.notify.windows.com')");
+    expect(body).toContain("s.user_id = uid and s.endpoint <> p_endpoint) >= 10 then raise exception 'PUSH_TOO_MANY';");
     expect(body).toContain("if uid is null then raise exception 'PUSH_NOT_SIGNED_IN'; end if;");
     expect(body).toContain('select 1 from auth.users where id = uid and is_anonymous is true');
     expect(body).toContain("raise exception 'PUSH_DEMO';");
@@ -109,9 +110,15 @@ describe('push subscriptions migration', () => {
     );
   });
 
-  test('the sender drops read items and gives up after five failures', () => {
-    expect(flat(fn(push, 'public.push_pending').body)).toContain('n.read_at is not null or n.user_id <> s.user_id');
+  test('the sender drops read items, claims what it hands out, and gives up after five failures', () => {
+    const pending = flat(fn(push, 'public.push_pending').body);
+    expect(pending).toContain('n.read_at is not null or n.user_id <> s.user_id');
+    expect(pending).toContain("where o.claimed_at is null or o.claimed_at < now() - interval '10 minutes'");
+    expect(pending).toContain('for update of o skip locked');
+    expect(pending).toContain('update private.push_outbox o set claimed_at = now() from picked where o.id = picked.id');
+    expect(flat(push)).toContain('claimed_at timestamptz,');
     const result = flat(fn(push, 'public.push_result').body);
+    expect(result).toContain('set attempts = attempts + 1, claimed_at = null where id = p_outbox;');
     expect(result).toContain('delete from private.push_outbox where id = p_outbox and attempts >= 5;');
     expect(result).toContain("raise exception 'PUSH_BAD_OUTCOME';");
   });

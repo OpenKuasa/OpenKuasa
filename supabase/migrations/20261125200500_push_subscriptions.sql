@@ -37,6 +37,7 @@ create table private.push_outbox (
   subscription_id uuid not null references public.push_subscriptions(id) on delete cascade,
   notification_id uuid not null references public.notifications(id) on delete cascade,
   attempts int not null default 0,
+  claimed_at timestamptz,
   created_at timestamptz not null default now(),
   unique (subscription_id, notification_id)
 );
@@ -45,21 +46,20 @@ create index push_outbox_notification_idx on private.push_outbox (notification_i
 revoke all on private.push_outbox from public, anon, authenticated;
 revoke all on sequence private.push_outbox_id_seq from public, anon, authenticated;
 
--- ---- 3. the service role (the sender) ----------------------------------------------------
--- service_role holds no table grants in this project unless written here.
-grant usage on schema private to service_role;
-grant select, update, delete on private.push_outbox to service_role;
-grant select, delete on public.push_subscriptions to service_role;
-grant select (id, user_id, title, body, href, event, read_at) on public.notifications to service_role;
+-- The sender (service role) gets no table grants: it works only through push_pending and
+-- push_result below, which run as their owner.
 
--- ---- 4. subscribe and unsubscribe --------------------------------------------------------
+-- ---- 3. subscribe and unsubscribe --------------------------------------------------------
 -- Upserts on endpoint, so one browser is one row, owned by whoever turned push on there
 -- last. A browser that changes hands drops what was still queued for the old owner.
+-- Only real push services are accepted (https, a plain host: no user, no port), and at
+-- most 10 browsers per person.
 create or replace function public.push_subscribe(p_endpoint text, p_p256dh text, p_auth text, p_label text)
 returns uuid language plpgsql security definer set search_path = public as $$
 declare
   uid uuid := auth.uid();
   sid uuid;
+  host text;
 begin
   if uid is null then raise exception 'PUSH_NOT_SIGNED_IN'; end if;
   if exists (select 1 from auth.users where id = uid and is_anonymous is true)
@@ -67,9 +67,18 @@ begin
          and not exists (select 1 from public.org_members m where m.user_id = uid and not private.is_demo_org(m.org_id))) then
     raise exception 'PUSH_DEMO';
   end if;
-  if coalesce(p_endpoint, '') !~ '^https://' or length(p_endpoint) > 1000
+  -- The host is everything between https:// and the first '/'; it must be letters, digits,
+  -- dots and dashes only, so a user part (@), a port (:) or anything else is refused.
+  host := substring(lower(coalesce(p_endpoint, '')) from '^https://([^/?#]*)/');
+  if host is null or host !~ '^[a-z0-9.-]+$' or host like '%..%' or length(p_endpoint) > 1000
+     or not (host = 'fcm.googleapis.com' or host like '%.push.services.mozilla.com'
+             or host like '%.push.apple.com' or host like '%.notify.windows.com')
      or coalesce(p_p256dh, '') = '' or length(p_p256dh) > 200 or coalesce(p_auth, '') = '' or length(p_auth) > 200 then
     raise exception 'PUSH_BAD_SUBSCRIPTION';
+  end if;
+  perform pg_advisory_xact_lock(hashtextextended('push_subscribe:' || uid::text, 0));
+  if (select count(*) from public.push_subscriptions s where s.user_id = uid and s.endpoint <> p_endpoint) >= 10 then
+    raise exception 'PUSH_TOO_MANY';
   end if;
   insert into public.push_subscriptions as s (user_id, endpoint, p256dh, auth, device_label)
   values (uid, p_endpoint, p_p256dh, p_auth, left(nullif(trim(p_label), ''), 80))
@@ -92,10 +101,12 @@ end; $$;
 revoke all on function public.push_unsubscribe(text) from public, anon;
 grant execute on function public.push_unsubscribe(text) to authenticated;
 
--- ---- 5. the sender's two calls (service role only) ---------------------------------------
+-- ---- 4. the sender's two calls (service role only) ---------------------------------------
 -- The private schema is not served over the API, so the sender works through these.
 -- push_pending: drops queued items that are already read (or no longer belong to the
--- subscription's owner), then returns up to p_limit items still to send, oldest first.
+-- subscription's owner), then claims and returns up to p_limit items still to send, oldest
+-- first. A claimed item is not handed out again for 10 minutes, so two overlapping runs
+-- never send the same item; one whose run died is picked up again after that.
 create or replace function public.push_pending(p_limit int default 100)
 returns table (outbox_id bigint, attempts int, subscription_id uuid, endpoint text, p256dh text, auth text,
                notification_id uuid, event text, title text, body text, href text)
@@ -106,12 +117,23 @@ begin
   where n.id = o.notification_id and s.id = o.subscription_id
     and (n.read_at is not null or n.user_id <> s.user_id);
   return query
-    select o.id, o.attempts, s.id, s.endpoint, s.p256dh, s.auth, n.id, n.event, n.title, n.body, n.href
-    from private.push_outbox o
-    join public.push_subscriptions s on s.id = o.subscription_id
-    join public.notifications n on n.id = o.notification_id and n.user_id = s.user_id and n.read_at is null
-    order by o.id
-    limit greatest(least(coalesce(p_limit, 100), 500), 0);
+    with picked as (
+      select o.id from private.push_outbox o
+      join public.push_subscriptions s on s.id = o.subscription_id
+      join public.notifications n on n.id = o.notification_id and n.user_id = s.user_id and n.read_at is null
+      where o.claimed_at is null or o.claimed_at < now() - interval '10 minutes'
+      order by o.id
+      limit greatest(least(coalesce(p_limit, 100), 500), 0)
+      for update of o skip locked
+    ), claimed as (
+      update private.push_outbox o set claimed_at = now() from picked where o.id = picked.id
+      returning o.id, o.attempts, o.subscription_id, o.notification_id
+    )
+    select c.id, c.attempts, s.id, s.endpoint, s.p256dh, s.auth, n.id, n.event, n.title, n.body, n.href
+    from claimed c
+    join public.push_subscriptions s on s.id = c.subscription_id
+    join public.notifications n on n.id = c.notification_id
+    order by c.id;
 end; $$;
 revoke all on function public.push_pending(int) from public, anon, authenticated;
 grant execute on function public.push_pending(int) to service_role;
@@ -119,7 +141,7 @@ grant execute on function public.push_pending(int) to service_role;
 -- push_result: what happened to one item.
 --   sent    the item goes and the subscription's last_used_at is stamped
 --   gone    the push service said 404/410: the subscription goes (and its queue with it)
---   failed  one more attempt is counted; at 5 the item goes
+--   failed  one more attempt is counted and the claim is released; at 5 the item goes
 create or replace function public.push_result(p_outbox bigint, p_outcome text)
 returns void language plpgsql security definer set search_path = public as $$
 declare sid uuid;
@@ -130,7 +152,7 @@ begin
   elsif p_outcome = 'gone' then
     delete from public.push_subscriptions s using private.push_outbox o where o.id = p_outbox and s.id = o.subscription_id;
   elsif p_outcome = 'failed' then
-    update private.push_outbox set attempts = attempts + 1 where id = p_outbox;
+    update private.push_outbox set attempts = attempts + 1, claimed_at = null where id = p_outbox;
     delete from private.push_outbox where id = p_outbox and attempts >= 5;
   else
     raise exception 'PUSH_BAD_OUTCOME';
@@ -139,7 +161,7 @@ end; $$;
 revoke all on function public.push_result(bigint, text) from public, anon, authenticated;
 grant execute on function public.push_result(bigint, text) to service_role;
 
--- ---- 6. queuing ----------------------------------------------------------------------------
+-- ---- 5. queuing ----------------------------------------------------------------------------
 create or replace function private.push_queue_notification()
 returns trigger language plpgsql security definer set search_path = public as $$
 declare prefs jsonb;

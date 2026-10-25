@@ -15,7 +15,7 @@ declare
   e_own uuid := gen_random_uuid(); e_mgr uuid := gen_random_uuid(); e_rep uuid := gen_random_uuid(); e_rep2 uuid := gen_random_uuid();
   e_lone uuid := gen_random_uuid(); e_lone2 uuid := gen_random_uuid(); e_unl uuid := gen_random_uuid(); e_adm uuid := gen_random_uuid();
   st uuid := gen_random_uuid(); sw uuid;
-  ep text := 'https://push.example.test/check-' || gen_random_uuid();
+  ep text := 'https://fcm.googleapis.com/fcm/send/check-' || gen_random_uuid();
   s1 uuid; s2 uuid; sq uuid; sq2 uuid; n1 uuid; ob bigint; a text; c int; i int; r record; fails text[] := '{}';
 begin
   begin
@@ -37,18 +37,18 @@ begin
      or has_table_privilege('authenticated', 'private.push_outbox', 'SELECT') or has_table_privilege('anon', 'private.push_outbox', 'SELECT') then
     fails := fails || 'signed-in users should read and delete push_subscriptions only, and nobody but the sender touch the outbox'::text;
   end if;
-  if not has_schema_privilege('service_role', 'private', 'USAGE')
-     or not has_table_privilege('service_role', 'private.push_outbox', 'SELECT') or not has_table_privilege('service_role', 'private.push_outbox', 'UPDATE')
-     or not has_table_privilege('service_role', 'private.push_outbox', 'DELETE') or has_table_privilege('service_role', 'private.push_outbox', 'INSERT')
-     or not has_table_privilege('service_role', 'public.push_subscriptions', 'SELECT') or not has_table_privilege('service_role', 'public.push_subscriptions', 'DELETE')
-     or has_table_privilege('service_role', 'public.push_subscriptions', 'INSERT') or has_table_privilege('service_role', 'public.push_subscriptions', 'UPDATE') then
-    fails := fails || 'the sender (service_role) should hold usage on private, select/update/delete on the outbox and select/delete on push_subscriptions, and nothing more'::text;
+  -- The sender works only through push_pending and push_result: it holds no grant on the tables or the schema.
+  select count(*) into i from unnest(array['SELECT', 'INSERT', 'UPDATE', 'DELETE']) priv
+  where has_table_privilege('service_role', 'private.push_outbox', priv) or has_table_privilege('service_role', 'public.push_subscriptions', priv)
+     or has_table_privilege('service_role', 'public.notifications', priv);
+  select count(*) into c from pg_attribute a where a.attrelid = 'public.notifications'::regclass and a.attnum > 0 and not a.attisdropped
+    and has_column_privilege('service_role', 'public.notifications', a.attname::text, 'SELECT');
+  if i <> 0 or c <> 0 or has_schema_privilege('service_role', 'private', 'USAGE') then
+    fails := fails || format('the sender holds %s table privileges and %s notification columns, or usage on private: it should hold none', i, c);
   end if;
-  select count(*) into i from unnest(array['id', 'user_id', 'title', 'body', 'href', 'event', 'read_at']) col
-  where has_column_privilege('service_role', 'public.notifications', col, 'SELECT');
-  if i <> 7 or has_column_privilege('service_role', 'public.notifications', 'org_id', 'SELECT') or has_table_privilege('service_role', 'public.notifications', 'UPDATE')
-     or has_table_privilege('service_role', 'public.notifications', 'INSERT') or has_table_privilege('service_role', 'public.notifications', 'DELETE') then
-    fails := fails || format('the sender reads %s of the 7 notification columns it needs, or holds more than that', i);
+  if (select count(*) from information_schema.columns k where k.table_schema = 'private' and k.table_name = 'push_outbox' and k.column_name = 'claimed_at'
+        and k.data_type = 'timestamp with time zone' and k.is_nullable = 'YES') <> 1 then
+    fails := fails || 'the outbox has no nullable claimed_at'::text;
   end if;
   select count(*) into i from pg_proc p where p.oid in (to_regprocedure('public.push_subscribe(text,text,text,text)'), to_regprocedure('public.push_unsubscribe(text)'))
     and p.prosecdef and p.proconfig @> array['search_path=public'] and has_function_privilege('authenticated', p.oid, 'execute')
@@ -158,14 +158,37 @@ begin
   end if;
   fails := fails
     || pg_temp.t(ua, 'A unsubscribing B''s browser changes nothing', format('public.push_unsubscribe(%L)', ep), '=""')
-    || pg_temp.t(ub, 'B cannot write a subscription directly', format('insert into public.push_subscriptions (user_id, endpoint, p256dh, auth) values (%L, ''https://push.example.test/x'', ''k'', ''a'')', ub), 'denied')
+    || pg_temp.t(ub, 'B cannot write a subscription directly', format('insert into public.push_subscriptions (user_id, endpoint, p256dh, auth) values (%L, ''https://fcm.googleapis.com/fcm/send/x'', ''k'', ''a'')', ub), 'denied')
     || pg_temp.t(ub, 'B cannot update their subscription directly', format('update public.push_subscriptions set user_id = %L where endpoint = %L', ua, ep), 'denied')
     || pg_temp.t(ub, 'B cannot read the outbox', '(select count(*) from private.push_outbox)', 'denied')
-    || pg_temp.t(anon_u, 'an anonymous guest cannot subscribe', 'public.push_subscribe(''https://push.example.test/anon'', ''k'', ''a'', null)', 'PUSH_DEMO')
-    || pg_temp.t(demo_u, 'someone only in the demo cannot subscribe', 'public.push_subscribe(''https://push.example.test/demo'', ''k'', ''a'', null)', 'PUSH_DEMO')
-    || pg_temp.t(null, 'nobody signed in cannot subscribe', 'public.push_subscribe(''https://push.example.test/none'', ''k'', ''a'', null)', 'PUSH_NOT_SIGNED_IN')
-    || pg_temp.t(ub, 'a non-https endpoint is refused', 'public.push_subscribe(''http://push.example.test/plain'', ''k'', ''a'', null)', 'PUSH_BAD_SUBSCRIPTION')
-    || pg_temp.t(ub, 'empty keys are refused', 'public.push_subscribe(''https://push.example.test/empty'', '''', ''a'', null)', 'PUSH_BAD_SUBSCRIPTION');
+    || pg_temp.t(anon_u, 'an anonymous guest cannot subscribe', 'public.push_subscribe(''https://fcm.googleapis.com/fcm/send/anon'', ''k'', ''a'', null)', 'PUSH_DEMO')
+    || pg_temp.t(demo_u, 'someone only in the demo cannot subscribe', 'public.push_subscribe(''https://fcm.googleapis.com/fcm/send/demo'', ''k'', ''a'', null)', 'PUSH_DEMO')
+    || pg_temp.t(null, 'nobody signed in cannot subscribe', 'public.push_subscribe(''https://fcm.googleapis.com/fcm/send/none'', ''k'', ''a'', null)', 'PUSH_NOT_SIGNED_IN')
+    || pg_temp.t(ub, 'empty keys are refused', 'public.push_subscribe(''https://fcm.googleapis.com/fcm/send/empty'', '''', ''a'', null)', 'PUSH_BAD_SUBSCRIPTION');
+  -- Only real push services, by a plainly written host.
+  for r in select * from (values
+      ('http://fcm.googleapis.com/fcm/send/plain', 'PUSH_BAD_SUBSCRIPTION'), ('https://push.example.test/x', 'PUSH_BAD_SUBSCRIPTION'),
+      ('https://user@fcm.googleapis.com/fcm/send/x', 'PUSH_BAD_SUBSCRIPTION'), ('https://fcm.googleapis.com@evil.test/x', 'PUSH_BAD_SUBSCRIPTION'),
+      ('https://fcm.googleapis.com:8443/fcm/send/x', 'PUSH_BAD_SUBSCRIPTION'), ('https://fcm.googleapis.com.evil.test/x', 'PUSH_BAD_SUBSCRIPTION'),
+      ('https://evil.test/fcm.googleapis.com/x', 'PUSH_BAD_SUBSCRIPTION'), ('https://fcm.googleapis.com', 'PUSH_BAD_SUBSCRIPTION'),
+      ('https://push.apple.com/x', 'PUSH_BAD_SUBSCRIPTION'), ('https://evilpush.apple.com/x', 'PUSH_BAD_SUBSCRIPTION'),
+      ('https://web..push.apple.com/x', 'PUSH_BAD_SUBSCRIPTION'), ('https://web.push.apple.com.evil.test/x', 'PUSH_BAD_SUBSCRIPTION'),
+      ('https://xn--fcm.googleapis.com/x', 'PUSH_BAD_SUBSCRIPTION'), ('https:///fcm.googleapis.com/x', 'PUSH_BAD_SUBSCRIPTION'),
+      ('https://fcm.googleapis.com/fcm/send/ok-' || gen_random_uuid(), '*'), ('https://FCM.googleapis.com/fcm/send/ok-' || gen_random_uuid(), '*'),
+      ('https://updates.push.services.mozilla.com/wpush/v2/ok-' || gen_random_uuid(), '*'), ('https://web.push.apple.com/ok-' || gen_random_uuid(), '*'),
+      ('https://wns2-par02p.notify.windows.com/w/?token=ok-' || gen_random_uuid(), '*')) v(url, want) loop
+    fails := fails || pg_temp.t(lone2, format('the endpoint %s', r.url), format('public.push_subscribe(%L, ''k'', ''a'', null)', r.url), r.want);
+  end loop;
+  if (select count(*) from public.push_subscriptions where user_id = lone2) <> 5 then fails := fails || 'the five real push services were not all kept'::text; end if;
+  -- At most 10 browsers each; re-subscribing one of them does not count.
+  for i in 1..10 loop
+    fails := fails || pg_temp.t(lone, format('browser %s of 10', i), format('public.push_subscribe(%L, ''k'', ''a'', null)', 'https://fcm.googleapis.com/fcm/send/cap-' || i || '-' || ep), '*');
+  end loop;
+  fails := fails
+    || pg_temp.t(lone, 'an 11th browser is refused', format('public.push_subscribe(%L, ''k'', ''a'', null)', 'https://fcm.googleapis.com/fcm/send/cap-11-' || ep), 'PUSH_TOO_MANY')
+    || pg_temp.t(lone, 're-subscribing one of the ten is fine', format('public.push_subscribe(%L, ''k2'', ''a2'', null)', 'https://fcm.googleapis.com/fcm/send/cap-3-' || ep), '*');
+  if (select count(*) from public.push_subscriptions where user_id = lone) <> 10 then fails := fails || 'the cap left other than 10 browsers'::text; end if;
+  delete from public.push_subscriptions where user_id in (lone, lone2);
   if (select count(*) from public.push_subscriptions where endpoint = ep) <> 1 then fails := fails || 'A''s unsubscribe removed B''s browser'::text; end if;
   fails := fails || pg_temp.t(ub, 'B unsubscribes', format('public.push_unsubscribe(%L)', ep), '=""');
   if exists (select 1 from public.push_subscriptions where endpoint = ep) then fails := fails || 'B''s unsubscribe left the row'::text; end if;
@@ -231,13 +254,24 @@ begin
   delete from private.push_outbox where subscription_id in (sq, sq2);
   update public.profiles set notification_prefs = '{"channels":{"push":true}}' where user_id = uq;
   delete from public.push_subscriptions where id = sq2;
+  -- Two overlapping runs never get the same item; one claimed over 10 minutes ago (its run died) is handed out again.
+  insert into public.notifications (user_id, org_id, event, title, href) values (uq, org, 'hr_request_filed', 'Claim one', '/command'), (uq, org, 'hr_request_filed', 'Claim two', '/command');
+  select count(*) into c from public.push_pending(100) p where p.title in ('Claim one', 'Claim two');
+  select count(*) into i from public.push_pending(100) p where p.title in ('Claim one', 'Claim two');
+  if c <> 2 or i <> 0 then fails := fails || format('the first run should claim both items (got %s) and the next none (got %s)', c, i); end if;
+  update private.push_outbox o set claimed_at = now() - interval '11 minutes' from public.notifications n where n.id = o.notification_id and n.title = 'Claim one';
+  select count(*) into c from public.push_pending(100) p where p.title in ('Claim one', 'Claim two');
+  if c <> 1 then fails := fails || format('an item claimed 11 minutes ago should be handed out again, alone: got %s', c); end if;
+  delete from private.push_outbox o using public.notifications n where n.id = o.notification_id and n.title like 'Claim %';
   insert into public.notifications (user_id, org_id, event, title, body, href) values (uq, org, 'hr_request_filed', 'Send me', 'Body', '/people/approve-leave') returning id into n1;
   set local role service_role;
   select count(*), max(p.outbox_id) into c, ob from public.push_pending(100) p where p.notification_id = n1 and p.endpoint = ep || '-q' and p.title = 'Send me' and p.href = '/people/approve-leave';
   reset role;
   if c <> 1 then fails := fails || format('the sender (as service_role) saw %s of the 1 queued item', c); end if;
   perform public.push_result(ob, 'failed'); perform public.push_result(ob, 'failed');
-  if (select attempts from private.push_outbox where id = ob) is distinct from 2 then fails := fails || 'two failures did not count two attempts'::text; end if;
+  if (select attempts::text || '/' || (claimed_at is null)::text from private.push_outbox where id = ob) is distinct from '2/true' then
+    fails := fails || 'two failures did not count two attempts and release the claim'::text;
+  end if;
   perform public.push_result(ob, 'failed'); perform public.push_result(ob, 'failed'); perform public.push_result(ob, 'failed');
   if exists (select 1 from private.push_outbox where id = ob) then fails := fails || 'an item that failed five times was kept'::text; end if;
   if not exists (select 1 from public.push_subscriptions where id = sq) then fails := fails || 'failures removed the subscription'::text; end if;
