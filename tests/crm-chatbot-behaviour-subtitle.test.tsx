@@ -25,10 +25,12 @@ const screen = (saved: boolean, canSave: boolean) =>
   );
 
 describe('the Behaviour card subtitle', () => {
-  it('tells someone who cannot save that only an owner or admin can change it', () => {
+  // Only viewers get no actions (chatbot-page.tsx): members can save, so the subtitle names viewers.
+  it('tells a viewer, who cannot save, that viewers cannot change it', () => {
     for (const saved of [true, false]) {
       const html = screen(saved, false);
-      expect(html).toContain('How the bot greets and responds. Only an owner or admin can change it.');
+      expect(html).toContain('How the bot greets and responds. Viewers can&#x27;t change it.');
+      expect(html).not.toContain('greets and responds. Only an owner or admin');
       expect(html).not.toContain('Save to make them yours');
     }
   });
@@ -36,7 +38,7 @@ describe('the Behaviour card subtitle', () => {
   it('asks someone who can save to make unsaved settings theirs', () => {
     const html = screen(false, true);
     expect(html).toContain('Save to make them yours');
-    expect(html).not.toContain('Only an owner or admin can change it. ');
+    expect(html).not.toContain('Viewers can&#x27;t change it.');
   });
 
   it('keeps the plain subtitle for saved settings someone can change', () => {

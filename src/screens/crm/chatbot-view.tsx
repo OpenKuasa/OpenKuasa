@@ -624,7 +624,8 @@ export function ChatbotView({
           title="Behaviour"
           subtitle={
             !actions?.saveSettings
-              ? 'How the bot greets and responds. Only an owner or admin can change it.'
+              ? // Only viewers get no actions (chatbot-page.tsx); members can save.
+                "How the bot greets and responds. Viewers can't change it."
               : saved
                 ? 'How the bot greets and responds'
                 : 'These are the starting settings. Save to make them yours.'
