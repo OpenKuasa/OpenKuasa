@@ -1,3 +1,6 @@
 [
-  { "file": "getting-started/ai-key.png", "path": "/account/ai", "as": "demo", "viewport": [1280, 800], "clip": "main" }
+  { "file": "getting-started/ai-key.png", "path": "/account/ai", "as": "demo", "viewport": [1280, 800], "clip": "main" },
+  { "file": "getting-started/team-roles.png", "path": "/account/team", "as": "demo", "viewport": [1280, 1000], "clip": "main [data-slot=\"card\"]:has-text(\"Roles & permissions\")" },
+  { "file": "getting-started/company-details.png", "path": "/account/company", "as": "demo", "viewport": [1280, 900], "clip": "main [data-slot=\"card\"]:has-text(\"Legal name\")" },
+  { "file": "getting-started/notifications.png", "path": "/account/notifications", "as": "demo", "viewport": [1280, 1100], "clip": "main [data-slot=\"card\"]:has-text(\"What you get notified about\")" }
 ]
