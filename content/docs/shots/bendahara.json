@@ -1,0 +1,112 @@
+[
+  {
+    "file": "bendahara/dashboard.png",
+    "path": "/finance/dashboard",
+    "as": "demo",
+    "viewport": [
+      1280,
+      800
+    ],
+    "clip": "main"
+  },
+  {
+    "file": "bendahara/supplier-bills.png",
+    "path": "/finance/supplier-bills",
+    "as": "demo",
+    "viewport": [
+      1280,
+      800
+    ],
+    "clip": "main"
+  },
+  {
+    "file": "bendahara/purchase-orders.png",
+    "path": "/finance/purchase-orders",
+    "as": "demo",
+    "viewport": [
+      1280,
+      800
+    ],
+    "clip": "main"
+  },
+  {
+    "file": "bendahara/rfqs.png",
+    "path": "/finance/rfqs",
+    "as": "demo",
+    "viewport": [
+      1280,
+      800
+    ],
+    "clip": "main"
+  },
+  {
+    "file": "bendahara/expenses.png",
+    "path": "/finance/expenses",
+    "as": "demo",
+    "viewport": [
+      1280,
+      800
+    ],
+    "clip": "main"
+  },
+  {
+    "file": "bendahara/payment-vouchers.png",
+    "path": "/finance/payment-vouchers",
+    "as": "demo",
+    "viewport": [
+      1280,
+      800
+    ],
+    "clip": "main"
+  },
+  {
+    "file": "bendahara/banking.png",
+    "path": "/finance/banking",
+    "as": "demo",
+    "viewport": [
+      1280,
+      800
+    ],
+    "clip": "main"
+  },
+  {
+    "file": "bendahara/chart-of-accounts.png",
+    "path": "/finance/chart-of-accounts",
+    "as": "demo",
+    "viewport": [
+      1280,
+      800
+    ],
+    "clip": "main"
+  },
+  {
+    "file": "bendahara/financial-reports.png",
+    "path": "/finance/reports",
+    "as": "demo",
+    "viewport": [
+      1280,
+      800
+    ],
+    "clip": "main"
+  },
+  {
+    "file": "bendahara/journals.png",
+    "path": "/finance/journals",
+    "as": "demo",
+    "viewport": [
+      1280,
+      800
+    ],
+    "clip": "main"
+  },
+  {
+    "file": "bendahara/customers-suppliers.png",
+    "path": "/finance/customers-suppliers",
+    "as": "demo",
+    "viewport": [
+      1280,
+      800
+    ],
+    "clip": "main"
+  }
+]
