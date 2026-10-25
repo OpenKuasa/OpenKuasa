@@ -34,9 +34,14 @@ const row = (id: number, href: string | null = '/people/leave/123'): Row => ({
   href,
 });
 
-function fakeDb(rows: Row[], pendingError: unknown = null) {
+function fakeDb(rows: Row[], pendingError: unknown = null, releaseError: unknown = null) {
   const results: Array<{ p_outbox: number; p_outcome: string }> = [];
+  const released: number[][] = [];
   const rpc = vi.fn(async (name: string, args: Record<string, unknown>) => {
+    if (name === 'push_release') {
+      released.push(args.p_outbox as number[]);
+      return { data: null, error: releaseError };
+    }
     if (name === 'push_pending') return { data: pendingError ? null : rows, error: pendingError };
     if (name === 'push_result') {
       results.push(args as { p_outbox: number; p_outcome: string });
@@ -44,7 +49,7 @@ function fakeDb(rows: Row[], pendingError: unknown = null) {
     }
     throw new Error(`unexpected rpc ${name}`);
   });
-  return { db: { rpc } as never, rpc, results };
+  return { db: { rpc } as never, rpc, results, released };
 }
 
 describe('sendPending', () => {
@@ -96,8 +101,8 @@ describe('sendPending', () => {
     err.mockRestore();
   });
 
-  it('stops starting sends once the deadline passes, and records nothing for the untried', async () => {
-    const { db, results } = fakeDb([row(1), row(2), row(3)]);
+  it('stops starting sends once the deadline passes, and hands the untried back without counting an attempt', async () => {
+    const { db, results, released } = fakeDb([row(1), row(2), row(3)]);
     let t = 1_000;
     const sender = vi.fn<PushSender>(async () => {
       t += 60_000;
@@ -107,16 +112,52 @@ describe('sendPending', () => {
     expect(sender).toHaveBeenCalledTimes(2);
     expect(out).toEqual({ sent: 2, removed: 0, failed: 0, deferred: 1 });
     expect(results.map((r) => r.p_outbox)).toEqual([1, 2]);
+    expect(released).toEqual([[3]]);
+  });
+
+  it('hands nothing back when every item was tried', async () => {
+    const { db, rpc } = fakeDb([row(1), row(2)]);
+    await sendPending(db, vi.fn<PushSender>(async () => ({ ok: true })));
+    expect(rpc).not.toHaveBeenCalledWith('push_release', expect.anything());
+  });
+
+  it('does not hand back items for a subscription already reported gone', async () => {
+    const rows = [row(1), row(2), { ...row(3), subscription_id: 'sub-1' }, row(4)];
+    const { db, released } = fakeDb(rows);
+    let t = 0;
+    const sender = vi.fn<PushSender>(async (sub) => {
+      t += 60_000;
+      return sub.endpoint.endsWith('/1') ? { ok: false, status: 410 } : { ok: true };
+    });
+    const out = await sendPending(db, sender, { deadlineMs: 90_000, now: () => t });
+    expect(out).toEqual({ sent: 1, removed: 1, failed: 0, deferred: 1 });
+    expect(released).toEqual([[4]]);
+  });
+
+  it('still returns the counts when handing back fails, logging only the code', async () => {
+    const { db } = fakeDb([row(1), row(2)], null, { code: '42501', message: 'permission denied' });
+    let t = 0;
+    const sender = vi.fn<PushSender>(async () => {
+      t += 60_000;
+      return { ok: true };
+    });
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const out = await sendPending(db, sender, { deadlineMs: 30_000, now: () => t });
+    expect(out).toEqual({ sent: 1, removed: 0, failed: 0, deferred: 1 });
+    expect(JSON.stringify(err.mock.calls)).toContain('42501');
+    expect(JSON.stringify(err.mock.calls)).not.toContain('permission denied');
+    err.mockRestore();
   });
 
   it('cuts off a send that never settles at the deadline and records it as one failed attempt', async () => {
-    const { db, results } = fakeDb([row(1), row(2)]);
+    const { db, results, released } = fakeDb([row(1), row(2)]);
     const sender = vi.fn<PushSender>(() => new Promise(() => {}));
     const err = vi.spyOn(console, 'error').mockImplementation(() => {});
     const out = await sendPending(db, sender, { deadlineMs: 30 });
     expect(sender).toHaveBeenCalledTimes(1);
     expect(out).toEqual({ sent: 0, removed: 0, failed: 1, deferred: 1 });
     expect(results).toEqual([{ p_outbox: 1, p_outcome: 'failed' }]);
+    expect(released).toEqual([[2]]);
     err.mockRestore();
   });
 

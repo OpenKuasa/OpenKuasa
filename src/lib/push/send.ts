@@ -67,13 +67,20 @@ export async function sendPending(
   // Subscriptions the push service reported gone in this run: the database
   // already deleted their queue, so later rows for them are not sent or recorded.
   const gone = new Set<string>();
+  // Claimed but never tried: handed back at the end so the next run sends them.
+  const untried: number[] = [];
+  const leaveFrom = (start: number) => {
+    const left = rows.slice(start).filter((r) => !gone.has(r.subscription_id));
+    result.deferred += left.length;
+    untried.push(...left.map((r) => r.outbox_id));
+  };
   for (let i = 0; i < rows.length; i++) {
     const row = rows[i];
     if (gone.has(row.subscription_id)) continue;
     const remaining = deadline - now();
     if (remaining <= 0) {
-      // Untried items get no push_result: they wait out their lease and no attempt is counted.
-      result.deferred += rows.slice(i).filter((r) => !gone.has(r.subscription_id)).length;
+      // Untried items get no push_result, so no attempt is counted.
+      leaveFrom(i);
       break;
     }
     const payload: PushPayload = {
@@ -115,9 +122,14 @@ export async function sendPending(
     if (recorded.error) console.error(`[push] could not record item ${row.outbox_id}:`, recorded.error.code);
     if (cutOffHit) {
       // The budget is spent: stop here instead of starting a send with a near-zero budget.
-      result.deferred += rows.slice(i + 1).filter((r) => !gone.has(r.subscription_id)).length;
+      leaveFrom(i + 1);
       break;
     }
+  }
+  if (untried.length > 0) {
+    // If this fails the items still go out, just after their 10-minute claim runs out.
+    const released = await db.rpc('push_release', { p_outbox: untried });
+    if (released.error) console.error('[push] could not hand back untried items:', released.error.code);
   }
   return result;
 }

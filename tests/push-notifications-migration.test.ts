@@ -167,3 +167,17 @@ describe('approval routing migration', () => {
     expect(push + routing).not.toMatch(/purple|violet|fuchsia|indigo/);
   });
 });
+
+describe('push release migration', () => {
+  const release = statements('20261125200700_push_release.sql');
+
+  test('push_release is a service-role-only definer that clears claims without counting an attempt', () => {
+    const { header, body } = fn(release, 'public.push_release');
+    expect(flat(header)).toContain('security definer set search_path = public');
+    const text = flat(body);
+    expect(text).toContain('update private.push_outbox set claimed_at = null');
+    expect(text).not.toContain('attempts');
+    expect(flat(release)).toContain('revoke all on function public.push_release(bigint[]) from public, anon, authenticated;');
+    expect(flat(release)).toContain('grant execute on function public.push_release(bigint[]) to service_role;');
+  });
+});
