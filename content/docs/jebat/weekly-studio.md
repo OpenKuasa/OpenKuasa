@@ -35,7 +35,7 @@ Weekly Studio runs on your workspace's own AI key. Without one, a run fails. See
 - **"Enter a cost cap between RM 0 and RM 100."** The cost cap must be within that range.
 - **"Video rendering…"** The video takes longer than the rest of the run. Come back to the page later.
 - **"Poster could not be generated" or "Hero image could not be generated".** That step failed. The digest and anything else the run made are kept.
-- **A run shows Skipped.** A scheduled run is skipped when nothing new has come into your leads, campaigns or appointments since the last run. It costs nothing.
+- **A run shows Skipped.** A scheduled run is skipped when no lead, campaign or appointment has been added in Jebat since the last run. People who came in through a lead form, a landing page or the chatbot do not count as new here. A skipped run costs nothing.
 
 ## Related
 

@@ -25,7 +25,9 @@ Owners, admins and members can create, edit, activate, pause and delete forms. V
    - **Consent sentence**: the sentence visitors tick to agree before they can send the form, up to 300 characters. `{workspace}` in it becomes your workspace's name.
 4. Click **Save form**.
 
-![The Your forms table, with each form's public link, status, views and contacts](/docs-media/jebat/lead-forms-table.png)
+![The Your forms table in the demo, with each form's short name, status, views and contacts](/docs-media/jebat/lead-forms-table.png)
+
+The demo's forms are samples, so the picture shows only each form's short name under **Public link**. In your own workspace, an active form also shows its link with **Copy link** and **Open**.
 
 ### Share the link
 

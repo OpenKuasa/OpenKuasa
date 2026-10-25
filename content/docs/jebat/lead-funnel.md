@@ -14,7 +14,7 @@ Owners, admins and members can add, edit, move and delete leads. Viewers can see
 ## Where leads come from
 
 - Leads you add here yourself, or that you ask Jebat to add for you.
-- People who come in through a lead form, a landing page or the chatbot. They are kept as Kasturi contacts and show here with the channel **Website** and an **Open in Kasturi** button. Their stage follows their status in Kasturi, so you change it there.
+- People who come in through a lead form, a landing page or the chatbot. They are kept as Kasturi contacts and show here with the channel **Website**. Owners, admins and members also see an **Open in Kasturi** button on their row. Their stage follows their status in Kasturi, so you change it there.
 
 ## Steps
 
@@ -50,7 +50,7 @@ In the lead's row, pick the new stage from the **Stage** list. It saves straight
 
 ## Common problems
 
-- **A lead has no Stage list, only "Open in Kasturi".** It came in through a lead form, a landing page or the chatbot, and lives in Kasturi. Click **Open in Kasturi** and change its status there.
+- **A lead has no Stage list, only "Open in Kasturi".** It came in through a lead form, a landing page or the chatbot, and lives in Kasturi. Click **Open in Kasturi** and change its status there. (Viewers see neither the Stage list nor the button, only the stage.)
 - **"That lead was not found."** Someone else deleted it. Refresh the page.
 - **"You do not have permission to make changes here."** Viewers cannot change leads.
 
