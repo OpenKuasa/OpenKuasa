@@ -15,9 +15,9 @@ Every signed-in person chooses their own notifications, whatever their role. In 
 
 ### Read your notifications
 
-1. Click the bell at the top of the app. A number shows how many are unread.
+1. Click the bell at the top of the app. A dot on the bell means you have unread notifications.
 2. Click a notification to open what it is about. It is marked as read.
-3. Click **Mark all read** to clear the count.
+3. Click **Mark all read** to mark them all as read and clear the dot.
 4. Click **Notification settings** to change what you get.
 
 ### Choose what you get
@@ -46,8 +46,11 @@ You see **Notification preferences saved.**
 
 - **In-app** notifications are live and follow your choices.
 - **Email** and **Push** are not connected yet. You can tick them, and the page saves your choice for later, but nothing is sent by email or push.
-- **Quiet hours** (**Pause notifications overnight**, **From**, **To**) are saved with your other choices. Times are shown in the timezone from your profile.
 - **Security alerts are always on and can't be turned off.** These include a changed password and two-step sign-in being turned on or off.
+
+## Not working yet
+
+- **Quiet hours** (**Pause notifications overnight**, **From**, **To**) are saved for later, but they do not hold or pause any notifications yet. Times are shown in the timezone from your profile.
 
 ## Common problems
 

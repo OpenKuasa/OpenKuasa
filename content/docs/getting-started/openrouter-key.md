@@ -15,7 +15,7 @@ With a key, chat is billed to your OpenRouter account. Set a spending limit on t
 
 ## Who can do this
 
-Only workspace owners and admins can add, change or remove the key. Members see the note **Only owners and admins can add or change the workspace key.** The demo workspace does not use a key.
+Only workspace owners and admins can add, change or remove the key. Members and viewers see the note **Only owners and admins can add or change the workspace key.** The demo workspace does not use a key.
 
 ## Before you start
 
@@ -34,7 +34,7 @@ Get a key from OpenRouter:
 
 OpenKuasa checks the key with OpenRouter first. The key is stored sealed (encrypted) and is never shown again. Only its last four characters are shown, so you can tell which key is in use. The status changes to **Active**.
 
-![The AI key page as the demo workspace shows it: the How it works card and a read-only Workspace key card](/docs-media/getting-started/ai-key.png)
+![The Workspace key card as the demo workspace shows it: read-only, with no key](/docs-media/getting-started/ai-key.png)
 
 ### Change or remove the key
 

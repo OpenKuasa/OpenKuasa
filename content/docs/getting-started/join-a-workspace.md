@@ -21,19 +21,19 @@ You need the invite link. OpenKuasa does not email it: the owner or admin who in
 1. Open the invite link. The page shows **Join** and the workspace name, with the **Workspace**, **Invited email** and **Role**.
 2. Keep **Create my account** selected.
 3. Enter your **Full name** and a **Password** of at least 8 characters. The email is filled in from the invite.
-4. Click **Create account and join** (the button shows the workspace name).
+4. Click **Create account and join** followed by the workspace name.
 
-If OpenKuasa asks you to check your email, open the confirmation link in that email. It brings you back to the invite, signed in. Click **Join** to finish.
+If OpenKuasa asks you to check your email, open the confirmation link in that email. It brings you back to the invite, signed in. Click **Join** followed by the workspace name to finish.
 
 ### Join with an account you already have
 
 1. Open the invite link.
 2. Click **I already have an account**.
-3. Enter your **Password** and click **Sign in and join**.
+3. Enter your **Password** and click **Sign in and join** followed by the workspace name.
 
 If you use two-step sign-in, enter the code from your app. You then come back to the invite to join.
 
-If you are already signed in with the invited email, the page shows one **Join** button. Click it.
+If you are already signed in with the invited email, the page shows one button, **Join** followed by the workspace name. Click it.
 
 When you have joined, OpenKuasa opens Tuah, the home screen of the workspace.
 

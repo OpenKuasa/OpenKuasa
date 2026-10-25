@@ -36,7 +36,7 @@ To cancel an invite, click **Revoke**. The link stops working.
 1. In the members list, find the person.
 2. Under **Manage**, pick a new role from the list next to their name.
 
-The person gets an in-app notification that their role changed. You cannot change your own role or the owner's role, so there is no list next to those rows.
+The person normally gets an in-app notification that their role changed. They do not get it if they turned off **Team activity** or **In-app** notifications. You cannot change your own role or the owner's role, so there is no list next to those rows.
 
 ### Remove someone
 

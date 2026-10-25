@@ -21,7 +21,7 @@ Anyone with an email address. You do not need an invite. If someone sent you an 
 7. **Create your account.** Check **Business name** (it starts with the company name you typed). Enter your **Email** and a **Password** of at least 8 characters.
 8. Click **Create account**.
 
-You can go back a step at any time with **Back**. The bar at the bottom shows how far along you are.
+From step 2 on, you can go back a step with **Back**. The bar at the bottom shows how far along you are.
 
 When the account is ready, OpenKuasa opens Tuah, the home screen.
 
