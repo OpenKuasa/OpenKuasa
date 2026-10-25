@@ -33,6 +33,11 @@ describe('docs screenshot config', () => {
     expect(isLocalBase('https://www.openkuasa.com')).toBe(false);
     expect(isLocalBase('http://localhost.evil.com')).toBe(false);
     expect(isLocalBase('not a url')).toBe(false);
+    expect(isLocalBase('https://openkuasa.com:443')).toBe(false);
+    expect(isLocalBase('http://127.0.0.1@evil.com')).toBe(false);
+    expect(isLocalBase('http://localhost:3175@evil.com')).toBe(false);
+    expect(isLocalBase('http://user:pass@localhost:3175')).toBe(false);
+    expect(isLocalBase('ftp://localhost')).toBe(false);
     expect(isLocalBase('http://localhost:3175')).toBe(true);
     expect(isLocalBase('http://127.0.0.1:3175')).toBe(true);
   });
@@ -41,6 +46,18 @@ describe('docs screenshot config', () => {
     for (const n of ['Save', 'save changes', 'Submit', 'Send', 'Approve', 'Delete', 'Remove', 'Post', 'Confirm', 'Pay']) {
       expect(isDeniedClick(n), n).toBe(true);
     }
-    for (const n of ['New leave', 'Open', 'Cancel']) expect(isDeniedClick(n), n).toBe(false);
+    for (const n of ['New leave', 'Open', 'Cancel', 'Ask Taming Sari']) expect(isDeniedClick(n), n).toBe(false);
+  });
+
+  test('deny-list catches other cases, inflections and joined words', () => {
+    const denied = [
+      'SUBMIT', 'Saved', 'Saving', 'Sending', 'Sent', 'Deleted', 'Approved', 'Approve all', 'SaveChanges', 'saveDraft',
+      'Submitted', 'Paid', 'Apply', 'Apply for leave', 'Invite', 'Invite member', 'Create', 'Create job', 'Reject',
+      'Rejected', 'Add', 'Add employee', 'Added', 'Removing', 'Posted', 'Confirmed',
+    ];
+    for (const n of denied) expect(isDeniedClick(n), n).toBe(true);
+    for (const n of ['Address', 'Payroll', 'Payslips', 'Postcode', 'Savings', 'Sender details', 'Creative Bank', 'Applications']) {
+      expect(isDeniedClick(n), n).toBe(false);
+    }
   });
 });

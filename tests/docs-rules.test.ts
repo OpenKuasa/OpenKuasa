@@ -6,7 +6,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { afterEach, describe, expect, test, vi } from 'vitest';
 import { GuideBody } from '@/components/docs/guide-body';
 import { getAllGuides, parseGuide } from '@/lib/docs/content';
-import { guideImages, guideLinks, HELD_SLUGS, liveScreenPaths, loadHeldSlugs } from '@/lib/docs/rules';
+import { guideImages, guideLinks, HELD_SLUGS, liveScreenPaths, loadHeldSlugs, missingHeldGuides } from '@/lib/docs/rules';
 
 /** The file a guide lives in, for failure messages. */
 const fileOf = (g: { section: string; slug: string }) => `content/docs/${g.section}/${g.slug}.md`;
@@ -55,6 +55,12 @@ describe('every guide follows the rules', () => {
     for (const g of getAllGuides()) {
       expect(HELD_SLUGS.has(`${g.section}/${g.slug}`), `${fileOf(g)} is a held topic`).toBe(false);
     }
+  });
+
+  test('every held entry names a guide when the held guides are here', () => {
+    if (process.env.DOCS_HOLD === '1') return;
+    const missing = missingHeldGuides(HELD_SLUGS, getAllGuides().map((g) => `${g.section}/${g.slug}`));
+    expect(missing, `content/docs/held lists guides that do not exist: ${missing.join(', ')}`).toEqual([]);
   });
 });
 
@@ -118,6 +124,15 @@ describe('held topics', () => {
     ['lekiu.txt', '[]', 'lekiu.txt'],
   ])('%s with %s fails naming the file', (name, text, named) => {
     expect(() => loadHeldSlugs(held({ [name]: text }))).toThrow(named);
+  });
+
+  test('missing held guides: none on a branch without the held guides, else every typo', () => {
+    const held = new Set(['lekiu/payroll', 'lekiu/my-payslips']);
+    expect(missingHeldGuides(held, ['lekiu/leave'])).toEqual([]);
+    expect(missingHeldGuides(held, ['lekiu/leave', 'lekiu/payroll', 'lekiu/my-payslips'])).toEqual([]);
+    expect(missingHeldGuides(new Set(['lekiu/payroll', 'lekiu/my-payslip']), ['lekiu/payroll', 'lekiu/my-payslips'])).toEqual([
+      'lekiu/my-payslip',
+    ]);
   });
 
   test('the held folder is not read as a docs section', async () => {

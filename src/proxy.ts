@@ -49,6 +49,7 @@ export const config = {
      * listed must still exist in public/ or src/app/ (a deleted or renamed
      * file left here would let [product]/[item] answer that path unproxied).
      * The matcher must stay a literal: Next reads it statically at build time.
+     * Docs screenshots under /docs-media/ go through the proxy on purpose and are not listed.
      */
     '/((?!_next/static/|_next/image$|icon\\.svg$|apple-icon\\.png$|icons/(?:icon-192|icon-512|maskable-512)\\.png$|(?:demo-logo\\.png|file\\.svg|globe\\.svg|next\\.svg|vercel\\.svg|window\\.svg)$|landing/(?:command|crm|cta-pamor|finance|hero-pamor|hire|keris|people|reach)\\.jpg$|theme/keris-pov\\.webp$).*)',
   ],

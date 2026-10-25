@@ -71,7 +71,9 @@ describe('which paths the proxy runs on', () => {
 
   test('docs screenshots go through the proxy and are not named in the matcher', () => {
     expect(runs('/docs-media/x/y.png')).toBe(true);
-    expect(publicImages().filter((path) => path.startsWith('/docs-media/'))).toEqual([]);
+    const real = '/docs-media/jebat/lead-forms-table.png';
+    expect(existsSync(join('public', real)), real).toBe(true);
+    expect(runs(real)).toBe(true);
     expect(config.matcher[0]).not.toContain('docs-media');
   });
 

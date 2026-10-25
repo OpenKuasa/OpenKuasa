@@ -285,6 +285,8 @@ pnpm eval:tuah     # run the assistant evals against real models (spends credits
 
 `pnpm docs:shots` reads `content/docs/shots/*.json` and writes `public/docs-media/`. It refuses any host
 except localhost, signs in with **Try the demo**, and never clicks Save, Send, Delete or the like.
+playwright-core is not a dependency of this repo, so set `PLAYWRIGHT_CORE` to the path of an installed
+playwright-core package; it drives your installed Chrome (`CHROME_PATH` to change which).
 
 `pnpm eval:tuah` is not part of `pnpm test`. It calls real models and writes
 to a real workspace, so it bills the OpenRouter key; `EVAL_RUNS` sets how many

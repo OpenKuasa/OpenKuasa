@@ -103,3 +103,13 @@ export function loadHeldSlugs(dir: string): Set<string> {
 
 /** `${section}/${slug}` of every held guide, read from content/docs/held/<section>.json. */
 export const HELD_SLUGS: ReadonlySet<string> = loadHeldSlugs(HELD_DIR);
+
+/**
+ * Held entries with no guide, to catch a typo in content/docs/held. The base branch carries none of the held
+ * guides, so when not one of them is present there is nothing to check and this returns [].
+ */
+export function missingHeldGuides(held: ReadonlySet<string>, guides: Iterable<string>): string[] {
+  const present = new Set(guides);
+  const missing = [...held].filter((key) => !present.has(key));
+  return missing.length === held.size ? [] : missing;
+}
