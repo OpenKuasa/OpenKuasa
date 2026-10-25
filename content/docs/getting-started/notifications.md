@@ -42,6 +42,8 @@ You see **Notification preferences saved.**
 
 ![The list of events and channels on the Notifications page](/docs-media/getting-started/notifications.png)
 
+_Shown from the sample workspace, where editing is switched off._
+
 ## What works today
 
 - **In-app** notifications are live and follow your choices.

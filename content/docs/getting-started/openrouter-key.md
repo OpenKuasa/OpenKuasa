@@ -36,6 +36,8 @@ OpenKuasa checks the key with OpenRouter first. The key is stored sealed (encryp
 
 ![The Workspace key card as the demo workspace shows it: read-only, with no key](/docs-media/getting-started/ai-key.png)
 
+_Shown from the sample workspace, where editing is switched off._
+
 ### Change or remove the key
 
 To change it, paste a new key into **Replace with a new key** and click **Replace key**. To stop using your own key, click **Remove key**. Chat then goes back to 3 free questions a week for each person.

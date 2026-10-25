@@ -31,6 +31,8 @@ Owners, admins and members. Viewers can see the Jobs screen but not the **Post a
 
 ![The Jobs screen with the All jobs table](/docs-media/lekir/jobs.png)
 
+_Shown from the sample workspace, where editing is switched off._
+
 ## Common problems
 
 - **Give the job a title.** The title is required. **Keep the title under 120 characters.**

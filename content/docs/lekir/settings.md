@@ -22,6 +22,8 @@ Lekir's Settings screen brings your recruiting preferences together. You change 
 
 ![Lekir's Settings screen](/docs-media/lekir/settings.png)
 
+_Shown from the sample workspace, where editing is switched off._
+
 ## Common problems
 
 - **"N open jobs have no description, so the page leaves them out."** The Careers page card shows this with the number of jobs (it says "would leave" while the page is off). Edit each job and add a description.

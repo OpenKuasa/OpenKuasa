@@ -18,6 +18,8 @@ Expenses holds what was spent on the business. An expense waits as **Pending app
 
 ![The Expenses screen with totals, charts and the expenses table](/docs-media/bendahara/expenses.png)
 
+_Shown from the sample workspace, where editing is switched off._
+
 ### Record an expense
 
 1. Open **Expenses** under **Purchases** in the Bendahara menu.

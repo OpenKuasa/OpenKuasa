@@ -19,6 +19,8 @@ Your account must be linked to your employee record. Have the receipt ready as a
 
 ![The Financial Claims screen with this month's claims and the My requests table](/docs-media/lekiu/claims.png)
 
+_Shown from the sample workspace, where editing is switched off._
+
 1. Open **Lekiu**, then **Financial Claims** under **Applications**.
 2. Click **New Claim**.
 3. Choose the **Category**: **Medical**, **Travel**, **Meals**, **Equipment** or **Other**.

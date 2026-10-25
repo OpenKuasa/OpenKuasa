@@ -16,6 +16,8 @@ screen: /people/public-holidays
 
 ![The Public Holidays screen with the year's holiday calendar](/docs-media/lekiu/public-holidays.png)
 
+_Shown from the sample workspace, where editing is switched off._
+
 ### See the holidays
 
 1. Open **Lekiu**, then **Public Holidays** under **Approvals**.

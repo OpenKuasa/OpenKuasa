@@ -27,6 +27,8 @@ Owners, admins and members can create, edit, activate, pause and delete forms. V
 
 ![The Your forms table in the demo, with each form's short name, status, views and contacts](/docs-media/jebat/lead-forms-table.png)
 
+_Shown from the sample workspace, where editing is switched off._
+
 The demo's forms are samples, so the picture shows only each form's short name under **Public link**. In your own workspace, an active form also shows its link with **Copy link** and **Open**.
 
 ### Share the link

@@ -67,6 +67,8 @@ The **Roles & permissions** table at the bottom of the **Team** page shows what 
 
 ![The Roles & permissions table on the Team page](/docs-media/getting-started/team-roles.png)
 
+_Shown from the sample workspace, where editing is switched off._
+
 The person who created the workspace is its owner. The owner role cannot be given in an invite or a role change.
 
 ## Common problems

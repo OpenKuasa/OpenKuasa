@@ -19,6 +19,8 @@ Nothing can be changed in the demo workspace.
 
 ![The top of the Employees screen with headcount, department and tenure charts, and the Departments card](/docs-media/lekiu/employees.png)
 
+_Shown from the sample workspace, where editing is switched off._
+
 ### Add an employee
 
 1. Open **Lekiu**, then **Employees** under **Management**.

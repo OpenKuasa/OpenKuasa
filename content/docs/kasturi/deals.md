@@ -31,6 +31,8 @@ You become the owner of the deals you add. You can also start a deal from a cont
 
 ![The Deals screen with the pipeline board](/docs-media/kasturi/deals.png)
 
+_Shown from the sample workspace, where editing is switched off._
+
 ### Move a deal
 
 - Drag the deal's card to another stage on the **Pipeline board**.

@@ -15,6 +15,8 @@ Owners and admins. The screen is hidden from everyone else. In the demo workspac
 
 ![The Lekiu Settings screen with working days, leave entitlements and overtime rates](/docs-media/lekiu/settings.png)
 
+_Shown from the sample workspace, where editing is switched off._
+
 1. Open **Lekiu**, then **Settings** under **Configuration**.
 2. The **Workspace** card shows your company and team. Use **Edit company** or **Manage team** to change them in your account.
 3. In **Working days and attendance**:

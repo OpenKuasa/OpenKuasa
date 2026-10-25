@@ -34,6 +34,8 @@ For a deal trigger, the action is taken on the contact the deal belongs to.
 
 ![The Automations screen with the list of automations](/docs-media/kasturi/automations.png)
 
+_Shown from the sample workspace, where editing is switched off._
+
 ### Switch it on or off, edit or delete it
 
 - In the **Automations** list, use the switch in the **Switch** column to turn it **On** or **Off**.

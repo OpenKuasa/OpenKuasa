@@ -29,6 +29,8 @@ The **CPL** (cost per lead) column is worked out for you: spend divided by leads
 
 ![The Campaigns table in Ad Studio, with spend, leads and cost per lead for each campaign](/docs-media/jebat/ad-studio-campaigns.png)
 
+_Shown from the sample workspace, where editing is switched off._
+
 ### Update, pause or delete a campaign
 
 - To change its figures, click **Edit** on its row, change them, and click **Save**.

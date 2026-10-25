@@ -19,6 +19,8 @@ Your account must be linked to your employee record.
 
 ![The My Attendance screen with the Today card and attendance figures](/docs-media/lekiu/my-attendance.png)
 
+_Shown from the sample workspace, where editing is switched off._
+
 This screenshot was taken on a day off, so the **Today** card shows "Today is not a working day." and no **Clock in** button. On a working day the button is there.
 
 1. Open **Lekiu**, then **My Attendance** under **General**.

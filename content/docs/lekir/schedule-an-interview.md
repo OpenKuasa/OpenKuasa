@@ -30,6 +30,8 @@ To schedule an interview, the application must be active. A rejected or withdraw
 
 ![The Interviews screen](/docs-media/lekir/interviews.png)
 
+_Shown from the sample workspace, where editing is switched off._
+
 ### Record a past interview
 
 For an interview that already took place, click **Record a past interview** instead. Choose the application, the day and time it started, and under **What happened** pick **Completed** or **No-show**. Click **Record interview**. Nothing is sent and no invitation is made.

@@ -15,6 +15,8 @@ Owners, admins and members can add, edit, archive and delete contacts. Viewers c
 
 ![The Customers and Suppliers screen with counts, open balances and the contacts table](/docs-media/bendahara/customers-suppliers.png)
 
+_Shown from the sample workspace, where editing is switched off._
+
 ### Add a contact
 
 1. Open **Customers & Suppliers** under **Records** in the Bendahara menu.

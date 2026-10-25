@@ -31,6 +31,8 @@ Owners, admins and members can add, edit, move and delete leads. Viewers can see
 
 ![The Lead Funnel screen, with the stage funnel, leads by channel and the newest leads](/docs-media/jebat/lead-funnel-leads.png)
 
+_Shown from the sample workspace, where editing is switched off._
+
 ### Move a lead to another stage
 
 In the lead's row, pick the new stage from the **Stage** list. It saves straight away.

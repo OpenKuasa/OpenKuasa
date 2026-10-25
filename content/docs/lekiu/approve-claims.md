@@ -19,6 +19,8 @@ An admin cannot approve, reject or mark as paid their own claim. The workspace o
 
 ![The Claim Approvals screen with expense claims, receipts and Mark paid](/docs-media/lekiu/approve-claims.png)
 
+_Shown from the sample workspace, where editing is switched off._
+
 ### Approve or reject
 
 1. Open **Lekiu**, then **Financial Claims** under **Approvals**.

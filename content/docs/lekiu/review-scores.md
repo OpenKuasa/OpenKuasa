@@ -16,6 +16,8 @@ On **Review Scores**, owners and admins write performance reviews. A review is s
 
 ![The Review Scores screen with ratings and scores by department](/docs-media/lekiu/review-scores.png)
 
+_Shown from the sample workspace, where editing is switched off._
+
 ### Write a review
 
 1. Open **Lekiu**, then **Review Scores** under **Performance**.

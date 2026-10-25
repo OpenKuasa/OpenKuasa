@@ -16,6 +16,8 @@ screen: /people/announcements
 
 ![The Announcements screen with a draft and published posts](/docs-media/lekiu/announcements.png)
 
+_Shown from the sample workspace, where editing is switched off._
+
 ### Post an announcement
 
 1. Open **Lekiu**, then **Announcements** under **General**.

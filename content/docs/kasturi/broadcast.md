@@ -35,6 +35,8 @@ Archived contacts, contacts with no email, and people who have unsubscribed are 
 
 ![The Broadcast screen with the list of broadcasts](/docs-media/kasturi/broadcast.png)
 
+_Shown from the sample workspace, where editing is switched off._
+
 ### Send it
 
 1. Under **My broadcasts**, click the send button on the broadcast's row.

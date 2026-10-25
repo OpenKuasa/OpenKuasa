@@ -19,6 +19,8 @@ Your account must be linked to your employee record.
 
 ![The OT Claims screen with overtime by month, by rate and the My requests table](/docs-media/lekiu/ot-claims.png)
 
+_Shown from the sample workspace, where editing is switched off._
+
 1. Open **Lekiu**, then **OT Claims** under **Applications**.
 2. Click **Claim OT**.
 3. Choose the **Date worked**. It cannot be in the future.

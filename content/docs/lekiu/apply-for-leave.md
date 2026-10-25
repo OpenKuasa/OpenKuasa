@@ -19,6 +19,8 @@ Your account must be linked to your employee record. If it is not, the screen sh
 
 ![The Leave screen with balances and the My requests table](/docs-media/lekiu/leave.png)
 
+_Shown from the sample workspace, where editing is switched off._
+
 1. Open **Lekiu**, then **Leave** under **Applications**.
 2. Click **Apply Leave**.
 3. Choose the **Type of leave**: **Annual leave**, **Medical leave**, **Emergency leave**, **Unpaid leave**, **Maternity leave** or **Paternity leave**.

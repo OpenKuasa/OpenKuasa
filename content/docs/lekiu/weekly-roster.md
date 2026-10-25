@@ -17,6 +17,8 @@ The **Shift Calendar** shows one week's shifts, Monday to Sunday. Owners and adm
 
 ![The Shift Calendar screen with the weekly shift grid and shift types](/docs-media/lekiu/shift-calendar.png)
 
+_Shown from the sample workspace, where editing is switched off._
+
 ### Set the week's shifts
 
 1. Open **Lekiu**, then **Shift Calendar** under **Attendance**.

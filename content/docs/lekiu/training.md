@@ -16,6 +16,8 @@ screen: /people/training
 
 ![The Training screen with courses, enrolments and completion](/docs-media/lekiu/training.png)
 
+_Shown from the sample workspace, where editing is switched off._
+
 This screenshot is from the demo workspace, where adding courses and enrolling are switched off and show "Available in a later update". In your own workspace they work as described below.
 
 ### Add a course

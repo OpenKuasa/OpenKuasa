@@ -19,6 +19,8 @@ The supplier must be in [Customers and suppliers](/docs/bendahara/customers-supp
 
 ![The RFQs screen listing requests for quotation and their status](/docs-media/bendahara/rfqs.png)
 
+_Shown from the sample workspace, where editing is switched off._
+
 ### Ask for a quote
 
 1. Open **RFQs** under **Purchases** in the Bendahara menu.

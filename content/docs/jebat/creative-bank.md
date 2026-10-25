@@ -30,6 +30,8 @@ A new creative is not linked to any campaign. Each card shows **Unlinked** or **
 
 ![The Creative library, with each creative's type, channel, status and CTR](/docs-media/jebat/creative-library.png)
 
+_Shown from the sample workspace, where editing is switched off._
+
 ### Find, edit or delete a creative
 
 - Use the tabs **All**, **Images**, **Videos** and **Copy** to narrow the library.

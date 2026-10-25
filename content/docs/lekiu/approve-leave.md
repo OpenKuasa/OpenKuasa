@@ -19,6 +19,8 @@ An admin cannot approve or reject their own leave. Their row shows **Needs the o
 
 ![The Leave Approvals screen with pending requests and Approve, Reject and Cancel buttons](/docs-media/lekiu/approve-leave.png)
 
+_Shown from the sample workspace, where editing is switched off._
+
 ### Approve or reject
 
 1. Open **Lekiu**, then **Leave** under **Approvals**.

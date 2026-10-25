@@ -17,6 +17,8 @@ Journals shows the ledger: every entry in the books, newest first, whatever made
 
 ![The Journals screen showing ledger entries with their debits and credits](/docs-media/bendahara/journals.png)
 
+_Shown from the sample workspace, where editing is switched off._
+
 ### Post a manual journal
 
 1. Open **Journals** under **Analytics** in the Bendahara menu.

@@ -22,6 +22,8 @@ The supplier must be in [Customers and suppliers](/docs/bendahara/customers-supp
 
 ![The Purchase Orders screen listing orders by status](/docs-media/bendahara/purchase-orders.png)
 
+_Shown from the sample workspace, where editing is switched off._
+
 ### Raise an order
 
 1. Open **Purchase Orders** under **Purchases** in the Bendahara menu.

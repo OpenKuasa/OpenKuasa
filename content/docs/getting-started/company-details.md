@@ -30,6 +30,8 @@ You see **Company details saved.** The new name shows across the app straight aw
 
 ![The Company card on the Company details page, with the legal name, registration, SST and tax number fields](/docs-media/getting-started/company-details.png)
 
+_Shown from the sample workspace, where editing is switched off._
+
 ### Add a logo
 
 The logo is shown at the top of letters.

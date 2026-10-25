@@ -17,6 +17,8 @@ Chart of Accounts is your double-entry account structure. It lists each account 
 
 ![The Chart of Accounts grouped by asset and liability, with the Books balance card](/docs-media/bendahara/chart-of-accounts.png)
 
+_Shown from the sample workspace, where editing is switched off._
+
 ### Add an account
 
 1. Open **Chart of Accounts** under **Analytics** in the Bendahara menu.

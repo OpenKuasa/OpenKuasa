@@ -19,6 +19,8 @@ The letterhead is made from your company details on your account's company page:
 
 ![The HR Letters screen with drafts and issued letters](/docs-media/lekiu/letters.png)
 
+_Shown from the sample workspace, where editing is switched off._
+
 ### Start a letter
 
 1. Open **Lekiu**, then **Letters** under **Approvals**.

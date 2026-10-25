@@ -18,6 +18,8 @@ Banking shows a balance for each bank and cash account, your cash position over 
 
 ![The Banking screen with account balances, cash position and reconciliation](/docs-media/bendahara/banking.png)
 
+_Shown from the sample workspace, where editing is switched off._
+
 ### Add an account
 
 1. Open **Banking** under **Purchases** in the Bendahara menu.

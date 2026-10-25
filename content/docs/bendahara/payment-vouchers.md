@@ -18,6 +18,8 @@ Payment Vouchers lists every movement of money out: payments to suppliers, refun
 
 ![The Payment Vouchers screen with the period list, totals and the vouchers table](/docs-media/bendahara/payment-vouchers.png)
 
+_Shown from the sample workspace, where editing is switched off._
+
 ### Record a voucher for an expense category
 
 Use this for money out that settles no bill and no expense, such as rent.

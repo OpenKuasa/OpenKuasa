@@ -21,6 +21,8 @@ Your account must be linked to your employee record.
 
 ![The Timesheet screen with hours by employee and the weekly timesheet](/docs-media/lekiu/timesheet.png)
 
+_Shown from the sample workspace, where editing is switched off._
+
 1. Open **Lekiu**, then **Timesheet** under **Attendance**.
 2. Use the arrows or **This week** to pick the week.
 3. In your row, type the hours in the box for each day. Type the billable hours in the small box under it.

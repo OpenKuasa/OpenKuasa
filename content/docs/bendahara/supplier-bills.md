@@ -21,6 +21,8 @@ The supplier must be in [Customers and suppliers](/docs/bendahara/customers-supp
 
 ![The Supplier Bills screen with payable totals, charts and the bills table](/docs-media/bendahara/supplier-bills.png)
 
+_Shown from the sample workspace, where editing is switched off._
+
 ### Add a bill
 
 1. Open **Supplier Bills** under **Purchases** in the Bendahara menu.

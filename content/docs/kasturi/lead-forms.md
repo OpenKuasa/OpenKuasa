@@ -26,6 +26,8 @@ A lead form is a public page where people leave their name and email. Each respo
 
 ![The Lead Forms screen with the list of forms](/docs-media/kasturi/lead-forms.png)
 
+_Shown from the sample workspace, where editing is switched off._
+
 ### Share the form
 
 1. Find the form under **Your forms**. An active form shows its link under **Public link**.
