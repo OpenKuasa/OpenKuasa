@@ -56,11 +56,11 @@ You see **Push is on for this device.** The **Push** channel under **Delivery ch
 
 Where it works:
 
-- **Laptop or desktop:** Chrome, Edge or Firefox.
+- **Laptop or desktop:** Chrome, Edge or Firefox. On a Mac, Safari 16 or later also works.
 - **Android:** Chrome or Firefox.
 - **iPhone or iPad:** you need iOS 16.4 or later. Add OpenKuasa to your Home Screen first (**Share** → **Add to Home Screen**), open it from there, then turn push on.
 
-Push follows the **Push** ticks under **What you get notified about**. **Requests from your team** has push ticked to start with, so approvals waiting on you reach you without any setup.
+Push follows the **Push** ticks under **What you get notified about**. It only goes out for events whose **In-app** box is ticked. While **In-app** is off, nothing is pushed, except security alerts. **Requests from your team** has push ticked to start with, so approvals waiting on you reach you without any setup. If you saved your choices before push existed, tick it yourself.
 
 A notification can arrive up to 5 minutes after the event. If you already read it in the app, it is not pushed.
 

@@ -2,6 +2,7 @@ import { NotificationsForm } from '@/components/account/notifications-form';
 import { getProfile } from '@/lib/account/data';
 import { getViewer, hasSupabaseEnv } from '@/lib/auth/viewer';
 import { listPushDevices } from '@/lib/push/devices';
+import { pushConfig } from '@/lib/push/config';
 import { createClient } from '@/lib/supabase/server';
 
 export default async function NotificationsPage() {
@@ -25,7 +26,7 @@ export default async function NotificationsPage() {
         email={profile.email}
         timezone={profile.timezone}
         readOnly={viewer.isDemo}
-        pushKey={process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY || null}
+        pushKey={pushConfig()?.publicKey ?? null}
         devices={devices}
       />
     </div>

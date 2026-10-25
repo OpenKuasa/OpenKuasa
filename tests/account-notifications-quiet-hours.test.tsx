@@ -6,14 +6,15 @@ import { renderToStaticMarkup } from 'react-dom/server';
  * still saved: the controls stay switched on and in the form, or the one Save would lose (and reject) them.
  */
 
-vi.mock('@/app/account/actions', () => ({ updateNotificationsAction: vi.fn() }));
+vi.mock('@/app/account/actions', () => ({ updateNotificationsAction: vi.fn(), turnOnPushChannelAction: vi.fn() }));
+vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh: vi.fn() }) }));
 
 import { NotificationsForm } from '@/components/account/notifications-form';
 import { DEFAULT_NOTIFICATION_PREFS } from '@/config/account';
 
 const screen = () =>
   renderToStaticMarkup(
-    <NotificationsForm prefs={DEFAULT_NOTIFICATION_PREFS} email={null} timezone="Asia/Kuala_Lumpur" readOnly={false} />,
+    <NotificationsForm prefs={DEFAULT_NOTIFICATION_PREFS} email={null} timezone="Asia/Kuala_Lumpur" readOnly={false} pushKey={null} devices={[]} />,
   );
 
 describe('the quiet hours card', () => {

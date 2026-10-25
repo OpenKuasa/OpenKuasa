@@ -61,7 +61,7 @@ export const NOTIFY_EVENTS = [
   { id: 'deal_stages', name: 'Deal stage changes', help: 'Movement across your CRM pipeline' },
   { id: 'payments', name: 'Payments & invoices', help: 'Receipts, overdue invoices & e-Invoice status' },
   { id: 'team_activity', name: 'Team activity', help: 'Leave & claims approvals waiting on you' },
-  { id: 'hr_request_filed', name: 'Requests from your team', help: 'When someone who reports to you files leave, time-off, a claim or overtime' },
+  { id: 'hr_request_filed', name: 'Requests from your team', help: 'When someone who reports to you files leave, time-off, a claim or overtime. Owners and admins get it too when the person has no manager' },
   { id: 'hr_request_decided', name: 'Decisions on your requests', help: 'When your leave, time-off, claim or overtime is approved or rejected' },
   { id: 'hr_roster_changed', name: 'Roster changes', help: 'When your shifts from today on are changed' },
   { id: 'hr_shift_swap', name: 'Shift swaps', help: 'When a colleague asks to swap shifts with you, and each answer or decision on a swap' },

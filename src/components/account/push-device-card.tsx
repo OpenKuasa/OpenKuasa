@@ -66,7 +66,7 @@ export function PushDeviceCardView({
             </p>
             <p className="text-sm text-muted-foreground">
               {note ??
-                'Turn push on for each phone or computer you use. Push follows the Push ticks above.'}
+                'Turn push on for each phone or computer you use. Push follows the Push ticks above, and only for events whose In-app box is ticked.'}
             </p>
           </div>
           {support === 'ok' &&
