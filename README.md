@@ -132,61 +132,15 @@ under `src/app/(app)/`, written by `pnpm gen:routes` (see
 ## Connect an AI tool (MCP)
 
 The server address is `https://<your-host>/api/mcp` (for openkuasa.com:
-`https://openkuasa.com/api/mcp`). The same steps are on **Account →
-Developers** in the app, with a copy button for each.
+`https://openkuasa.com/api/mcp`). Make a personal API key on **Account →
+Developers**, which also shows the setup for Claude Code, Codex and Cursor with
+a copy button for each. The tool acts as you, with exactly what you can see and
+do in the app.
 
-1. On **Account → Developers**, make a key: give it a name such as "Claude Code
-   on my laptop" and copy it. It starts with `okk_` and is shown only once.
-   Make one key per tool, and revoke it when you stop using that tool.
-2. Keep the key in an environment variable, not in a command or a file you
-   might share. On macOS, straight from the clipboard:
-
-   ```bash
-   echo "export OPENKUASA_API_KEY=$(pbpaste)" >> ~/.zshrc && source ~/.zshrc
-   ```
-
-3. Add the server to your tool:
-
-   **Claude Code** — the single quotes keep the variable name in the config, so
-   Claude Code fills in the key when it connects:
-
-   ```bash
-   claude mcp add --transport http openkuasa https://openkuasa.com/api/mcp \
-     --header 'Authorization: Bearer ${OPENKUASA_API_KEY}'
-   ```
-
-   **Codex** — add to `~/.codex/config.toml`:
-
-   ```toml
-   [mcp_servers.openkuasa]
-   url = "https://openkuasa.com/api/mcp"
-   bearer_token_env_var = "OPENKUASA_API_KEY"
-   ```
-
-   **Cursor** — add to `~/.cursor/mcp.json`:
-
-   ```json
-   {
-     "mcpServers": {
-       "openkuasa": {
-         "url": "https://openkuasa.com/api/mcp",
-         "headers": { "Authorization": "Bearer ${env:OPENKUASA_API_KEY}" }
-       }
-     }
-   }
-   ```
-
-   **Claude Desktop and claude.ai** — no key. In Settings → Connectors, choose
-   Add custom connector, paste the server address, then sign in with OpenKuasa
-   and allow it for your workspace. This needs "Sign in with OpenKuasa" turned
-   on (`MCP_SIGN_IN_ENABLED`, see [Self-hosting setup](#self-hosting-setup)).
-
-4. Restart the tool, then ask it something like "what's in my CRM?".
-
-The tool acts as you, with exactly what you can see and do in the app. It asks
-before every change (unless you have told it not to), riskier changes come
-back with a note that needs your OK, and owners and admins see each change in
-the activity log as "via MCP".
+The steps for each tool, and for "Sign in with OpenKuasa" (Claude Desktop and
+claude.ai), are in the guides:
+[Connect an AI tool (MCP)](https://openkuasa.com/docs/developers/connect-an-ai-tool) and
+[Turn on Sign in with OpenKuasa](https://openkuasa.com/docs/developers/mcp-sign-in).
 
 ## Screenshots
 
@@ -278,116 +232,34 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=<your-anon-key>
 
 ### Preview mode (no Supabase project)
 
-Without those two values the app has no sign-in and no database. What it does
-then depends on where it is running:
-
-- **`pnpm dev` and tests** — it runs in *preview mode*: every visitor is a
-  read-only "Guest" in a "Preview workspace" and the screens show sample data.
-  Nothing needs to be set.
-- **A production server (`pnpm start`, or any host)** — it refuses to serve.
-  Every request gets a plain `503 Service unavailable` and the server log says
-  which variables are missing. A deployment that loses a variable therefore
-  fails visibly instead of quietly turning into the sample app with nobody
-  signed in.
-- **A production preview on purpose** — set `OPENKUASA_PREVIEW=1` on the host
-  to serve the sample-data preview from a production build. The flag is only
-  read when the Supabase values are missing; it does nothing on a configured
-  deployment. Do not set it on the deployment that serves your real data.
-
-The check is made per request (`src/lib/auth/preview-mode.ts`, applied in
-`src/lib/supabase/middleware.ts`), so `pnpm build` works with or without the
-variables. `pnpm smoke:routes` sets the flag for the server it starts.
-
-### Optional: `AUTH_COOKIE_SECRET`
-
-Opening a password-reset link leaves a short-lived signed cookie that the "set
-a new password" form checks. It is signed with `AUTH_COOKIE_SECRET` (32+
-characters) when set, otherwise with a key derived from
-`AI_KEYS_ENCRYPTION_SECRET`, otherwise with a random key made when the server
-starts. The last option is fine for one long-running server; if you run several
-instances or a serverless host and set neither secret, set
-`AUTH_COOKIE_SECRET` or reset links will intermittently be refused.
+Without those two values, `pnpm dev` and the tests run in *preview mode* on
+sample data, and a production server (`pnpm start`, or any host) refuses to
+serve: every request gets `503 Service unavailable` and the server log names
+the missing variables. Set `OPENKUASA_PREVIEW=1` to serve the preview from a
+production build on purpose. See
+[Run your own copy](https://openkuasa.com/docs/developers/self-hosting).
 
 ## Self-hosting setup
 
-`.env.example` has the full list. Beyond the two Supabase values above, these
-turn on the rest of the app:
+`.env.example` has the full list. Beyond the two Supabase values above, more
+variables turn on the rest of the app (the service-role key, the key-sealing
+secret, AI models, `CRON_SECRET`, `AGENTS_ENABLED`, `MCP_SIGN_IN_ENABLED`,
+`AUTH_COOKIE_SECRET` and others). A fresh Supabase project also needs some Auth
+settings: anonymous sign-ins on, and hCaptcha left off. The guides explain each
+variable and give the steps:
 
-| Variable | What it is for |
-| --- | --- |
-| `SUPABASE_SERVICE_ROLE_KEY` | Server-only work: scheduled agents, file clean-ups, reading a workspace's stored keys, test clean-up. Never expose it to the browser. |
-| `AI_KEYS_ENCRYPTION_SECRET` | 32+ characters. Seals each workspace's OpenRouter and Resend keys; without it a workspace cannot save its own keys. Use the same value on every host, because changing it makes stored keys unreadable. |
-| `OPENROUTER_API_KEY` | The platform key behind the 3 free questions a week for workspaces without their own key. Optional. |
-| `OPENKUASA_MODEL_ORCHESTRATOR`, `OPENKUASA_MODEL_WORKER` | Models for Tuah and its specialists. `OPENKUASA_MODEL_RECEIPTS` and `OPENKUASA_MODEL_AGENT_*` override the receipt reader and the Weekly Studio steps. |
-| `AI_GATEWAY_BASE_URL` | Optional gateway in front of OpenRouter. |
-| `AGENTS_ENABLED` | `true` lets scheduled agent runs happen. Off by default. |
-| `CRON_SECRET` | 32+ characters. Authorises the scheduled endpoints below. |
-| `MCP_SIGN_IN_ENABLED` | `true` turns on "Sign in with OpenKuasa" for MCP apps. Off by default, so apps connect with API keys only. It also needs the Supabase OAuth server on (Authentication → OAuth Server, consent path `/oauth/consent`). |
-| `NEXT_PUBLIC_DEMO_ENABLED` | `1` shows the "Try the demo" button on the login page. |
-| `PUBLIC_SITE_URL` | The lasting address written into broadcast unsubscribe links. |
-| `RATE_LIMIT_PEPPER` | Keys the hashes the rate limiter stores, so they cannot be tested against guesses. |
-| `OPENKUASA_SUPABASE_TOKEN` | A Supabase access token, used only by `pnpm db:migrate`. |
-
-Email broadcasts use each workspace's own Resend key, entered in the app, so
-there is no email variable to set.
-
-A fresh Supabase project also needs these Auth settings (Supabase dashboard →
-Authentication) for sign-in and signup to work:
-
-- **Enable Anonymous sign-ins** — powers the demo workspace and the tests.
-- **"Confirm email"** — with it off, signup creates a session immediately and
-  lands on `/command`. With it on, signup stops at a "check your email" message
-  and the user must confirm and sign in. An already-registered address always
-  gets that same "check your email" message, so the form does not say which
-  addresses have an account.
-- **Leave hCaptcha OFF for now** — the auth forms don't yet pass a captcha
-  token, so *enabling* hCaptcha would break sign-in and signup. Wiring the
-  hCaptcha widget into the auth UI is a planned hardening step before it can be
-  turned on in production.
+- [Run your own copy](https://openkuasa.com/docs/developers/self-hosting), including the Supabase Auth settings
+- [Environment variables](https://openkuasa.com/docs/developers/environment-variables)
+- [AI models and keys](https://openkuasa.com/docs/developers/ai-models-and-keys)
 
 ### Scheduled triggers (cron)
 
-Six endpoints do background work and are meant to be called by a scheduler
-you run (for example a cron job every five minutes), not by a browser:
-
-| Endpoint | What it does |
-| --- | --- |
-| `POST /api/agents/run` | Runs the agent schedules that are due |
-| `POST /api/agents/poll` | Finishes pending videos, fails stuck runs, expires old proposals |
-| `POST /api/finance/fx-rates/fetch` | Stores Bank Negara Malaysia's exchange rates; reaches BNM only when a rate is missing |
-| `POST /api/hire/cv-cleanup` | Removes stored CV files of deleted applications |
-| `POST /api/finance/receipt-cleanup` | Removes Receipts Inbox files of deleted receipts, and uploads nobody recorded within the hour |
-| `POST /api/maintenance/sweep-files` | Removes document and logo files nothing points at (once a day is plenty) |
-
-Agent runs also need `AGENTS_ENABLED=true`; without it `/api/agents/run` does
-nothing. Database-side jobs (nightly attendance close, yearly leave balances,
-demo data reseeds) run on `pg_cron` inside Supabase and need no scheduler.
-
-They take no body and no parameters. Each call must carry a dedicated secret:
-
-```bash
-# Generate once, set it as CRON_SECRET on the app and on the scheduler.
-openssl rand -hex 32
-
-curl -X POST https://<your-host>/api/agents/run \
-  -H "Authorization: Bearer $CRON_SECRET"
-```
-
-- `/api/finance/receipt-cleanup` answers `{"ok": true, "queued": n, "removed": n}`:
-  how many unrecorded uploads it listed and how many files it removed.
-  `"ok": false` means part of the work is left for the next call (it stops
-  after 20 seconds); it needs attention only if it stays false for many calls
-  in a row.
-- `CRON_SECRET` must be at least 32 characters. Unset, empty or shorter means
-  the endpoints accept nothing with it (they answer `401`).
-- Use a value made for this purpose only. Do not reuse a Supabase key.
-- `CRON_ALLOW_LEGACY_KEY` is a temporary switch for installs set up before
-  `CRON_SECRET` existed, whose scheduler still sends the Supabase service-role
-  key (in an `x-service-key` header or as the bearer token). It is on unless set
-  to `false`, and every call accepted that way logs a deprecation warning. Move
-  the scheduler to `CRON_SECRET`, then set `CRON_ALLOW_LEGACY_KEY=false`. New
-  installs should set it to `false` from the start. The switch and the old path
-  will be removed in a later release.
+Six `POST` endpoints under `/api/agents`, `/api/finance`, `/api/hire` and
+`/api/maintenance` do background work, and are meant to be called by a
+scheduler you run, with `Authorization: Bearer $CRON_SECRET`. Sending the
+service-role key instead is deprecated: set `CRON_ALLOW_LEGACY_KEY=false`. The
+endpoints, what they answer and how to set them up are in
+[Scheduled jobs](https://openkuasa.com/docs/developers/scheduled-jobs).
 
 ## Supabase helpers
 
@@ -434,15 +306,8 @@ pnpm db:migrate           # lists what the project has not had; changes nothing
 pnpm db:migrate --apply   # applies those, oldest first, once you type the project ref
 ```
 
-Code that needs a table or column the database lacks fails, and some pages then
-quietly show their samples instead of your data. The script uses
-`OPENKUASA_SUPABASE_TOKEN` and the Supabase Management API, so no database
-password is needed. It reads both variables from `.env.local` only, never from
-your shell, and `--apply` asks you to type the project ref it is about to write
-to (without a terminal, pass `--confirm=<ref>`). Each migration is applied in
-one transaction with its record in `supabase_migrations.schema_migrations`
-(created if the project has none yet), and the run stops at the first one that
-fails.
+It needs `OPENKUASA_SUPABASE_TOKEN` in `.env.local`. See
+[Keep the database up to date](https://openkuasa.com/docs/developers/database-migrations).
 
 ### Testing against a live Supabase project
 
