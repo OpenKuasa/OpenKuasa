@@ -5,7 +5,7 @@ order: 81
 ask: How much in payment vouchers is still outstanding?
 screen: /people/payment-vouchers
 ---
-**Payment Vouchers** is the register of vouchers on record, newest first. It only shows information. Creating vouchers is not built yet.
+**Payment Vouchers** is the register of vouchers on record, newest first. It only shows information. Creating vouchers is not built yet. This is Lekiu's own register of HR vouchers, separate from Bendahara's [Payment Vouchers](/docs/bendahara/payment-vouchers).
 
 ## Who can do this
 

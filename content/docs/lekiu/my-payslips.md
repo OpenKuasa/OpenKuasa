@@ -9,7 +9,7 @@ screen: /people/my-payslips
 
 ## Who can do this
 
-Any member of the workspace whose account is linked to their employee record. You only see your own paid payslips.
+Anyone in the workspace whose account is linked to their employee record. You only see your own paid payslips.
 
 ## Before you start
 
@@ -30,7 +30,7 @@ Your payslips are also listed on **My Documents**.
 ## Common problems
 
 - **"No payslips yet. A payslip appears here once payroll for the month is marked as paid."** HR has not marked a run as paid for you yet.
-- **A figure looks wrong**: ask an owner or admin. Only they can change a payslip, and only by undoing the paid run. They can only undo the newest month's run, so an older payslip may not be changeable.
+- **A figure looks wrong**: ask an owner or admin. Only they can change a payslip, and only by undoing the paid run. They can only undo the newest month's run, so an older payslip can be changed only by undoing the later runs first, which deletes those runs' payslips and lines. That is a real cost, so it is not done lightly.
 
 ## Related
 

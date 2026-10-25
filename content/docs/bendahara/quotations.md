@@ -19,6 +19,8 @@ The customer must be in [Customers and suppliers](/docs/bendahara/customers-supp
 
 ![The Quotations screen with open quotes, the acceptance funnel and the quotations table](/docs-media/bendahara/quotations.png)
 
+_Shown from the sample workspace, where editing is switched off._
+
 ### Give a quotation
 
 1. Open **Quotations** under **Sales** in the Bendahara menu.
@@ -42,7 +44,7 @@ The answer can be changed until an invoice is made from the quotation.
 ### Make an invoice
 
 1. On an accepted quotation, choose **Make invoice**.
-2. Confirm with **Make invoice**. A draft invoice is made with the same customer, notes and lines, dated today.
+2. Confirm with **Make invoice**. A draft invoice is made with the same customer, notes and lines, dated today. Line discounts and the whole-quotation discount carry over too.
 3. Check it and post it on [Invoices](/docs/bendahara/invoices). The quotation's **Invoice** column shows it.
 
 A quotation in another currency becomes an invoice in that currency, at Bank Negara Malaysia's selling rate for the new invoice's date. The note says "Invoice drafted in … at Bank Negara Malaysia's selling rate of …", or, when Bank Negara has no rate, "Invoice drafted in …. Enter its exchange rate before posting."

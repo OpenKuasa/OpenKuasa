@@ -21,6 +21,8 @@ The customer must be in [Customers and suppliers](/docs/bendahara/customers-supp
 
 ![The Invoices screen with receivable totals, charts and the invoices table](/docs-media/bendahara/invoices.png)
 
+_Shown from the sample workspace, where editing is switched off._
+
 ### Raise an invoice
 
 1. Open **Invoices** under **Sales** in the Bendahara menu.

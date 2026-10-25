@@ -29,7 +29,7 @@ You need a posted invoice whose customer is in credit on it: more paid and credi
 6. Under **When**, choose **Pay out now** or **Pay later**.
 7. Click **Record refund**, or **Save to pay later**.
 
-A refund on an invoice in another currency is always paid out now. The form then asks for the **Ringgit paid out**.
+A refund on an invoice in another currency is always paid out now. Paid out of a ringgit account, the form then asks for the **Ringgit paid out**: what left the account, in RM. Paid out of an account in that currency, it asks for the exchange rate instead.
 
 ### Mark as paid, delete or void
 

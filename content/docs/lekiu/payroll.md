@@ -7,7 +7,7 @@ screen: /people/payroll
 ---
 On **Payroll**, owners and admins run payroll month by month. A run starts as a draft that employees cannot see. When you mark it as paid, each employee sees their payslip on **My Payslips**.
 
-Marking a run as paid only records it in OpenKuasa. It does not move any money, make a bank file, or submit anything to EPF, SOCSO, EIS or LHDN. You pay and submit those yourself.
+Marking a run as paid only records it in OpenKuasa. It does not move any money, make a bank file, or submit anything to EPF, SOCSO, EIS or LHDN. You pay and submit those yourself. It also posts nothing to Bendahara, so record the salaries there separately.
 
 ## Who can do this
 
@@ -37,7 +37,7 @@ The screen shows "Draft: employees can't see this yet". It also notes overtime c
 1. In **Payslips**, click an employee's name to open their payslip.
 2. To add pay or a deduction, click **Add line**, choose **Earning (adds to gross)** or **Deduction (comes off net)**, type a name and the amount, and click **Save line**. Lines you added can be edited or removed. Lines added by the system cannot: overtime ("Overtime," with the date and hours), unpaid leave ("Unpaid leave," with the days) and the unpaid days before a new joiner started ("Joined" with the date).
 3. Check EPF, SOCSO, EIS and PCB. The payslip says: "Proposed figures. Check them before marking the run as paid." Know how they are filled in:
-   - **EPF, SOCSO and EIS** are simple estimates of the employee's share, worked out from gross pay. They are not the official contribution tables, so check each one. Employer shares are not worked out or shown.
+   - **EPF, SOCSO and EIS** are simple estimates of the employee's share, worked out from gross pay, so overtime and every earning line you add raise them. They are not the official contribution tables, so check each one. Employer shares are not worked out or shown.
    - **PCB is not worked out.** It is copied from the employee's last paid payslip, or RM 0.00 if there is none. A first run and a new joiner get RM 0.00, and PCB does not change when salary, overtime or other pay changes. Enter the correct PCB for each employee every month.
 4. To use your own amount, type it and click **Save**. The figure is then marked **set by HR** and stays fixed, even when you click **Recalculate**. Click **Reset** to go back to the proposed amount. After changing salary, overtime or lines, click **Reset** or check the figures you set again.
 5. To take someone off this draft, click **Remove payslip**, then **Confirm**. **Recalculate** would bring it back.
@@ -49,6 +49,8 @@ Click **Recalculate** after changing salaries or overtime. It adds payslips for 
 1. Click **Mark as paid**, then **Confirm**. Employees can now see their payslips.
 
 To change a paid run, click **Undo paid**, then **Confirm**. The run goes back to a draft, its payslips go back to pending, and employees no longer see them. Only the newest run can be undone: if a later month already has a run, delete that run first. Only a draft can be deleted, so if that later run is paid, click **Undo paid** on it first, then **Delete draft**. To throw a draft away, click **Delete draft**, then **Confirm**.
+
+Be careful when undoing and deleting later runs: deleting a run deletes its payslips and their lines. Every line typed in and every EPF, SOCSO, EIS or PCB figure marked **set by HR** in those months is lost. When you run those months again, PCB is copied afresh from the employee's last paid payslip.
 
 Use the **Month** list at the top to open an earlier run. **Export** is a disabled button that says "Available in a later update".
 
