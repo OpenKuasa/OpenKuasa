@@ -18,7 +18,7 @@ Owners and admins. The screen is hidden from everyone else, and shows "This page
 3. Read **Amount by month** and **Vouchers by type**.
 4. In **Vouchers**, each row shows the **Voucher no**, **Payee**, **Type**, **Amount**, **Date** and **Status**: **Paid**, **Issued** or **Draft**.
 
-**New voucher** and **Export** show "Available in a later update".
+There is no way to create vouchers yet: **New voucher** and **Export** show "Available in a later update". In your own workspace the register shows "No vouchers yet" until vouchers can be created.
 
 ## Related
 
