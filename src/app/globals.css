@@ -327,6 +327,17 @@
   }
 }
 
+/*
+ * Inside a form, a select also draws a hidden native <select> straight after its trigger. When the
+ * select is the last thing in a `space-y-*` box, that hidden element becomes the box's last child, so
+ * the visible trigger takes the space-y margin meant for the gap between children: the box stands
+ * 4–8px taller than its neighbours, and in a row lined up at the bottom its label sits above theirs.
+ * Outside any layer so it outranks the utilities; no trigger sets a bottom margin of its own.
+ */
+[data-slot='select-trigger']:has(+ select[aria-hidden='true']:last-child) {
+  margin-block-end: 0;
+}
+
 /* Ambient icon motion — subtle, used sparingly on signature icons. */
 @keyframes twinkle {
   0%,
