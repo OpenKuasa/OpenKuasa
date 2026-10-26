@@ -172,6 +172,18 @@ describe('a line of a document', () => {
     }
   });
 
+  it('keeps the product box as tall as the others on the row', () => {
+    // Inside a form, the product select also draws a hidden native <select> as the box's last child.
+    // `space-y-1` puts its margin under every child but the last, so the visible trigger got 4px
+    // under it and the box stood 4px taller, its label 4px above the row's other labels. A flex gap
+    // only falls between children in the flow, and the hidden select is positioned out of it.
+    for (const discount of [false, true]) {
+      const box = fieldBox(markup(discount), 'product');
+      expect(box).not.toContain('space-y-1');
+      expect(box).toEqual(expect.arrayContaining(['flex', 'flex-col', 'gap-1']));
+    }
+  });
+
   it('sizes the totals from the form too', () => {
     const html = markup(true);
     expect(html).toContain('@sm/lines:w-64');

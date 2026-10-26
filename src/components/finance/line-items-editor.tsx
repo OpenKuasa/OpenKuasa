@@ -175,7 +175,9 @@ export function LineItemsEditor({
               className={cn('grid grid-cols-6 gap-2 rounded-lg border p-3', wide.row)}
               style={rowStyle}
             >
-              <div className={cn('col-span-6 space-y-1', wide.oneTrack)}>
+              {/* A flex gap, not space-y: in a form the select adds a hidden native select as the last
+                  child, and space-y would then put 4px under the trigger and lift this box's label. */}
+              <div className={cn('col-span-6 flex flex-col gap-1', wide.oneTrack)}>
                 <Label htmlFor={field('product')} className={label}>
                   Product
                 </Label>
