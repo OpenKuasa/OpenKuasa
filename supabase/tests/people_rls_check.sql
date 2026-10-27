@@ -330,7 +330,7 @@ begin
   exception when insufficient_privilege then null;
   end;
   select count(*) into n from public.hr_statutory_rules;
-  if n <> 3 then fails := array_append(fails, format('a member reads %s statutory rules, expected 3', n)); end if;
+  if n <> 12 then fails := array_append(fails, format('a member reads %s statutory rules, expected 12', n)); end if;
   foreach t in array hr_only loop
     execute format('select count(*) from public.%I where org_id = %L', t, org) into n;
     if n <> 0 then fails := array_append(fails, format('a member reads %s rows of HR-only %s', n, t)); end if;

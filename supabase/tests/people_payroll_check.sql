@@ -173,9 +173,20 @@ begin
      or not has_table_privilege('authenticated', 'public.hr_statutory_rules', 'SELECT') then
     fails := array_append(fails, 'hr_statutory_rules is not read-only for signed-in users and closed to everyone else');
   end if;
-  select string_agg(format('%s %s %s', s.scheme, s.rate, coalesce(s.max_cents::text, 'none')), '; ' order by s.scheme) into t
+  select string_agg(format('%s %s %s-%s %s %s', s.scheme, s.citizenship, s.employee_from_age, coalesce(s.employee_until_age::text, ''),
+           s.rate, coalesce(s.max_cents::text, 'none')), '; ' order by s.scheme, s.citizenship, s.employee_from_age) into t
   from public.hr_statutory_rules s;
-  if t is distinct from 'eis 0.00200 1190; epf 0.11000 none; socso 0.00500 2975' then
+  -- No two bands of one scheme and category overlap, so at most one rule ever matches.
+  select count(*) into n from public.hr_statutory_rules a join public.hr_statutory_rules b
+    on a.scheme = b.scheme and a.citizenship = b.citizenship and a.employee_from_age < b.employee_from_age
+   and b.employee_from_age < coalesce(a.employee_until_age, 1000);
+  if n <> 0 then fails := array_append(fails, format('%s pairs of statutory age bands overlap', n)); end if;
+  if t is distinct from 'eis citizen 18-60 0.00200 1190; eis permanent_resident 18-60 0.00200 1190; '
+       || 'epf citizen 0-60 0.11000 none; epf non_citizen 0-75 0.02000 none; '
+       || 'epf non_citizen_before_1998 0-60 0.11000 none; epf non_citizen_before_1998 60-75 0.05500 none; '
+       || 'epf permanent_resident 0-60 0.11000 none; epf permanent_resident 60-75 0.05500 none; '
+       || 'socso citizen 0-60 0.00500 2975; socso non_citizen 0-60 0.00500 2975; '
+       || 'socso non_citizen_before_1998 0-60 0.00500 2975; socso permanent_resident 0-60 0.00500 2975' then
     fails := array_append(fails, format('the statutory rules are: %s', t));
   end if;
   -- The columns of the spec.
@@ -1140,6 +1151,10 @@ begin
   insert into public.hr_employee_private (employee_id, org_id, base_salary_cents, date_of_birth, nric)
   values (turned60, corg, 500000, date '1965-03-15', null), (turns60, corg, 300000, date '1965-04-01', null),
          (icsixty, corg, 400000, null, '650228-10-5551'), (teen, corg, 150000, date '2007-06-01', null);
+  -- Sixty By Identity Card is a permanent resident: 5.5% EPF from 60. Turns Sixty On 1 April
+  -- is a non-citizen: 2% EPF and no EIS.
+  update public.hr_employee_private set citizenship = 'permanent_resident' where employee_id = icsixty;
+  update public.hr_employee_private set citizenship = 'non_citizen' where employee_id = turns60;
   -- Unpaid leave, approved. Monday and Tuesday; a half day; and Friday 28 March
   -- to Wednesday 2 April, which is 3 working days of March and 2 of April.
   insert into public.hr_leave_requests (org_id, employee_id, leave_type, start_date, end_date, days, half_day, status)
@@ -1227,12 +1242,12 @@ begin
       -- Turned 60 on 15 March: March still has every employee share. They stop in April.
       ('turned sixty inside the month', turned60,
         'basic 500000 gross 500000 epf 55000 socso 2500 eis 1000 pcb 0 other 0 net 441500 set [] pending', 'none'),
-      -- Turns 60 on 1 April: March and April both keep their shares.
-      ('fifty nine all month', turns60,
-        'basic 300000 gross 300000 epf 33000 socso 1500 eis 600 pcb 0 other 0 net 264900 set [] pending', 'none'),
-      -- Turned 60 in February, read from the identity card: no employee share in March.
-      ('sixty before the month began, by identity card', icsixty,
-        'basic 400000 gross 400000 epf 0 socso 0 eis 0 pcb 0 other 0 net 400000 set [] pending', 'none'),
+      -- Turns 60 on 1 April, a non-citizen: 2% EPF, SOCSO as anyone, no EIS.
+      ('fifty nine all month, non-citizen', turns60,
+        'basic 300000 gross 300000 epf 6000 socso 1500 eis 0 pcb 0 other 0 net 292500 set [] pending', 'none'),
+      -- Turned 60 in February, read from the identity card, a permanent resident: 5.5% EPF and nothing else.
+      ('sixty before the month began, by identity card, permanent resident', icsixty,
+        'basic 400000 gross 400000 epf 22000 socso 0 eis 0 pcb 0 other 0 net 378000 set [] pending', 'none'),
       -- 17: EPF and SOCSO as usual, no EIS below 18.
       ('seventeen', teen,
         'basic 150000 gross 150000 epf 16500 socso 750 eis 0 pcb 0 other 0 net 132750 set [] pending', 'none')
@@ -1248,27 +1263,44 @@ begin
   if n <> 7 then fails := array_append(fails, 'March did not take exactly the three overtime records it should'); end if;
   -- The maximum is reached exactly at 5950.00, and a sen above it changes nothing.
   for n, want in select * from (values (595000, '2975 1190'), (594999, '2975 1190'), (594800, '2974 1190'), (594700, '2974 1189'), (595001, '2975 1190'), (0, '0 0'), (1, '0 0')) as c(g, w) loop
-    if format('%s %s', private.hr_payroll_proposal('socso', n, null), private.hr_payroll_proposal('eis', n, null)) <> want then
+    if format('%s %s', private.hr_payroll_proposal('socso', n, null, null), private.hr_payroll_proposal('eis', n, null, null)) <> want then
       fails := array_append(fails, format('SOCSO and EIS on a gross of %s are %s %s, expected %s', n,
-        private.hr_payroll_proposal('socso', n, null), private.hr_payroll_proposal('eis', n, null), want));
+        private.hr_payroll_proposal('socso', n, null, null), private.hr_payroll_proposal('eis', n, null, null), want));
     end if;
   end loop;
-  if private.hr_payroll_proposal('epf', 100000000, null) <> 11000000 or private.hr_payroll_proposal('epf', 5, null) <> 1
-     or private.hr_payroll_proposal('epf', 4, null) <> 0 or private.hr_payroll_proposal('pcb', 100000, null) <> 0 then
+  if private.hr_payroll_proposal('epf', 100000000, null, null) <> 11000000 or private.hr_payroll_proposal('epf', 5, null, null) <> 1
+     or private.hr_payroll_proposal('epf', 4, null, null) <> 0 or private.hr_payroll_proposal('pcb', 100000, null, null) <> 0 then
     fails := array_append(fails, 'EPF has a maximum, is not rounded to the sen, or a scheme with no rule is not zero');
   end if;
   -- From the age of 60 there is no employee share of EPF, SOCSO or EIS, and none
   -- of EIS below 18. An unknown age keeps every share.
-  if private.hr_payroll_proposal('epf', 500000, 60) <> 0 or private.hr_payroll_proposal('epf', 500000, 61) <> 0
-     or private.hr_payroll_proposal('epf', 500000, 59) <> 55000 or private.hr_payroll_proposal('epf', 500000, null) <> 55000
-     or private.hr_payroll_proposal('socso', 500000, 60) <> 0 or private.hr_payroll_proposal('eis', 500000, 60) <> 0 then
+  if private.hr_payroll_proposal('epf', 500000, 60, null) <> 0 or private.hr_payroll_proposal('epf', 500000, 61, null) <> 0
+     or private.hr_payroll_proposal('epf', 500000, 59, null) <> 55000 or private.hr_payroll_proposal('epf', 500000, null, null) <> 55000
+     or private.hr_payroll_proposal('socso', 500000, 60, null) <> 0 or private.hr_payroll_proposal('eis', 500000, 60, null) <> 0 then
     fails := array_append(fails, 'the employee share from the age of 60 is not zero, or a missing date of birth is not under 60');
   end if;
-  if private.hr_payroll_proposal('eis', 500000, 17) <> 0 or private.hr_payroll_proposal('eis', 500000, 18) <> 1000
-     or private.hr_payroll_proposal('eis', 500000, null) <> 1000 or private.hr_payroll_proposal('epf', 500000, 17) <> 55000
-     or private.hr_payroll_proposal('socso', 500000, 17) <> 2500 then
+  if private.hr_payroll_proposal('eis', 500000, 17, null) <> 0 or private.hr_payroll_proposal('eis', 500000, 18, null) <> 1000
+     or private.hr_payroll_proposal('eis', 500000, null, null) <> 1000 or private.hr_payroll_proposal('epf', 500000, 17, null) <> 55000
+     or private.hr_payroll_proposal('socso', 500000, 17, null) <> 2500 then
     fails := array_append(fails, 'EIS below 18 is not zero, or an age below 18 changed EPF or SOCSO, or an unknown age dropped EIS');
   end if;
+  -- The category decides the rate. Empty is a citizen.
+  for t, want in select * from (values
+      ('epf citizen 30', 55000), ('epf citizen 60', 0), ('epf - 60', 0), ('epf - -', 55000),
+      ('epf permanent_resident 59', 55000), ('epf permanent_resident 60', 27500), ('epf permanent_resident 75', 0),
+      ('epf permanent_resident -', 55000),
+      ('epf non_citizen_before_1998 60', 27500), ('epf non_citizen 30', 10000), ('epf non_citizen 70', 10000),
+      ('epf non_citizen 75', 0), ('epf non_citizen -', 10000),
+      ('socso non_citizen 30', 2500), ('socso non_citizen 60', 0), ('socso permanent_resident 30', 2500),
+      ('eis permanent_resident 30', 1000), ('eis permanent_resident 17', 0), ('eis non_citizen 30', 0),
+      ('eis non_citizen_before_1998 30', 0), ('eis non_citizen -', 0)) as c(k, w) loop
+    if private.hr_payroll_proposal(split_part(t, ' ', 1), 500000, nullif(split_part(t, ' ', 3), '-')::int,
+         nullif(split_part(t, ' ', 2), '-'))::text is distinct from want then
+      fails := array_append(fails, format('%s on 5000.00 proposes %s, expected %s', t,
+        private.hr_payroll_proposal(split_part(t, ' ', 1), 500000, nullif(split_part(t, ' ', 3), '-')::int,
+          nullif(split_part(t, ' ', 2), '-')), want));
+    end if;
+  end loop;
   -- Age from an identity card number: the date it encodes, with or without dashes;
   -- nothing when it is not a real date or not twelve digits; a date of birth on file wins.
   for n, want, t in select * from (values
@@ -1379,10 +1411,10 @@ begin
       ('the month after turning sixty', turned60,
         'basic 500000 gross 500000 epf 0 socso 0 eis 0 pcb 0 other 0 net 500000 set [] pending', 'none'),
       -- Turned 60 on 1 April: April still has every share; May would not.
-      ('turned sixty on the first of the month', turns60,
-        'basic 300000 gross 300000 epf 33000 socso 1500 eis 600 pcb 0 other 0 net 264900 set [] pending', 'none'),
-      ('still sixty and over, by identity card', icsixty,
-        'basic 400000 gross 400000 epf 0 socso 0 eis 0 pcb 0 other 0 net 400000 set [] pending', 'none'),
+      ('turned sixty on the first of the month, non-citizen', turns60,
+        'basic 300000 gross 300000 epf 6000 socso 1500 eis 0 pcb 0 other 0 net 292500 set [] pending', 'none'),
+      ('still sixty and over, by identity card, permanent resident', icsixty,
+        'basic 400000 gross 400000 epf 22000 socso 0 eis 0 pcb 0 other 0 net 378000 set [] pending', 'none'),
       ('still seventeen', teen,
         'basic 150000 gross 150000 epf 16500 socso 750 eis 0 pcb 0 other 0 net 132750 set [] pending', 'none')
     ) as c(label, employee, slip, lines)

@@ -131,8 +131,9 @@ describe('payroll statutory wages and age', () => {
     const calls = callArguments(text, 'private.hr_payroll_proposal');
     expect(calls.length).toBeGreaterThan(0);
     for (const args of calls) {
-      // Three arguments: the scheme, the wages and the age. A two-argument call names the signature this migration drops.
-      expect(args.length, args.join(' | ')).toBe(3);
+      // Four arguments since 20261126090100: the scheme, the wages, the age and the citizenship.
+      // A shorter call names a signature that no longer exists.
+      expect(args.length, args.join(' | ')).toBe(4);
     }
     // The demo's figures are compared with what the payslip function works out, not a copy of its rules.
     expect(text).toContain('from private.hr_payroll_refresh_payslip(p.id) f)');
