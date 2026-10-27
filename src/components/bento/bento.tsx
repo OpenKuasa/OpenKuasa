@@ -169,9 +169,21 @@ export function BentoStat({
       >
         {label}
       </p>
-      {/* A figure and its chip never break inside themselves; in a narrow card the chip drops below the figure. */}
-      <div className="mt-1 flex flex-wrap items-baseline gap-x-2 gap-y-1">
-        <span className={cn('text-2xl font-bold tracking-tight whitespace-nowrap tabular-nums', valueClassName)}>{value}</span>
+      {/*
+       * The figure scales to its tile (container query) so a long money value
+       * fits instead of being clipped at the tile's edge, and wraps (at the
+       * space, "RM" above the amount) as a last resort rather than truncating.
+       * The chip drops below the figure in a narrow card.
+       */}
+      <div className="@container mt-1 flex flex-wrap items-baseline gap-x-2 gap-y-1">
+        <span
+          className={cn(
+            'min-w-0 break-words text-[clamp(0.9rem,16.7cqi,1.5rem)] font-bold leading-[1.333] tracking-tight tabular-nums',
+            valueClassName,
+          )}
+        >
+          {value}
+        </span>
         {delta != null ? (
           <span
             className={cn(
