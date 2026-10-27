@@ -187,7 +187,10 @@ export function BentoStat({
         {delta != null ? (
           <span
             className={cn(
-              'rounded-full px-1.5 py-0.5 text-[11px] font-semibold whitespace-nowrap',
+              // A short chip (e.g. "+13%") stays on one line; a long label
+              // (e.g. a deductions breakdown) wraps rather than being clipped
+              // at the tile's edge.
+              'min-w-0 break-words rounded-full px-1.5 py-0.5 text-[11px] font-semibold',
               deltaClass,
             )}
           >
