@@ -8,6 +8,8 @@
  * a provider returns whatever the caller's session is allowed to see.
  */
 
+import type { Citizenship } from './citizenship';
+
 /** The fictional employee a demo visitor sees on the "My …" screens. Fixed by the demo seed. */
 export const DEMO_EMPLOYEE_ID = 'dea97d89-a5b6-f264-bd42-c6df73f664a7';
 export const DEMO_ORG_SLUG = 'rimba-ventures-demo';
@@ -60,6 +62,8 @@ export type EmployeePrivate = {
   employee_id: string;
   nric: string | null;
   date_of_birth: string | null;
+  /** KWSP's category; null is not recorded, paid as a citizen. */
+  citizenship: Citizenship | null;
   phone: string | null;
   address: string | null;
   base_salary_cents: number | null;

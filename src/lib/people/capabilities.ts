@@ -12,6 +12,7 @@
  */
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { z } from 'zod';
+import { CITIZENSHIPS } from './citizenship';
 import { PAYROLL_REFUSALS } from './payroll-refusals';
 import { REPORTS_TO_REFUSALS } from './reporting-refusals';
 import type { Department } from './types';
@@ -180,6 +181,13 @@ const privateFields = z
   .object({
     nric: text(20).describe('NRIC or passport number.'),
     date_of_birth: day('Date of birth'),
+    citizenship: z
+      .enum(CITIZENSHIPS)
+      .nullable()
+      .optional()
+      .describe(
+        'Citizenship for EPF and EIS: citizen, permanent_resident, non_citizen_before_1998 (a non-citizen who joined EPF before 1 August 1998) or non_citizen. Null clears it, which pays as a citizen.',
+      ),
     phone: text(30),
     address: text(300),
     base_salary: z
@@ -277,6 +285,7 @@ function privateValues(input: EmployeePrivateInput | undefined): Record<string, 
     if (value !== undefined) out[key] = blankToNull(value);
   }
   if (input.date_of_birth !== undefined) out.date_of_birth = input.date_of_birth;
+  if (input.citizenship !== undefined) out.citizenship = input.citizenship;
   return out;
 }
 

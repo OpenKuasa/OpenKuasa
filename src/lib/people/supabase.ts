@@ -47,7 +47,7 @@ const EMPLOYEE_COLUMNS =
   'id,user_id,employee_no,name,work_email,department_id,designation,employment_type,reports_to,join_date,status,' +
   'date_of_birth_day,date_of_birth_month,created_at,department:hr_departments(name)';
 const PRIVATE_COLUMNS =
-  'employee_id,nric,date_of_birth,phone,address,base_salary_cents,bank_name,bank_account,epf_no,socso_no,tax_no,' +
+  'employee_id,nric,date_of_birth,citizenship,phone,address,base_salary_cents,bank_name,bank_account,epf_no,socso_no,tax_no,' +
   'emergency_contact_name,emergency_contact_phone';
 // A payslip reaches an employee by a composite foreign key (employee_id, org_id), which Postgres named by its
 // columns. The hint keeps the embed unambiguous if another path between the tables ever appears.

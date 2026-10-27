@@ -243,7 +243,9 @@ describe('createEmployee', () => {
     });
     await createEmployee(ctxOf(client), {
       name: 'Farah Idris',
-      private: { base_salary: 3500.5, nric: ' 900101-14-5678 ', date_of_birth: '1990-01-09', phone: '' },
+      private: {
+        base_salary: 3500.5, nric: ' 900101-14-5678 ', date_of_birth: '1990-01-09', citizenship: 'permanent_resident', phone: '',
+      },
     });
     expect(calls.find((c) => c.table === 'hr_employees' && c.op === 'insert')!.values).toMatchObject({
       date_of_birth_day: 9,
@@ -257,8 +259,16 @@ describe('createEmployee', () => {
       base_salary_cents: 350050,
       nric: '900101-14-5678',
       date_of_birth: '1990-01-09',
+      citizenship: 'permanent_resident',
       phone: null,
     });
+  });
+
+  it('takes only KWSP\'s four citizenship categories, or null to clear', () => {
+    for (const citizenship of ['citizen', 'permanent_resident', 'non_citizen_before_1998', 'non_citizen', null]) {
+      expect(createEmployeeInput.safeParse({ name: 'A', private: { citizenship } }).success).toBe(true);
+    }
+    expect(createEmployeeInput.safeParse({ name: 'A', private: { citizenship: 'malaysian' } }).success).toBe(false);
   });
 
   it('removes the employee again when the private details cannot be saved', async () => {

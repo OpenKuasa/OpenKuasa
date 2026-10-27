@@ -2,6 +2,7 @@
  * The Employees screen's figures and its form's rules, as pure functions so
  * the server component, the client form and the tests share one version.
  */
+import type { Citizenship } from './citizenship';
 import { daysBetween } from './dates';
 import { showsOwnerDocumentControls } from './documents-screens';
 import type { WorkspaceMember } from './members';
@@ -224,6 +225,8 @@ export type EmployeeFormValues = {
   status: EmployeeStatus;
   nric: string;
   date_of_birth: string;
+  /** `''` is not recorded. */
+  citizenship: Citizenship | '';
   phone: string;
   address: string;
   /** In ringgit, as typed. */
@@ -262,6 +265,7 @@ export function employeeFormValues(employee: Employee | null, priv: EmployeePriv
     status: employee?.status ?? 'active',
     nric: priv?.nric ?? '',
     date_of_birth: priv?.date_of_birth ?? '',
+    citizenship: priv?.citizenship ?? '',
     phone: priv?.phone ?? '',
     address: priv?.address ?? '',
     base_salary: priv?.base_salary_cents == null ? '' : String(priv.base_salary_cents / 100),
@@ -306,7 +310,11 @@ export function toEmployeeInput(
       salary = Number(values.base_salary.trim().replace(/,/g, ''));
       if (!Number.isFinite(salary) || salary < 0) return { ok: false, error: 'Salary must be a number, such as 3500.' };
     }
-    const priv: Record<string, unknown> = { base_salary: salary, date_of_birth: orNull(values.date_of_birth) };
+    const priv: Record<string, unknown> = {
+      base_salary: salary,
+      date_of_birth: orNull(values.date_of_birth),
+      citizenship: values.citizenship || null,
+    };
     for (const key of PRIVATE_TEXT_FIELDS) priv[key] = orNull(values[key]);
     input.private = priv;
   }

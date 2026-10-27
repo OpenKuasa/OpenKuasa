@@ -864,6 +864,7 @@ export function createPeopleTools(
               base_salary: priv.base_salary_cents === null ? null : rm(priv.base_salary_cents),
               nric: priv.nric,
               date_of_birth: priv.date_of_birth,
+              citizenship: priv.citizenship,
               phone: priv.phone,
               address: priv.address,
               bank_name: priv.bank_name,

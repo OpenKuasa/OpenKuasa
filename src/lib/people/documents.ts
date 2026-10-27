@@ -5,6 +5,7 @@
  * My Documents) and shape the rows for display.
  */
 
+import { CITIZENSHIP_LABEL } from './citizenship';
 import { daysBetween, formatDate, malaysiaDate, monthYearLabel } from './dates';
 import { EXPIRY_WINDOW_DAYS, type ExpiryState, expiryState } from './document-forms';
 import { EMPLOYMENT_LABEL } from './employees';
@@ -138,6 +139,7 @@ export function buildRecordsModel(
         title: 'Statutory',
         subtitle: 'EPF · SOCSO · PCB',
         rows: [
+          { label: 'Citizenship', value: priv?.citizenship ? CITIZENSHIP_LABEL[priv.citizenship] : NOT_RECORDED },
           { label: 'EPF / KWSP no', value: orNotRecorded(priv?.epf_no) },
           { label: 'SOCSO / PERKESO no', value: orNotRecorded(priv?.socso_no) },
           { label: 'Income tax no (PCB/MTD)', value: orNotRecorded(priv?.tax_no) },

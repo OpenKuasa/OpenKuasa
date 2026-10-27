@@ -298,6 +298,7 @@ export function createSeedPeopleData(now: Date = new Date()): PeopleData {
       employee_id: employeeId(n),
       nric: `900101-14-${pad(5000 + n, 4)}`,
       date_of_birth: `${year - 26 - (n % 14)}-${birthday.slice(5, 7)}-${pad(Math.min(Number(birthday.slice(8, 10)), 28), 2)}`,
+      citizenship: 'citizen' as const,
       phone: `+60 12-555 ${pad(1000 + n * 37, 4)}`,
       address: `${n} Jalan Rimba, 50450 Kuala Lumpur`,
       base_salary_cents: salaryCents(n, designation),

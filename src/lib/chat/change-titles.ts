@@ -2138,6 +2138,7 @@ const PRIVATE_EMPLOYEE_FIELDS: EmployeeField[] = [
   { key: 'base_salary', word: 'monthly salary', show: shownSalary },
   { key: 'nric', word: 'NRIC' },
   { key: 'date_of_birth', word: 'date of birth' },
+  { key: 'citizenship', word: 'citizenship' },
   { key: 'phone', word: 'phone' },
   { key: 'address', word: 'address' },
   { key: 'bank_name', word: 'bank name' },

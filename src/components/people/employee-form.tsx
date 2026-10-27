@@ -5,6 +5,12 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import {
+  CITIZENSHIP_LABEL,
+  CITIZENSHIP_NOT_RECORDED,
+  CITIZENSHIPS,
+  type Citizenship,
+} from '@/lib/people/citizenship';
+import {
   EMPLOYMENT_LABEL,
   EMPLOYMENT_TYPES,
   type EmployeeFormValues,
@@ -35,6 +41,7 @@ export type EditingEmployee = {
 };
 
 const NO_DEPARTMENT = 'none';
+const CITIZENSHIP_UNSET = 'unset';
 const NOBODY = 'nobody';
 
 type TextKey = {
@@ -234,6 +241,28 @@ export function EmployeeForm({
             {text('base_salary', 'Monthly base salary (RM)', { placeholder: '3500' })}
             {text('nric', 'NRIC / passport no.')}
             {text('date_of_birth', 'Date of birth', { type: 'date' })}
+            <div className="sm:col-span-2">
+              <Field label="Citizenship (for EPF and EIS)">
+                <Select
+                  value={values.citizenship || CITIZENSHIP_UNSET}
+                  onValueChange={(value) =>
+                    set('citizenship', value === CITIZENSHIP_UNSET ? '' : (value as Citizenship))
+                  }
+                >
+                  <SelectTrigger aria-label="Citizenship (for EPF and EIS)" className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={CITIZENSHIP_UNSET}>{CITIZENSHIP_NOT_RECORDED}</SelectItem>
+                    {CITIZENSHIPS.map((choice) => (
+                      <SelectItem key={choice} value={choice}>
+                        {CITIZENSHIP_LABEL[choice]}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </Field>
+            </div>
             {text('phone', 'Phone')}
             <div className="sm:col-span-2">{text('address', 'Home address')}</div>
             {text('bank_name', 'Bank')}
