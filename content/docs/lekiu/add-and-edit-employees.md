@@ -29,7 +29,9 @@ _Shown from the sample workspace, where editing is switched off._
    - **Employee no.**: leave it blank and the next free number is given.
    - **Work email**, **Designation**, **Department**, **Employment type** (**Full-time**, **Part-time**, **Contract** or **Intern**) and **Join date**.
    - **Reports to**: search by name, then pick the person, or **Nobody**.
-4. Fill in the **Private details** you have. These are seen only by owners, admins and the employee themselves: **Monthly base salary (RM)**, **NRIC / passport no.**, **Date of birth**, **Phone**, **Home address**, **Bank**, **Bank account no.**, **KWSP (EPF) no.**, **PERKESO (SOCSO) no.**, **LHDN tax no.**, **Emergency contact** and **Emergency contact phone**.
+4. Fill in the **Private details** you have. These are seen only by owners, admins and the employee themselves: **Monthly base salary (RM)**, **NRIC / passport no.**, **Date of birth**, **Citizenship (for EPF and EIS)**, **Phone**, **Home address**, **Bank**, **Bank account no.**, **KWSP (EPF) no.**, **PERKESO (SOCSO) no.**, **LHDN tax no.**, **Emergency contact** and **Emergency contact phone**.
+
+   **Citizenship (for EPF and EIS)** decides which rates payroll proposes. Choose **Malaysian citizen**, **Permanent resident**, **Non-citizen, EPF member since before 1 August 1998** or **Non-citizen**. Left as **Not recorded (paid as a Malaysian citizen)**, payroll works the employee out as a Malaysian citizen, so set it for anyone who is not. See [Run payroll](/docs/lekiu/payroll).
 5. Click **Add employee**.
 
 ### Edit an employee
