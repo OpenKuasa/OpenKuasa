@@ -179,7 +179,6 @@ function Cards({ m, label }: { m: DashboardModel; label: string }) {
           </div>
         ) : (
           <BentoStat
-            valueClassName="text-xl sm:text-2xl"
             label="Cash position"
             value={rm(m.cashPosition)}
             onPrimary
@@ -189,7 +188,6 @@ function Cards({ m, label }: { m: DashboardModel; label: string }) {
       </BentoCard>
       <BentoCard className="col-span-1 md:col-span-3">
         <BentoStat
-          valueClassName="text-xl sm:text-2xl"
           label={`Revenue · ${label}`}
           value={rm(pl.totalIncome)}
           delta={revenue.delta}
@@ -199,7 +197,6 @@ function Cards({ m, label }: { m: DashboardModel; label: string }) {
       </BentoCard>
       <BentoCard className="col-span-1 md:col-span-3">
         <BentoStat
-          valueClassName="text-xl sm:text-2xl"
           label={`Expenses · ${label}`}
           value={rm(pl.totalExpenses)}
           delta={expenses.delta}
@@ -209,7 +206,6 @@ function Cards({ m, label }: { m: DashboardModel; label: string }) {
       </BentoCard>
       <BentoCard className="col-span-1 md:col-span-3">
         <BentoStat
-          valueClassName="text-xl sm:text-2xl"
           label={`Net profit · ${label}`}
           value={rm(pl.netProfit)}
           delta={net.delta}

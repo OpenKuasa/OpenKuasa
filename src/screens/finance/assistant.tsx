@@ -234,7 +234,6 @@ export default async function OverviewScreen() {
         <BentoCard tone="primary" className="col-span-1 md:col-span-3">
           {isDemo ? (
             <BentoStat
-              valueClassName="text-xl sm:text-2xl"
               label="Cash balance"
               value="RM 84,200"
               delta="+6%"
@@ -249,7 +248,6 @@ export default async function OverviewScreen() {
             />
           ) : (
             <BentoStat
-              valueClassName="text-xl sm:text-2xl"
               label="Cash balance"
               value={dash?.cashPosition != null ? rm(dash.cashPosition) : '—'}
               delta={dash?.cashPosition != null ? undefined : "Couldn't load"}
@@ -261,7 +259,6 @@ export default async function OverviewScreen() {
         <BentoCard className="col-span-1 md:col-span-3">
           {isDemo ? (
             <BentoStat
-              valueClassName="text-xl sm:text-2xl"
               label="Revenue · MTD"
               value="RM 42,800"
               delta="+14%"
@@ -270,7 +267,6 @@ export default async function OverviewScreen() {
             />
           ) : (
             <BentoStat
-              valueClassName="text-xl sm:text-2xl"
               label="Revenue · MTD"
               value={dash ? rm(dash.pl.totalIncome) : '—'}
               delta={dash ? revenueChip.delta : "Couldn't load"}
@@ -281,7 +277,6 @@ export default async function OverviewScreen() {
         <BentoCard className="col-span-1 md:col-span-3">
           {isDemo ? (
             <BentoStat
-              valueClassName="text-xl sm:text-2xl"
               label="Outstanding · AR"
               value="RM 16,900"
               delta="−5%"
@@ -296,7 +291,6 @@ export default async function OverviewScreen() {
             />
           ) : (
             <BentoStat
-              valueClassName="text-xl sm:text-2xl"
               label="Outstanding · AR"
               value={dash?.receivable ? rm(dash.receivable.total) : '—'}
               delta={
@@ -313,7 +307,6 @@ export default async function OverviewScreen() {
         <BentoCard className="col-span-1 md:col-span-3">
           {isDemo ? (
             <BentoStat
-              valueClassName="text-xl sm:text-2xl"
               label="Payable · AP"
               value="RM 9,300"
               delta="+RM 1.2k"
@@ -328,7 +321,6 @@ export default async function OverviewScreen() {
             />
           ) : (
             <BentoStat
-              valueClassName="text-xl sm:text-2xl"
               label="Payable · AP"
               value={dash?.payable ? rm(dash.payable.total) : '—'}
               delta={
