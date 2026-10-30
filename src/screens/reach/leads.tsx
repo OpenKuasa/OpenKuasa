@@ -5,7 +5,7 @@ import { BentoGrid, BentoCard, BentoStat } from '@/components/bento/bento';
 import { BarGroup, FunnelFlow, type Series, type Slice } from '@/components/charts';
 import { LeadFunnelTable } from '@/components/reach/lead-funnel-table';
 import { clearDanglingPromotions } from '@/lib/reach/leads-view';
-import { getViewer } from '@/lib/auth/viewer';
+import { getViewer, hasSupabaseEnv } from '@/lib/auth/viewer';
 import { can } from '@/lib/auth/permissions';
 import { deriveLeadSummary } from '@/lib/ai/tools';
 import { LEAD_STAGES, type Lead, type LeadChannel, type LeadStage } from '@/lib/reach/types';
@@ -63,7 +63,7 @@ export default async function LeadsScreen() {
     .map((l) => l.promoted_contact_id)
     .filter((id): id is string => id !== null);
   let displayLeads = leads;
-  if (promotedIds.length > 0 && !viewer.isDemo) {
+  if (promotedIds.length > 0 && hasSupabaseEnv()) {
     const supabase = await createClient();
     const { data: contacts } = await supabase
       .from('crm_contacts')
