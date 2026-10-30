@@ -3,15 +3,13 @@ import { ScreenContainer } from '@/components/screen/screen-container';
 import { PageHeader } from '@/components/screen/page-header';
 import { BentoGrid, BentoCard, BentoStat } from '@/components/bento/bento';
 import { AppointmentsTable } from '@/components/reach/appointments-table';
-import { createClient } from '@/lib/supabase/server';
-import { getReachData } from '@/lib/reach/supabase';
 import { getViewer } from '@/lib/auth/viewer';
 import { can } from '@/lib/auth/permissions';
 import type { Appointment } from '@/lib/reach/types';
+import { loadReachData } from './parts';
 
 export default async function AppointmentsScreen() {
-  const supabase = await createClient();
-  const [data, viewer] = await Promise.all([getReachData(supabase), getViewer()]);
+  const [data, viewer] = await Promise.all([loadReachData(), getViewer()]);
   const appts: Appointment[] = await data.listAppointments();
   const canEdit = !viewer.isDemo && can(viewer.role, 'edit-data');
 

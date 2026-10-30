@@ -4,13 +4,13 @@ import { PageHeader } from '@/components/screen/page-header';
 import { BentoGrid, BentoCard, BentoStat } from '@/components/bento/bento';
 import { BarGroup, FunnelFlow, type Series, type Slice } from '@/components/charts';
 import { LeadFunnelTable } from '@/components/reach/lead-funnel-table';
-import { createClient } from '@/lib/supabase/server';
-import { getReachData } from '@/lib/reach/supabase';
 import { clearDanglingPromotions } from '@/lib/reach/leads-view';
 import { getViewer } from '@/lib/auth/viewer';
 import { can } from '@/lib/auth/permissions';
 import { deriveLeadSummary } from '@/lib/ai/tools';
 import { LEAD_STAGES, type Lead, type LeadChannel, type LeadStage } from '@/lib/reach/types';
+import { createClient } from '@/lib/supabase/server';
+import { loadReachData } from './parts';
 
 const CHANNEL_LABEL: Record<LeadChannel, string> = {
   whatsapp: 'WhatsApp',
@@ -49,8 +49,7 @@ function Muted({ children }: { children: React.ReactNode }) {
 }
 
 export default async function LeadsScreen() {
-  const supabase = await createClient();
-  const [data, viewer] = await Promise.all([getReachData(supabase), getViewer()]);
+  const [data, viewer] = await Promise.all([loadReachData(), getViewer()]);
   const leads: Lead[] = await data.listLeads();
   const canEdit = !viewer.isDemo && can(viewer.role, 'edit-data');
   const summary = deriveLeadSummary(leads, new Date());
@@ -63,15 +62,16 @@ export default async function LeadsScreen() {
     .filter((l) => l.origin !== 'crm')
     .map((l) => l.promoted_contact_id)
     .filter((id): id is string => id !== null);
-  let existingContactIds: ReadonlySet<string> = new Set();
-  if (promotedIds.length > 0) {
+  let displayLeads = leads;
+  if (promotedIds.length > 0 && !viewer.isDemo) {
+    const supabase = await createClient();
     const { data: contacts } = await supabase
       .from('crm_contacts')
       .select('id')
       .in('id', promotedIds);
-    existingContactIds = new Set((contacts ?? []).map((c) => (c as { id: string }).id));
+    const existingContactIds = new Set((contacts ?? []).map((c) => (c as { id: string }).id));
+    displayLeads = clearDanglingPromotions(leads, existingContactIds);
   }
-  const displayLeads = clearDanglingPromotions(leads, existingContactIds);
 
   const funnelSlices: Slice[] = LEAD_STAGES.map((stage) => ({
     key: stage,

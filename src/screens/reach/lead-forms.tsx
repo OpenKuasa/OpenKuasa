@@ -23,10 +23,7 @@ import {
   setFormStatusAction,
   updateFormAction,
 } from '@/app/(app)/reach/actions';
-import { createClient } from '@/lib/supabase/server';
-import { getReachData } from '@/lib/reach/supabase';
-import { createSeedReachData } from '@/lib/reach/seed';
-import { getViewer, hasSupabaseEnv } from '@/lib/auth/viewer';
+import { getViewer } from '@/lib/auth/viewer';
 import { can } from '@/lib/auth/permissions';
 import { formKpis } from '@/lib/reach/forms';
 import {
@@ -37,6 +34,7 @@ import {
   submissionsTrendStart,
 } from '@/lib/reach/form-submissions';
 import type { Form, ReachData } from '@/lib/reach/types';
+import { loadReachData } from './parts';
 
 /*
  * ---- demo-only values: no live source yet (shown only to demo viewers) ----
@@ -134,15 +132,6 @@ async function loadSubmissionFigures(data: ReachData, now: Date): Promise<Submis
     console.error('[lead-forms] reading submissions failed:', error);
     return null;
   }
-}
-
-/**
- * The workspace's reach data. With no Supabase project configured there is no
- * client to build (building one throws), so the sample forms are read directly.
- */
-async function loadReachData(): Promise<ReachData> {
-  if (!hasSupabaseEnv()) return createSeedReachData();
-  return getReachData(await createClient());
 }
 
 /* ------------------------------------------------------------------ */
