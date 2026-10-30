@@ -104,15 +104,18 @@ const shown = (l: SstFormLine) => ({
 const lines = (n: number) => (n === 1 ? '1 line' : `${n} lines`);
 
 /**
- * The "Not on the form" notes of a return: lines with no form item, a 13(a) below zero, and an item 14 below
- * zero.
+ * The "Not on the form" notes of a return: lines with no form item, tax a voided credit note puts back up, and an
+ * item 14 below zero.
  */
 function notesOf(ret: SstReturn): string[] {
   const notes: string[] = [];
   const one = (n: number) => n === 1;
   if (ret.offForm.count > 0) {
+    const found = `${lines(ret.offForm.count)} (${rm(ret.offForm.value)})`;
     notes.push(
-      `Not on the form: ${lines(ret.offForm.count)} (${rm(ret.offForm.value)}) ${one(ret.offForm.count) ? 'is' : 'are'} at a rate with no item on this return. Fix ${one(ret.offForm.count) ? 'its' : 'their'} rate or tax type before you file.`,
+      ret.type === 'sales'
+        ? `Not on the form: ${found} ${one(ret.offForm.count) ? 'is' : 'are'} at a rate with no item on this return. Either the rate is wrong, or it is a Part C (item 17) good, which this return does not count yet: a Schedule 2 good taxed per litre, per kilogram, or at a rate other than 5% or 10%. Add it on the form.`
+        : `Not on the form: ${found} ${one(ret.offForm.count) ? 'is' : 'are'} at a rate with no item on this return. Either the rate is wrong or the line needs another tax type. Fix it before you file.`,
     );
   }
   if (ret.untyped.count > 0) {
@@ -120,8 +123,10 @@ function notesOf(ret: SstReturn): string[] {
       `Not on the form: ${lines(ret.untyped.count)} (${rm(ret.untyped.value)}) ${one(ret.untyped.count) ? 'has' : 'have'} no SST tax type. Set one before you file.`,
     );
   }
-  if (ret.deductions.some((d) => d.item === '13(a)' && d.tax < 0)) {
-    notes.push('Not on the form: 13(a) is below zero because a credit note counted in an earlier return was voided this period.');
+  if (ret.creditReversed > 0) {
+    notes.push(
+      `Not on the form: 13(a) is held at 0 because a credit note counted in an earlier return was voided this period. ${rm(ret.creditReversed)} of tax goes back up: add it in this period's B1 and item 12 as a debit note.`,
+    );
   }
   if (ret.item14 < 0) {
     notes.push(
@@ -201,7 +206,7 @@ export function SstReturnBody({ ret, settings, companyName }: { ret: SstReturn; 
           {/* Part B1 */}
           <BentoCard
             title="Part B1"
-            subtitle={service ? 'Taxable services, by kind' : 'Taxable goods, by kind'}
+            subtitle="Sales / Service Details"
             icon={ListChecks}
             className="col-span-2 md:col-span-7"
           >
@@ -213,7 +218,9 @@ export function SstReturnBody({ ret, settings, companyName }: { ret: SstReturn; 
                     {/* The long column names wrap, so the four columns fit the card without a sideways scroll. */}
                     <TableHead className="h-auto py-2 whitespace-normal">{service ? 'Service type code' : 'Tariff code'}</TableHead>
                     <TableHead className="h-auto py-2 text-right whitespace-normal">{service ? 'Value of taxable service (10)' : 'Value of goods sold (8)'}</TableHead>
-                    <TableHead className="h-auto py-2 text-right whitespace-normal">Own use or free</TableHead>
+                    <TableHead className="h-auto py-2 text-right whitespace-normal">
+                      {service ? 'Value of free services' : 'Value of goods (for own use / disposed)'}
+                    </TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -276,10 +283,11 @@ export function SstReturnBody({ ret, settings, companyName }: { ret: SstReturn; 
       {/* Part D */}
       <BentoCard
         title="Part D"
-        subtitle={service ? 'Exempt and non-taxable services' : 'Exempt goods'}
+        subtitle="Sales / services exempted from tax / non-taxable service"
         icon={ShieldCheck}
         className="col-span-2 md:col-span-12"
       >
+        <p className="mb-1 text-sm font-medium">Item 18: sales of taxable goods / taxable services</p>
         <p className="text-sm text-muted-foreground">Part D is worked out once invoice lines can carry an exemption reason.</p>
       </BentoCard>
     </>

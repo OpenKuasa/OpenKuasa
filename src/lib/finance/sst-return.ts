@@ -10,7 +10,7 @@
  * filed (FIN71), so a void is either a correction before filing or part of an amended return (Pindaan), and
  * a later sale that falls through is a credit note. A credit note voided in the period it was dated in counts
  * nowhere; one voided in a later period counts in its own period, and the void period's 13(a) goes down by its
- * tax (13(a) may go below 0).
+ * tax, held at 0 as the form has it, with the rest reported as `creditReversed` to add back as a debit note.
  *
  * Typed-in figures (11(e) cards, 13(b), 13(c), 13(d), 13A) come in as a fifth argument: 11(e) joins item 12, the rest come off item 14.
  */
@@ -60,6 +60,12 @@ export type SstReturn = {
   item14: number;
   offForm: { count: number; value: number; tax: number };
   untyped: { count: number; value: number };
+  /**
+   * Tax of a credit note counted in an earlier return and voided in this one, in ringgit, where it is more than
+   * the tax this period's own credit notes deduct. The form takes 0 for 13(a), never a negative, so this amount
+   * goes back up as a debit note and the screen says so.
+   */
+  creditReversed: number;
 };
 
 /** The form's rate items per return: a line of the type at any other rate is off the form. */
@@ -92,7 +98,7 @@ export const sstCards = (n: number) => `${n.toLocaleString('en-MY')} ${n === 1 ?
 const CARD_TAX_SEN = 2500;
 
 const CARD_ITEM: SstFormLine = { item: '11(e)', label: 'Credit and charge cards, RM25 each', value: null, tax: 0, typed: true };
-const CREDIT_NOTES = { item: '13(a)', label: 'Tax from credit notes' };
+const CREDIT_NOTES = { item: '13(a)', label: 'Tax deduction from credit note' };
 const BAD_DEBT: SstFormLine = { item: '13(d)', label: 'Bad debt relief (approved)', value: null, tax: 0, typed: true };
 const TYPED_DEDUCTIONS: Record<SstReturnType, SstFormLine[]> = {
   service: [{ item: '13(c)', label: 'Approved service tax deduction', value: null, tax: 0, typed: true }, BAD_DEBT],
@@ -207,7 +213,10 @@ export function buildSstReturn(
       ? { '13(c)': figures.deduction13c, '13(d)': figures.badDebt13d }
       : { '13(b)': figures.deduction13b, '13A': figures.adjustment13a, '13(d)': figures.badDebt13d };
   const typed = TYPED_DEDUCTIONS[type].map((d) => ({ ...d, tax: fromSen(toSen(typedAmount[d.item] ?? 0)) }));
-  const item14Sen = item12Sen - creditNotesSen - typed.reduce((s, d) => s + toSen(d.tax), 0);
+  // The form takes 0 for 13(a): a voided credit note beyond what this period deducts goes back up as a debit note.
+  const creditReversedSen = creditNotesSen < 0 ? -creditNotesSen : 0;
+  const heldCreditSen = creditNotesSen < 0 ? 0 : creditNotesSen;
+  const item14Sen = item12Sen - heldCreditSen - typed.reduce((s, d) => s + toSen(d.tax), 0);
 
   const b2: SstFormLine[] = items.map((i, n) => ({ item: i.item, label: i.label, value: fromSen(b2Sen[n].value), tax: fromSen(b2Sen[n].tax) }));
   if (type === 'service') b2.push({ ...CARD_ITEM, value: cards > 0 ? cards : null, tax: fromSen(cardsTaxSen) });
@@ -219,10 +228,11 @@ export function buildSstReturn(
     b1Total: fromSen(b1TotalSen),
     b2,
     item12: fromSen(item12Sen),
-    deductions: [{ ...CREDIT_NOTES, value: null, tax: fromSen(creditNotesSen) }, ...typed],
+    deductions: [{ ...CREDIT_NOTES, value: null, tax: fromSen(heldCreditSen) }, ...typed],
     item14: fromSen(item14Sen),
     offForm: { count: offForm.count, value: fromSen(offForm.value), tax: fromSen(offForm.tax) },
     untyped: { count: untyped.count, value: fromSen(untyped.value) },
+    creditReversed: fromSen(creditReversedSen),
   };
 }
 

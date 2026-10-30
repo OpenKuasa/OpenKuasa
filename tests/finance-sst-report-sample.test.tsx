@@ -124,4 +124,87 @@ describe('the return body', () => {
       "Not on the form: item 14 is below zero because this period's deductions are more than its tax. Check with Customs (JKDM) how to claim it before you file.",
     );
   });
+
+  it('prints the B1 titles and columns, and Part D with item 18, as the form does', () => {
+    const invoiceBasis = { ...settings, service_tax_basis: 'invoice' as const };
+    const service = textOf(
+      renderToStaticMarkup(<SstReturnBody ret={buildSstReturn('service', period, [], [])} settings={invoiceBasis} companyName="Rimba" />),
+    );
+    expect(service).toContain('Sales / Service Details');
+    expect(service).toContain('Value of free services');
+    expect(service).not.toContain('Own use or free');
+    expect(service).toContain('Sales / services exempted from tax / non-taxable service');
+    expect(service).toContain('Item 18: sales of taxable goods / taxable services');
+
+    const sales = textOf(
+      renderToStaticMarkup(<SstReturnBody ret={buildSstReturn('sales', period, [], [])} settings={invoiceBasis} companyName="Rimba" />),
+    );
+    expect(sales).toContain('Sales / Service Details');
+    expect(sales).toContain('Value of goods (for own use / disposed)');
+    expect(sales).not.toContain('Value of free services');
+    expect(sales).not.toContain('Exempt goods');
+  });
+
+  it('says a sales line off the form may be a Part C good, and does not say that on a service return', () => {
+    const invoiceBasis = { ...settings, service_tax_basis: 'invoice' as const };
+    const row = (over: Partial<SstLineRow>): SstLineRow => ({
+      id: 'l1',
+      invoice_id: 'i1',
+      product_id: null,
+      description: 'Item',
+      sst_rate: 6,
+      tax_type: 'service',
+      sst_code: null,
+      amount_myr: 1000,
+      sst_amount_myr: 60,
+      invoice_date: '2026-09-10',
+      invoice_status: 'posted',
+      voided_on: null,
+      ...over,
+    });
+    const sales = textOf(
+      renderToStaticMarkup(
+        <SstReturnBody
+          ret={buildSstReturn('sales', period, [row({ tax_type: 'sales', sst_rate: 3, sst_amount_myr: 30 })], [])}
+          settings={invoiceBasis}
+          companyName="Rimba"
+        />,
+      ),
+    );
+    expect(sales).toContain('Part C (item 17)');
+    expect(sales).toContain('Add it on the form');
+
+    const service = textOf(
+      renderToStaticMarkup(
+        <SstReturnBody
+          ret={buildSstReturn('service', period, [row({ sst_rate: 7, sst_amount_myr: 70 })], [])}
+          settings={invoiceBasis}
+          companyName="Rimba"
+        />,
+      ),
+    );
+    expect(service).toContain('Not on the form: 1 line (RM 1,000.00)');
+    expect(service).not.toContain('Part C');
+  });
+
+  it('carries a voided credit note in a note, with 13(a) held at 0', () => {
+    const invoiceBasis = { ...settings, service_tax_basis: 'invoice' as const };
+    const nov = sstPeriodFor('2026-11-10', 9);
+    const ret = buildSstReturn('service', nov, [], [
+      {
+        id: 'c1',
+        credit_date: '2026-09-15',
+        status: 'void',
+        voided_on: '2026-11-02',
+        amount_myr: 1080,
+        invoice_total_myr: 10800,
+        invoice_sst_myr: { service: 800, sales: 0 },
+      },
+    ]);
+    const body = textOf(renderToStaticMarkup(<SstReturnBody ret={ret} settings={invoiceBasis} companyName="Rimba" />));
+    expect(body).toContain('13(a) is held at 0');
+    expect(body).toContain('RM 80.00');
+    expect(body).toContain('as a debit note');
+    expect(body).not.toContain('13(a) is below zero');
+  });
 });
