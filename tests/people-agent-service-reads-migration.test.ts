@@ -9,25 +9,15 @@ const migration = readFileSync(
 
 describe('the people agent service-role migration', () => {
   it('removes fresh-project table grants before granting selected read columns', () => {
-    const revoke = migration.indexOf('revoke all on');
+    const revoke = migration.indexOf('select c.relname from pg_catalog.pg_class c');
     const grant = migration.indexOf('grant select (id, org_id, name, status)');
 
     expect(revoke).toBeGreaterThan(-1);
     expect(grant).toBeGreaterThan(revoke);
-    for (const table of [
-      'public.hr_employees',
-      'public.hr_documents',
-      'public.hr_goals',
-      'public.hr_leave_requests',
-      'public.hr_claims',
-      'public.hr_overtime_records',
-      'public.hr_letters',
-      'public.hr_attendance_days',
-      'public.hr_payroll_runs',
-      'public.hr_employee_private',
-      'public.hr_agent_notes',
-    ]) {
-      expect(migration.slice(revoke, grant)).toContain(table);
-    }
+    const cleanup = migration.slice(revoke, grant);
+    expect(cleanup).toContain("c.relnamespace = 'public'::regnamespace");
+    expect(cleanup).toContain("c.relkind in ('r', 'p', 'v', 'm')");
+    expect(cleanup).toContain("c.relname like 'hr\\_%'");
+    expect(cleanup).toContain("format('revoke all on public.%I from service_role', t)");
   });
 });

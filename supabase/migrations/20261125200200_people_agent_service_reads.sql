@@ -18,20 +18,22 @@
 set local lock_timeout = '5s';
 
 -- Supabase grants service_role table privileges by default on fresh projects.
--- Remove those broad grants before adding the worker's column-level reads.
-revoke all on
-  public.hr_employees,
-  public.hr_documents,
-  public.hr_goals,
-  public.hr_leave_requests,
-  public.hr_claims,
-  public.hr_overtime_records,
-  public.hr_letters,
-  public.hr_attendance_days,
-  public.hr_payroll_runs,
-  public.hr_employee_private,
-  public.hr_agent_notes
-  from service_role;
+-- Remove them from every HR relation, not only the tables the worker reads: the
+-- column grants below are the complete service-role boundary for the HR schema.
+do $$
+declare
+  t text;
+begin
+  for t in
+    select c.relname from pg_catalog.pg_class c
+     where c.relnamespace = 'public'::regnamespace
+       and c.relkind in ('r', 'p', 'v', 'm')
+       and c.relname like 'hr\_%'
+     order by c.relname
+  loop
+    execute format('revoke all on public.%I from service_role', t);
+  end loop;
+end $$;
 
 grant select (id, org_id, name, status)
   on public.hr_employees to service_role;
