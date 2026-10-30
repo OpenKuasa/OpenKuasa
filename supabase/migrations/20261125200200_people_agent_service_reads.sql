@@ -17,6 +17,22 @@
 -- people_agent_notes_check.sql pins this list: a new grant fails it until reviewed.
 set local lock_timeout = '5s';
 
+-- Supabase grants service_role table privileges by default on fresh projects.
+-- Remove those broad grants before adding the worker's column-level reads.
+revoke all on
+  public.hr_employees,
+  public.hr_documents,
+  public.hr_goals,
+  public.hr_leave_requests,
+  public.hr_claims,
+  public.hr_overtime_records,
+  public.hr_letters,
+  public.hr_attendance_days,
+  public.hr_payroll_runs,
+  public.hr_employee_private,
+  public.hr_agent_notes
+  from service_role;
+
 grant select (id, org_id, name, status)
   on public.hr_employees to service_role;
 grant select (id, org_id, employee_id, doc_type, expires_on)

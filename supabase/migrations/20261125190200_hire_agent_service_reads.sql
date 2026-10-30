@@ -11,6 +11,16 @@
 -- a job's description or salary; or a note's body or label.
 set local lock_timeout = '5s';
 
+-- Supabase grants service_role table privileges by default on fresh projects.
+-- Remove those broad grants before adding the worker's column-level reads.
+revoke all on
+  public.hire_applications,
+  public.hire_candidates,
+  public.hire_interviews,
+  public.hire_jobs,
+  public.hire_agent_notes
+  from service_role;
+
 grant select (id, org_id, candidate_id, job_id, stage, outcome, applied_at, offered_at, hired_at)
   on public.hire_applications to service_role;
 grant select (id, org_id, name, pool_status, created_at)
