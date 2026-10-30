@@ -10,5 +10,9 @@
 -- Read only, and only the columns listLeads selects, filters on and sorts by:
 -- the worker never sees a contact's email, phone or notes.
 
+-- Fresh Supabase projects grant service_role table privileges by default. Remove
+-- that table-wide access before giving the worker its narrow column grant.
+revoke all on public.crm_contacts from service_role;
+
 grant select (id, org_id, first_name, last_name, status, source, tags, created_at)
   on public.crm_contacts to service_role;
