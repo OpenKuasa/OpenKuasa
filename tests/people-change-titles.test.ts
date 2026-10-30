@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { changeRows } from '@/lib/chat/change-rows';
 import { approvalDetail, approvalTitle, collectNames, nameIn } from '@/lib/chat/change-titles';
 
 const EMP = '22222222-2222-4222-8222-222222222222';
@@ -549,6 +550,13 @@ describe('approval cards for payroll', () => {
     // A month that cannot be read is said, never guessed.
     expect(approvalTitle('runPayroll', { month: 'bulan ni' })).toContain('a month that could not be read');
     expect(approvalTitle('recalculatePayroll', { month: '' })).toContain('a month that could not be read');
+  });
+
+  it('names a payslip line row by the line, and whose payslip it is on, not by the employee alone', () => {
+    const edit = changeRows('savePayslipLine', { payslip_id: SLIP, line_id: LINE, kind: 'earning', label: 'Sales commission', amount: '900' }, find);
+    expect(edit.find((r) => r.key === 'payslip_id')).toMatchObject({ label: 'Payslip', to: 'Aisyah Rahim' });
+    expect(edit.find((r) => r.key === 'line_id')).toMatchObject({ label: 'Payslip line', to: 'Sales commission (Aisyah Rahim)' });
+    expect(changeRows('removePayslipLine', { line_id: LINE }, find)[0]).toMatchObject({ label: 'Payslip line', to: 'Sales commission (Aisyah Rahim)' });
   });
 
   it('adds a line: the employee, the month, the kind, the name and the amount that will be saved', () => {

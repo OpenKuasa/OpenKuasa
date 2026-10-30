@@ -221,7 +221,8 @@ const CONTROL_CHARS = new RegExp('[\\u0000-\\u001f\\u007f\\u2028\\u2029]+', 'g')
 /**
  * A row's name as it may be shown: one line, with nothing that could pass for
  * the card's own layout. Some kinds are "named" by a set of facts kept as JSON
- * (a payslip, a goal): of those only the person or the title is a name.
+ * (a payslip, a goal): of those only the person or the title is a name, and a
+ * payslip line is its label.
  */
 function recordName(raw: string | null, kind?: ItemKind): string | null {
   if (!raw) return null;
@@ -235,6 +236,10 @@ function recordName(raw: string | null, kind?: ItemKind): string | null {
       // A letter or a document is its title, and whose it is: "Passport (Faiz Hakim)".
       if ((kind === 'letter' || kind === 'document') && typeof facts.title === 'string' && facts.title.trim()) {
         name = typeof facts.employee === 'string' && facts.employee.trim() ? `${facts.title} (${facts.employee})` : facts.title;
+      }
+      // A payslip line is its own label, and whose payslip it is on: "Sales commission (Aisyah Rahim)".
+      if (kind === 'payslip-line' && typeof facts.label === 'string' && facts.label.trim()) {
+        name = typeof facts.employee === 'string' && facts.employee.trim() ? `${facts.label} (${facts.employee})` : facts.label;
       }
     } catch {
       return null;
