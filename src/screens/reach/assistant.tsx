@@ -24,11 +24,10 @@ import {
 } from '@/components/charts';
 import { LiveDot } from '@/components/ui/live-dot';
 import { AskJebatHero } from '@/components/reach/ask-jebat-hero';
-import { createClient } from '@/lib/supabase/server';
-import { isLiveChatAllowed } from '@/lib/ai/access';
-import { getReachData } from '@/lib/reach/supabase';
+import { getViewer } from '@/lib/auth/viewer';
 import { buildOverviewModel, type OverviewModel } from '@/lib/reach/overview';
 import { loadServerGreeting } from '@/lib/greeting/server';
+import { loadReachData } from './parts';
 
 /* ---- mock data (Rimba Ventures Sdn Bhd) --------------------------- */
 
@@ -95,15 +94,12 @@ export default async function OverviewScreen() {
   // Started first so the greeting loads alongside the screen's own reads.
   const greetingPromise = loadServerGreeting('reach');
   void greetingPromise.catch(() => {});
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  const isDemo = !isLiveChatAllowed(user);
+  const [data, viewer] = await Promise.all([loadReachData(), getViewer()]);
+  const isDemo = viewer.isDemo;
 
   let model: OverviewModel | null = null;
   try {
-    model = await buildOverviewModel(await getReachData(supabase), new Date());
+    model = await buildOverviewModel(data, new Date());
   } catch (e) {
     console.error('[reach/overview] data error:', e);
   }

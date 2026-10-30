@@ -9,9 +9,10 @@ import { Button } from '@/components/ui/button';
 import { isLiveChatAllowed } from '@/lib/ai/access';
 import { getCurrentOrg } from '@/lib/auth/current-org';
 import { hasSupabaseEnv } from '@/lib/auth/viewer';
+import { createSeedPeopleData } from '@/lib/people/seed';
 import { createSupabasePeopleData, getPeopleData } from '@/lib/people/supabase';
 import type { ClaimStatus, PeopleData, PeopleViewer } from '@/lib/people/types';
-import { NO_WORKSPACE_VIEWER, getPeopleViewer } from '@/lib/people/viewer';
+import { NO_WORKSPACE_VIEWER, PREVIEW_PEOPLE_VIEWER, getPeopleViewer } from '@/lib/people/viewer';
 import { createClient } from '@/lib/supabase/server';
 import { cn } from '@/lib/utils';
 
@@ -31,7 +32,9 @@ export const NOT_AVAILABLE = <Muted>Not available yet</Muted>;
 export const DEPARTMENT_COLORS = ['var(--chart-1)', 'var(--chart-2)', 'var(--chart-3)', 'var(--chart-4)', 'var(--muted-foreground)'];
 
 /** What a screen's builder is told besides the data: the session, the workspace and who is looking. */
-export type PeopleLoadContext = { client: SupabaseClient; orgId: string | null; viewer: PeopleViewer };
+export type PeopleLoadContext =
+  | { client: SupabaseClient; orgId: string; viewer: PeopleViewer }
+  | { client: null; orgId: null; viewer: PeopleViewer };
 
 /**
  * Loads one Lekiu screen's model for the signed-in viewer. `model` is null
@@ -45,6 +48,20 @@ export async function loadPeople<T>(
   tag: string,
   build: (data: PeopleData, now: Date, ctx: PeopleLoadContext) => Promise<T>,
 ): Promise<{ model: T | null; viewer: PeopleViewer; chatDemo: boolean; hasWorkspace: boolean }> {
+  if (!hasSupabaseEnv()) {
+    try {
+      const model = await build(createSeedPeopleData(), new Date(), {
+        client: null,
+        orgId: null,
+        viewer: PREVIEW_PEOPLE_VIEWER,
+      });
+      return { model, viewer: PREVIEW_PEOPLE_VIEWER, chatDemo: true, hasWorkspace: true };
+    } catch (error) {
+      console.error(`[people/${tag}] data error:`, error);
+      return { model: null, viewer: PREVIEW_PEOPLE_VIEWER, chatDemo: true, hasWorkspace: true };
+    }
+  }
+
   const supabase = await createClient();
   const {
     data: { user },
@@ -54,12 +71,14 @@ export async function loadPeople<T>(
   let hasWorkspace = false;
   try {
     // Resolve the workspace once; the provider and the viewer share it.
-    const org = hasSupabaseEnv() ? await getCurrentOrg(supabase) : null;
-    // No project configured: the sample company stands in for a workspace.
-    hasWorkspace = org !== null || !hasSupabaseEnv();
+    const org = await getCurrentOrg(supabase);
+    hasWorkspace = org !== null;
     const data = org ? createSupabasePeopleData(supabase, org.orgId) : await getPeopleData(supabase);
     viewer = await getPeopleViewer(supabase, org);
-    model = await build(data, new Date(), { client: supabase, orgId: org?.orgId ?? null, viewer });
+    const context: PeopleLoadContext = org
+      ? { client: supabase, orgId: org.orgId, viewer }
+      : { client: null, orgId: null, viewer };
+    model = await build(data, new Date(), context);
   } catch (error) {
     console.error(`[people/${tag}] data error:`, error);
   }

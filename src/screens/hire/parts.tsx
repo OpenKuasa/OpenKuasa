@@ -1,5 +1,7 @@
 import type { ReactNode } from 'react';
 import { isLiveChatAllowed } from '@/lib/ai/access';
+import { hasSupabaseEnv } from '@/lib/auth/viewer';
+import { createSeedHireData } from '@/lib/hire/seed';
 import { getHireData } from '@/lib/hire/supabase';
 import type { HireData } from '@/lib/hire/types';
 import { createClient } from '@/lib/supabase/server';
@@ -34,6 +36,15 @@ export async function loadHire<T>(
   tag: string,
   build: (data: HireData, now: Date) => Promise<T>,
 ): Promise<{ model: T | null; isDemo: boolean }> {
+  if (!hasSupabaseEnv()) {
+    try {
+      return { model: await build(createSeedHireData(), new Date()), isDemo: true };
+    } catch (error) {
+      console.error(`[hire/${tag}] data error:`, error);
+      return { model: null, isDemo: true };
+    }
+  }
+
   const supabase = await createClient();
   const {
     data: { user },

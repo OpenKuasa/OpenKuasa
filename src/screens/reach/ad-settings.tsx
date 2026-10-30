@@ -14,11 +14,10 @@ import { Badge } from '@/components/ui/badge';
 import { AdSettingsForm } from '@/components/reach/ad-settings-form';
 import { WorkspaceCard } from '@/components/settings/workspace-card';
 import { loadWorkspaceOverview } from '@/lib/account/workspace-overview';
-import { createClient } from '@/lib/supabase/server';
-import { getReachData } from '@/lib/reach/supabase';
 import { getViewer } from '@/lib/auth/viewer';
 import { can } from '@/lib/auth/permissions';
 import { cn } from '@/lib/utils';
+import { loadReachData } from './parts';
 
 type Status = 'Healthy' | 'Warning' | 'Action needed';
 
@@ -83,8 +82,7 @@ function StatusIcon({ status }: { status: Status }) {
 }
 
 export default async function AdSettingsScreen() {
-  const supabase = await createClient();
-  const [data, viewer, workspace] = await Promise.all([getReachData(supabase), getViewer(), loadWorkspaceOverview()]);
+  const [data, viewer, workspace] = await Promise.all([loadReachData(), getViewer(), loadWorkspaceOverview()]);
   const settings = await data.getAdSettings();
   const canEdit = !viewer.isDemo && can(viewer.role, 'edit-data');
   const issues = CHECKS.filter((c) => c.status === 'Action needed').length;

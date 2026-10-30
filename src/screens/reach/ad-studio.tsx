@@ -22,12 +22,11 @@ import {
 } from '@/components/charts';
 import { Button } from '@/components/ui/button';
 import { AdStudioTable } from '@/components/reach/ad-studio-table';
-import { createClient } from '@/lib/supabase/server';
-import { getReachData } from '@/lib/reach/supabase';
 import { getViewer } from '@/lib/auth/viewer';
 import { can } from '@/lib/auth/permissions';
 import { deriveAdsOverview, deriveSpendByChannel } from '@/lib/ai/tools';
 import type { Campaign, Channel } from '@/lib/reach/types';
+import { loadReachData } from './parts';
 
 /* ---- demo-only values: no live source yet (shown only to demo viewers) ---- */
 
@@ -80,8 +79,7 @@ const AD_FUNNEL: Slice[] = [
 /* ------------------------------------------------------------------ */
 
 export default async function AdStudioScreen() {
-  const supabase = await createClient();
-  const [data, viewer] = await Promise.all([getReachData(supabase), getViewer()]);
+  const [data, viewer] = await Promise.all([loadReachData(), getViewer()]);
   const campaigns: Campaign[] = await data.listCampaigns();
   const overview = deriveAdsOverview(campaigns);
   const canEdit = !viewer.isDemo && can(viewer.role, 'edit-data');

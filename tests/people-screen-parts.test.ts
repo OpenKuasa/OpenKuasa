@@ -13,16 +13,23 @@ const ctl = vi.hoisted(() => ({
   orgLookups: 0,
   createdFor: [] as string[],
   fallbackCalls: 0,
+  clientCreations: 0,
 }));
 
 const ORG_PROVIDER = { marker: 'org' };
 const FALLBACK_PROVIDER = { marker: 'fallback' };
+const PREVIEW_PROVIDER = { marker: 'preview' };
 
 vi.mock('@/lib/supabase/server', () => ({
-  createClient: async () => ({
-    auth: { getUser: async () => ({ data: { user: ctl.user }, error: null }) },
-  }),
+  createClient: async () => {
+    ctl.clientCreations += 1;
+    return {
+      auth: { getUser: async () => ({ data: { user: ctl.user }, error: null }) },
+    };
+  },
 }));
+
+vi.mock('@/lib/people/seed', () => ({ createSeedPeopleData: () => PREVIEW_PROVIDER }));
 
 vi.mock('@/lib/auth/current-org', () => ({
   getCurrentOrg: async () => {
@@ -67,6 +74,7 @@ beforeEach(() => {
   ctl.orgLookups = 0;
   ctl.createdFor = [];
   ctl.fallbackCalls = 0;
+  ctl.clientCreations = 0;
   build.mockClear();
   build.mockImplementation(async (data) => ({ got: data }));
 });
@@ -96,8 +104,12 @@ describe('loadPeople', () => {
     const r = await loadPeople('t', build);
     expect(r.hasWorkspace).toBe(true);
     expect(ctl.orgLookups).toBe(0);
-    expect(ctl.fallbackCalls).toBe(1);
-    expect(r.model).toEqual({ got: FALLBACK_PROVIDER });
+    expect(ctl.fallbackCalls).toBe(0);
+    expect(ctl.clientCreations).toBe(0);
+    expect(r.model).toEqual({ got: PREVIEW_PROVIDER });
+    expect(r.viewer).toMatchObject({ isDemo: true });
+    expect(r.chatDemo).toBe(true);
+    expect(build.mock.calls[0][2]).toMatchObject({ client: null, orgId: null });
   });
 
   it('returns a null model, no workspace and does not throw when the org lookup fails', async () => {
