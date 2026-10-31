@@ -20,8 +20,15 @@ describe('the hiring agent service-role migration', () => {
       'public.hire_interviews',
       'public.hire_jobs',
       'public.hire_agent_notes',
+      'public.hire_settings',
     ]) {
       expect(migration.slice(revoke, grant)).toContain(table);
     }
+  });
+
+  it('checks the complete hire schema for surviving table privileges', () => {
+    expect(migration).toContain("c.relname like 'hire\\_%'");
+    expect(migration).toContain('aclexplode(c.relacl)');
+    expect(migration).toContain("a.grantee = 'service_role'::regrole");
   });
 });

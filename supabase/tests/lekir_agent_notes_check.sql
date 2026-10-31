@@ -29,8 +29,8 @@
 --   * members read the notes, nobody inserts or edits them directly, a writer deletes one, a viewer cannot;
 --   * a note goes with its record: deleting an application, an interview, a job or a candidate removes its notes,
 --     and deleting a candidate also removes the notes on its applications and their interviews (cascades);
---   * service_role may read exactly the columns the agent's scan reads, but not a candidate's email or a note's
---     body, and writes nothing;
+--   * service_role may read exactly the columns the agent's scan reads, nothing else on any hire_ relation, and
+--     writes nothing;
 --   * a note outlives its proposal, and goes with its workspace.
 do $$
 declare
@@ -64,6 +64,7 @@ declare
   r record;
   fails text[] := '{}';
   note_input jsonb;
+  pinned text[];
 begin
   -- ==== the shape ===================================================================================================
   if to_regclass('public.hire_agent_notes') is null
@@ -154,7 +155,20 @@ begin
     fails := fails || 'authenticated may call the note clean-up trigger function'::text;
   end if;
 
-  -- ==== service_role reads exactly what the scan reads ==============================================================
+  -- ==== service_role reads exactly what the scan reads, and nothing else on a hire_ relation ========================
+  pinned := array[
+    'hire_applications.id', 'hire_applications.org_id', 'hire_applications.candidate_id',
+    'hire_applications.job_id', 'hire_applications.stage', 'hire_applications.outcome',
+    'hire_applications.applied_at', 'hire_applications.offered_at', 'hire_applications.hired_at',
+    'hire_candidates.id', 'hire_candidates.org_id', 'hire_candidates.name', 'hire_candidates.pool_status',
+    'hire_candidates.created_at',
+    'hire_interviews.id', 'hire_interviews.org_id', 'hire_interviews.application_id',
+    'hire_interviews.scheduled_at', 'hire_interviews.status', 'hire_interviews.created_at',
+    'hire_interviews.updated_at', 'hire_interviews.feedback_at',
+    'hire_jobs.id', 'hire_jobs.org_id', 'hire_jobs.title', 'hire_jobs.status', 'hire_jobs.opened_at',
+    'hire_jobs.created_at', 'hire_jobs.closes_on', 'hire_jobs.headcount',
+    'hire_agent_notes.org_id', 'hire_agent_notes.entity_type', 'hire_agent_notes.entity_id',
+    'hire_agent_notes.agent_proposal_id', 'hire_agent_notes.created_at'];
   for r in
     select * from (values
       ('hire_applications', 'id,org_id,candidate_id,job_id,stage,outcome,applied_at,offered_at,hired_at'),
@@ -181,6 +195,39 @@ begin
       fails := fails || format('service_role may write %s', r.tbl);
     end if;
   end loop;
+
+  -- Every readable hiring column must be one of the worker's pinned columns.
+  select string_agg(c.table_name || '.' || c.column_name, ',' order by c.table_name, c.column_name) into t
+    from information_schema.columns c
+    join pg_class k on k.relname = c.table_name and k.relnamespace = 'public'::regnamespace
+   where c.table_schema = 'public' and c.table_name like 'hire\_%'
+     and has_column_privilege('service_role', k.oid, c.column_name, 'select')
+     and (c.table_name || '.' || c.column_name) <> all (pinned);
+  if t is not null then fails := fails || format('service_role may also read %s', t); end if;
+
+  -- No table-level privilege of any kind on a hire_ relation, and no writable
+  -- column grant: the pinned SELECT columns are the whole service-role boundary.
+  select string_agg(distinct c.relname || ':' || a.privilege_type, ',') into t
+    from pg_class c, aclexplode(c.relacl) a
+   where c.relnamespace = 'public'::regnamespace and c.relname like 'hire\_%'
+     and a.grantee = 'service_role'::regrole;
+  if t is not null then fails := fails || format('service_role holds table privileges %s', t); end if;
+  select string_agg(distinct table_name || ':' || privilege_type, ',') into t
+    from information_schema.column_privileges
+   where table_schema = 'public' and table_name like 'hire\_%'
+     and grantee = 'service_role' and privilege_type <> 'SELECT';
+  if t is not null then fails := fails || format('service_role may write %s', t); end if;
+
+  -- The inherited fresh-project grant on this non-worker table was the gap that
+  -- prompted the whole-schema assertion above. Prove denial as the actual role.
+  begin
+    set local role service_role;
+    execute 'select * from public.hire_settings limit 1';
+    reset role;
+    fails := fails || 'service_role selected hire_settings'::text;
+  exception when insufficient_privilege then
+    reset role;
+  end;
   if has_column_privilege('service_role', 'public.hire_candidates', 'email', 'SELECT') then
     fails := fails || 'service_role may read a candidate''s email'::text;
   end if;
