@@ -19,6 +19,14 @@ describe('the Weekly Studio worker may read captured contacts', () => {
     expect(grant).not.toBeNull();
   });
 
+  test('removes fresh-project table grants before adding the column grant', () => {
+    const revokeAt = sql.indexOf('revoke all on public.crm_contacts from service_role;');
+    const grantAt = sql.indexOf('grant select (');
+
+    expect(revokeAt).toBeGreaterThan(-1);
+    expect(grantAt).toBeGreaterThan(revokeAt);
+  });
+
   test('covers every column listLeads selects, filters on and sorts by', () => {
     const granted = new Set(grant![1].split(',').map((column) => column.trim()));
     for (const column of [...CAPTURED_CONTACT_COLUMNS.split(','), 'org_id', 'tags']) {

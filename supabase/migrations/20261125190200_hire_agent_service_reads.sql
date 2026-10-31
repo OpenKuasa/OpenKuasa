@@ -11,6 +11,17 @@
 -- a job's description or salary; or a note's body or label.
 set local lock_timeout = '5s';
 
+-- Supabase grants service_role table privileges by default on fresh projects.
+-- Remove those broad grants before adding the worker's column-level reads.
+revoke all on
+  public.hire_applications,
+  public.hire_candidates,
+  public.hire_interviews,
+  public.hire_jobs,
+  public.hire_agent_notes,
+  public.hire_settings
+  from service_role;
+
 grant select (id, org_id, candidate_id, job_id, stage, outcome, applied_at, offered_at, hired_at)
   on public.hire_applications to service_role;
 grant select (id, org_id, name, pool_status, created_at)
@@ -67,5 +78,16 @@ begin
    where has_column_privilege('service_role', ('public.' || v.tbl)::regclass, v.col, 'select');
   if missing is not null then
     raise exception 'service_role may read private columns: %', missing;
+  end if;
+
+  -- No table-level privilege of any kind may survive on a hiring relation. The
+  -- column grants above are the complete service-role boundary for this schema.
+  select string_agg(distinct c.relname || ':' || a.privilege_type, ',') into missing
+    from pg_catalog.pg_class c, aclexplode(c.relacl) a
+   where c.relnamespace = 'public'::regnamespace
+     and c.relname like 'hire\_%'
+     and a.grantee = 'service_role'::regrole;
+  if missing is not null then
+    raise exception 'service_role holds table privileges on hire relations: %', missing;
   end if;
 end $$;

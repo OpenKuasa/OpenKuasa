@@ -165,6 +165,12 @@ begin
      or has_table_privilege('service_role', 'public.finance_agent_notes', 'select') then
     fails := fails || 'service_role may read a note''s body or label'::text;
   end if;
+  select string_agg(distinct c.relname || ':' || a.privilege_type, ',') into t
+    from pg_class c, aclexplode(c.relacl) a
+   where c.relnamespace = 'public'::regnamespace
+     and c.relname in ('finance_sst_settings', 'finance_sst_returns')
+     and a.grantee = 'service_role'::regrole;
+  if t is not null then fails := fails || format('service_role holds table privileges on SST relations %s', t); end if;
 
   -- ---- people and workspaces: a test address, so delete_test_org may delete them -----------------------------------
   insert into auth.users (id, instance_id, aud, role, email, encrypted_password,
