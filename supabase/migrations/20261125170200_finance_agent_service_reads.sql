@@ -16,6 +16,11 @@
 set local lock_timeout = '5s';
 
 -- ---- 1. what the scan reads ----------------------------------------------------
+-- Fresh Supabase projects grant service_role table privileges by default. These
+-- two tables were not narrowed by an earlier finance migration, so remove their
+-- broad access before restoring only the columns the worker reads.
+revoke all on public.finance_sst_settings, public.finance_sst_returns from service_role;
+
 grant select (org_id, id, invoice_no, customer_id, invoice_date, due_date, display_status, balance_myr, currency)
   on public.finance_invoice_totals to service_role;
 grant select (org_id, id, bill_no, supplier_id, bill_date, due_date, display_status, balance_myr, currency)
@@ -101,6 +106,15 @@ begin
   if has_column_privilege('service_role', 'public.finance_agent_notes', 'body', 'select')
      or has_column_privilege('service_role', 'public.finance_agent_notes', 'entity_label', 'select') then
     raise exception 'service_role may read a note''s body or label';
+  end if;
+
+  select string_agg(distinct c.relname || ':' || a.privilege_type, ',') into missing
+    from pg_catalog.pg_class c, aclexplode(c.relacl) a
+   where c.relnamespace = 'public'::regnamespace
+     and c.relname in ('finance_sst_settings', 'finance_sst_returns')
+     and a.grantee = 'service_role'::regrole;
+  if missing is not null then
+    raise exception 'service_role holds table privileges on SST relations: %', missing;
   end if;
 
   set local role service_role;
