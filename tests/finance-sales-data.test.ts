@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { INVOICE_MESSAGES, setEInvoice, setEInvoiceInput, voidInvoice } from '@/lib/finance/invoices';
+import { INVOICE_MESSAGES, postInvoice, setEInvoice, setEInvoiceInput, voidInvoice } from '@/lib/finance/invoices';
 import {
   markPaymentPaid,
   recordPaymentIn,
@@ -167,5 +167,25 @@ describe('voiding an invoice on a return already marked filed', () => {
   it('never passes on the text of any other database error', async () => {
     const { ctx } = fakeFinance({ data: null, error: { code: 'XX000', message: 'internal detail' } });
     expect(await voidInvoice(ctx, { id: ID })).toEqual({ ok: false, error: 'That change could not be saved. Please try again.' });
+  });
+});
+
+describe('posting a draft invoice dated in a return already marked filed', () => {
+  // The database refuses it (finance_invoice_post_filed_guard, FIN72) and words the sentence itself.
+  const DATED =
+    'This invoice is dated in the 1 Sep – 31 Oct 2026 service tax return, which is marked filed. Date it in the current period, or take the filed mark off the return and file an amended return (Pindaan).';
+
+  it('shows the database’s sentence, which names the period and both ways out', async () => {
+    const { ctx, calls } = fakeFinance({ data: null, error: { code: 'FIN72', message: DATED } });
+    expect(await postInvoice(ctx, { id: ID })).toEqual({ ok: false, error: DATED });
+    // One call, and it is the posting function: the guard is in the database, so nothing can slip between.
+    expect(calls.map((c) => `${c.kind}:${c.name}`)).toEqual(['rpc:finance_post_invoice']);
+    expect(logged).not.toHaveBeenCalled();
+  });
+
+  it('falls back to the plain failure when the refusal comes with no sentence', async () => {
+    const { ctx } = fakeFinance({ data: null, error: { code: 'FIN72', message: '' } });
+    expect(await postInvoice(ctx, { id: ID })).toEqual({ ok: false, error: 'That change could not be saved. Please try again.' });
+    expect(logged).toHaveBeenCalled();
   });
 });

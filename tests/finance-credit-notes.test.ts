@@ -180,3 +180,23 @@ describe('voiding a credit note on a return already marked filed', () => {
     expect(await voidCreditNote(ctx, { id: ID })).toEqual({ ok: false, error: 'That change could not be saved. Please try again.' });
   });
 });
+
+describe('issuing a draft credit note dated in a return already marked filed', () => {
+  // The database refuses it (finance_credit_note_issue_filed_guard, FIN73) and words the sentence itself.
+  const DATED =
+    'This credit note is dated in the 1 Sep – 31 Oct 2026 service tax return, which is marked filed. Date it in the current period: a note for tax declared in an earlier return is deducted in the period it is issued.';
+
+  it('shows the database’s sentence, which names the period and the way out', async () => {
+    const { ctx, calls } = fakeFinance({ data: null, error: { code: 'FIN73', message: DATED } });
+    expect(await issueCreditNote(ctx, { id: ID })).toEqual({ ok: false, error: DATED });
+    // One call, and it is the issuing function: the guard is in the database, so nothing can slip between.
+    expect(calls.map((c) => `${c.kind}:${c.name}`)).toEqual(['rpc:finance_issue_credit_note']);
+    expect(logged).not.toHaveBeenCalled();
+  });
+
+  it('falls back to the plain failure when the refusal comes with no sentence', async () => {
+    const { ctx } = fakeFinance({ data: null, error: { code: 'FIN73', message: '' } });
+    expect(await issueCreditNote(ctx, { id: ID })).toEqual({ ok: false, error: 'That change could not be saved. Please try again.' });
+    expect(logged).toHaveBeenCalled();
+  });
+});

@@ -97,6 +97,9 @@ const REFUSALS: Record<string, string> = {
 // refusal itself, naming the period and the way out, so its sentence is shown as it is.
 const FIN_VOID_ON_FILED = 'FIN74';
 
+/** The note is dated inside a return marked filed (private trigger finance_credit_note_issue_filed_guard, #222). */
+const FIN_ISSUE_ON_FILED = 'FIN73';
+
 function creditNoteWriteFailed(fnName: string, error: unknown): { ok: false; error: string } {
   const refusal = REFUSALS[pgCode(error) ?? ''];
   return refusal ? { ok: false, error: refusal } : writeFailed(fnName, error);
@@ -218,7 +221,12 @@ export async function issueCreditNote(
     target_org: ctx.orgId,
     target_note: id,
   });
-  if (error || !data) return creditNoteWriteFailed('issueCreditNote', error);
+  if (error || !data) {
+    // The database words this refusal itself: it names the filed period and the way out (#222).
+    const message = (error as { message?: unknown } | null)?.message;
+    if (pgCode(error) === FIN_ISSUE_ON_FILED && typeof message === 'string' && message) return { ok: false, error: message };
+    return creditNoteWriteFailed('issueCreditNote', error);
+  }
   return { ok: true, data: { id, credit_note_no: data as string } };
 }
 
