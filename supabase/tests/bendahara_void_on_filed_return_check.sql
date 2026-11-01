@@ -30,14 +30,26 @@ begin
     end $g$
   $f$;
   execute 'grant execute on function public.bendahara_void_try(uuid) to authenticated';
-  -- A posted invoice of one or more lines (rate, tax type) on a date.
+  -- A posted invoice of one or more lines (rate, tax type) on a date. The
+  -- posting guard of 20261129090000_bendahara_post_into_filed_period.sql refuses
+  -- an invoice dated inside a filed return, so the marks are lifted while the
+  -- invoice is posted and put back before the void under test: the guard this
+  -- file checks is the void one, and it still runs with the mark on.
   execute $f$
     create function public.bendahara_void_posted(o uuid, c uuid, d date, lines jsonb) returns uuid
     language plpgsql security invoker set search_path = '' as $g$
-    declare i uuid;
+    declare
+      i uuid;
+      marks jsonb;
     begin
+      select coalesce(jsonb_agg(jsonb_build_object('tax_type', r.tax_type, 'period_start', r.period_start, 'filed_on', r.filed_on)), '[]'::jsonb)
+        into marks
+        from public.finance_sst_returns r where r.org_id = o;
+      delete from public.finance_sst_returns where org_id = o;
       i := public.finance_save_invoice(o, jsonb_build_object('customer_id', c, 'invoice_date', d, 'due_date', d + 30), lines);
       perform public.finance_post_invoice(o, i);
+      insert into public.finance_sst_returns (org_id, tax_type, period_start, filed_on)
+      select o, (m->>'tax_type'), (m->>'period_start')::date, (m->>'filed_on')::date from jsonb_array_elements(marks) as m;
       return i;
     end $g$
   $f$;
