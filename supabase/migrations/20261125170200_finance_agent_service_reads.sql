@@ -17,9 +17,15 @@ set local lock_timeout = '5s';
 
 -- ---- 1. what the scan reads ----------------------------------------------------
 -- Fresh Supabase projects grant service_role table privileges by default. These
--- two tables were not narrowed by an earlier finance migration, so remove their
--- broad access before restoring only the columns the worker reads.
-revoke all on public.finance_sst_settings, public.finance_sst_returns from service_role;
+-- four tables were not narrowed by an earlier finance migration, so remove their
+-- broad access before restoring only the columns the worker reads from two of
+-- them. The worker does not read finance_settings or finance_sst_return_figures.
+revoke all on
+  public.finance_settings,
+  public.finance_sst_return_figures,
+  public.finance_sst_settings,
+  public.finance_sst_returns
+  from service_role;
 
 grant select (org_id, id, invoice_no, customer_id, invoice_date, due_date, display_status, balance_myr, currency)
   on public.finance_invoice_totals to service_role;
@@ -108,13 +114,22 @@ begin
     raise exception 'service_role may read a note''s body or label';
   end if;
 
-  select string_agg(distinct c.relname || ':' || a.privilege_type, ',') into missing
-    from pg_catalog.pg_class c, aclexplode(c.relacl) a
-   where c.relnamespace = 'public'::regnamespace
-     and c.relname in ('finance_sst_settings', 'finance_sst_returns')
-     and a.grantee = 'service_role'::regrole;
+  -- has_table_privilege checks effective access, including a grant to PUBLIC;
+  -- inspecting only service_role's own ACL entry would miss that inherited path.
+  select string_agg(v.tbl, ',') into missing
+    from (values
+      ('finance_settings'),
+      ('finance_sst_return_figures'),
+      ('finance_sst_settings'),
+      ('finance_sst_returns')
+    ) v(tbl)
+   where has_table_privilege(
+     'service_role',
+     ('public.' || v.tbl)::regclass,
+     'select,insert,update,delete,truncate,references,trigger,maintain'
+   );
   if missing is not null then
-    raise exception 'service_role holds table privileges on SST relations: %', missing;
+    raise exception 'service_role holds effective table privileges on finance relations: %', missing;
   end if;
 
   set local role service_role;
