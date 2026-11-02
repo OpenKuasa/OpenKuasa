@@ -24,6 +24,11 @@ describe('clearDanglingPromotions', () => {
     expect(r.promoted_contact_id).toBeNull();
   });
 
+  it('never touches a lead read from Kasturi, whose promoted_contact_id is its own id', () => {
+    const [r] = clearDanglingPromotions([lead({ origin: 'crm', promoted_contact_id: 'l1' })], new Set());
+    expect(r.promoted_contact_id).toBe('l1');
+  });
+
   it('leaves an unpromoted lead untouched', () => {
     const [r] = clearDanglingPromotions([lead({ promoted_contact_id: null })], new Set(['c1']));
     expect(r.promoted_contact_id).toBeNull();

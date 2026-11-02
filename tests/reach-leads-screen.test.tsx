@@ -5,6 +5,7 @@ import type { Lead } from '@/lib/reach/types';
 const state = vi.hoisted(() => ({
   hasEnv: true,
   clientCreations: 0,
+  lookupError: null as null | { code: string },
 }));
 
 const lead: Lead = {
@@ -20,6 +21,7 @@ const lead: Lead = {
 vi.mock('@/lib/auth/viewer', () => ({
   getViewer: async () => ({ role: 'viewer', isDemo: true }),
   hasSupabaseEnv: () => state.hasEnv,
+  usesSampleData: () => !state.hasEnv,
 }));
 vi.mock('@/screens/reach/parts', () => ({
   loadReachData: async () => ({ listLeads: async () => [lead] }),
@@ -29,7 +31,9 @@ vi.mock('@/lib/supabase/server', () => ({
     state.clientCreations += 1;
     return {
       from: () => ({
-        select: () => ({ in: async () => ({ data: [] }) }),
+        select: () => ({
+          in: async () => (state.lookupError ? { data: null, error: state.lookupError } : { data: [], error: null }),
+        }),
       }),
     };
   },
@@ -47,6 +51,7 @@ vi.mock('@/components/charts', () => ({
 beforeEach(() => {
   state.hasEnv = true;
   state.clientCreations = 0;
+  state.lookupError = null;
 });
 
 describe('the Reach leads screen promotion check', () => {
@@ -65,5 +70,16 @@ describe('the Reach leads screen promotion check', () => {
 
     expect(state.clientCreations).toBe(0);
     expect(html).toContain('promotion:missing-contact');
+  });
+
+  it('keeps the promotion when the contact lookup fails, instead of inviting a duplicate', async () => {
+    state.lookupError = { code: '42501' };
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { default: LeadsScreen } = await import('@/screens/reach/leads');
+    const html = renderToStaticMarkup(await LeadsScreen());
+
+    expect(html).toContain('promotion:missing-contact');
+    expect(JSON.stringify(err.mock.calls)).toContain('42501');
+    err.mockRestore();
   });
 });

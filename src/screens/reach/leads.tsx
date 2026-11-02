@@ -5,7 +5,7 @@ import { BentoGrid, BentoCard, BentoStat } from '@/components/bento/bento';
 import { BarGroup, FunnelFlow, type Series, type Slice } from '@/components/charts';
 import { LeadFunnelTable } from '@/components/reach/lead-funnel-table';
 import { clearDanglingPromotions } from '@/lib/reach/leads-view';
-import { getViewer, hasSupabaseEnv } from '@/lib/auth/viewer';
+import { getViewer, usesSampleData } from '@/lib/auth/viewer';
 import { can } from '@/lib/auth/permissions';
 import { deriveLeadSummary } from '@/lib/ai/tools';
 import { LEAD_STAGES, type Lead, type LeadChannel, type LeadStage } from '@/lib/reach/types';
@@ -62,15 +62,20 @@ export default async function LeadsScreen() {
     .filter((l) => l.origin !== 'crm')
     .map((l) => l.promoted_contact_id)
     .filter((id): id is string => id !== null);
+  // A failed lookup changes nothing: showing every lead as unpromoted would invite duplicate contacts.
   let displayLeads = leads;
-  if (promotedIds.length > 0 && hasSupabaseEnv()) {
+  if (promotedIds.length > 0 && !usesSampleData()) {
     const supabase = await createClient();
-    const { data: contacts } = await supabase
+    const { data: contacts, error } = await supabase
       .from('crm_contacts')
       .select('id')
       .in('id', promotedIds);
-    const existingContactIds = new Set((contacts ?? []).map((c) => (c as { id: string }).id));
-    displayLeads = clearDanglingPromotions(leads, existingContactIds);
+    if (error) {
+      console.error('[reach/leads] could not check promoted contacts:', error.code);
+    } else {
+      const existingContactIds = new Set((contacts ?? []).map((c) => (c as { id: string }).id));
+      displayLeads = clearDanglingPromotions(leads, existingContactIds);
+    }
   }
 
   const funnelSlices: Slice[] = LEAD_STAGES.map((stage) => ({
