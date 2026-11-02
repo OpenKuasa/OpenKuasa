@@ -31,11 +31,17 @@ begin
   $f$;
   execute 'grant execute on function public.bendahara_cn_void_try(uuid) to authenticated';
   -- An issued credit note of RM10 dated d, against a posted invoice of one or more lines dated 1 Sep 2026.
+  -- The marks are lifted while the two documents are written and put back before the void: the guards from
+  -- 20261129090000 refuse a posting or an issue into a period already marked filed (FIN72, FIN73), so the
+  -- order a workspace can reach this state in is post, issue, then file. What this file checks is the void,
+  -- which happens with the mark in place.
   execute $f$
     create function public.bendahara_cn_issued(o uuid, c uuid, d date, lines jsonb) returns uuid
     language plpgsql security invoker set search_path = '' as $g$
-    declare i uuid; n uuid;
+    declare i uuid; n uuid; marks public.finance_sst_returns[];
     begin
+      select array_agg(r) into marks from public.finance_sst_returns r where r.org_id = o;
+      delete from public.finance_sst_returns where org_id = o;
       i := public.finance_save_invoice(o, jsonb_build_object('customer_id', c, 'invoice_date', date '2026-09-01', 'due_date', date '2026-10-01'), lines);
       -- finance_save_invoice leaves tax_type out, so it is set on the draft line here.
       update public.finance_invoice_lines l set tax_type = e->>'tax_type'
@@ -44,6 +50,9 @@ begin
       perform public.finance_post_invoice(o, i);
       n := public.finance_save_credit_note(o, jsonb_build_object('invoice_id', i, 'credit_date', d, 'amount', 10, 'reason', 'returns'));
       perform public.finance_issue_credit_note(o, n);
+      if marks is not null then
+        insert into public.finance_sst_returns select * from unnest(marks);
+      end if;
       return n;
     end $g$
   $f$;
