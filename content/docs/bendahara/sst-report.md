@@ -28,21 +28,20 @@ Until the taxable period is set, the screen asks you to set it to see your retur
 ### Read the return
 
 1. Choose **Service tax** or **Sales tax**, and the **Taxable period**, at the top.
-2. The return shows **Part A** (the business and the period), **Part B1** (taxable services or goods, by kind), **Part B2** (value and tax at each rate) and **Deductions and tax payable** (items 13 and 14).
+2. The return shows **Part A** (the business and the period), **Part B1** (Sales / Service Details: taxable services or goods, by kind), **Part B2** (value and tax at each rate) and **Deductions and tax payable** (items 13 and 14).
 3. Sales tax is counted when the goods are sold, by the invoice date. Service tax is counted on the basis you chose.
 
 **Payment basis is not ready yet.** If service tax is counted on **Payment received**, the service tax return shows **Not ready yet** in place of Parts B1 and B2 and items 12 to 14, with the note "Not ready yet: service tax on payment basis is counted from payments received, which comes in the next step." Its payable amount in **Periods** also reads "not ready yet".
 
-Part D (exempt items) is worked out once invoice lines can carry an exemption reason. Imported services and debit notes are not counted yet. Items 15 and 16 (late payment penalty) are worked out by Customs in MySST, so they are not shown.
+Part D (sales / services exempted from tax / non-taxable service, item 18 on a sales return) is worked out once invoice lines can carry an exemption reason. Imported services and debit notes are not counted yet. Items 15 and 16 (late payment penalty) are worked out by Customs in MySST, so they are not shown.
 
 ### Before you file
 
 Under the return, Bendahara may show "Not on the form" notes. Check each one before you copy the figures into MySST:
 
-- "… at a rate with no item on this return. Fix their rate or tax type before you file."
+- Service tax: "… at a rate with no item on this return. Either the rate is wrong or the line needs another tax type. Fix it before you file."
+- Sales tax: "… at a rate with no item on this return. If the rate or tax type is wrong, fix it before you file. If it is a Part C (item 17) good, a Schedule 2 good taxed at a rate other than 5% or 10%, add it on the form yourself: this return does not count Part C yet."
 - "… no SST tax type. Set one before you file."
-- "13(a) is below zero because a credit note counted in an earlier return was voided this period."
-- "13(a) includes … of tax on invoices from earlier returns that were voided this period."
 - "item 14 is below zero because this period's deductions are more than its tax. Check with Customs (JKDM) how to claim it before you file."
 
 ### Type in figures from Customs
@@ -57,6 +56,12 @@ This card is not shown while the service tax return is not ready.
 ### Mark a return as filed
 
 Bendahara cannot see MySST, so you mark a return as filed yourself. In **Periods**, each period shows its due date and what is payable, with **Open**, **Not filed** or **Marked filed**. Once a period has ended, click **Mark as filed**. Click **Undo** to take the mark off.
+
+A voided invoice or credit note counts in no return. While a return is marked filed, an invoice or credit note on it cannot be voided, so a filed return never changes without anyone noticing:
+
+- A sale that falls through after filing is corrected with a credit note, which goes in 13(a) of the period it is dated in.
+- An invoice or credit note that should never have been issued is an amended return (Pindaan): click **Undo** to take the mark off, void it, and file the amended return in MySST.
+- A credit taken back after filing is a debit note, which Bendahara does not issue yet.
 
 ## Check before you file
 
@@ -73,6 +78,7 @@ The return follows what Bendahara does, which is not always the same as the offi
 - **"You can mark a return as filed once its period has ended."**
 - **"This return is marked filed. Undo the mark to change its figures."**
 - **"Only an owner or admin can mark a return as filed."**
+- **"This invoice is on the … return, which is marked filed. Issue a credit note instead. …"** or **"This credit note is on the … return, which is marked filed. …"** See **Mark a return as filed** above.
 
 ## Related
 
