@@ -10,6 +10,7 @@ import {
   PREVIEW_BLOCKED_MESSAGE,
   deploymentMode,
   hasSupabaseEnv,
+  usesSampleData,
 } from './preview-mode';
 
 /** The signed-in person and their workspace, as shown in the app chrome. */
@@ -97,7 +98,7 @@ export function avatarPublicUrl(path: string | null | undefined): string | null 
   return `${base}/storage/v1/object/public/avatars/${path}`;
 }
 
-export { hasSupabaseEnv };
+export { hasSupabaseEnv, usesSampleData };
 
 /**
  * Resolves the signed-in viewer for the app and account layouts. Sends

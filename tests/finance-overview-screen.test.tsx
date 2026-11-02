@@ -1,16 +1,20 @@
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
 
 /** The Bendahara Overview, live branch: the cards that have a real source are filled from the books, the rest say why not. */
 
 const state = vi.hoisted(() => ({
   inputs: async (): Promise<unknown> => ({}),
+  isDemo: false,
+  clientCreations: 0,
 }));
 vi.mock('@/lib/supabase/server', () => ({
-  createClient: async () => ({ auth: { getUser: async () => ({ data: { user: { id: 'u' } } }) } }),
+  createClient: async () => {
+    state.clientCreations += 1;
+    return {};
+  },
 }));
-vi.mock('@/lib/ai/access', () => ({ isLiveChatAllowed: () => true }));
-vi.mock('@/lib/auth/viewer', () => ({ getViewer: async () => ({ orgId: 'org' }) }));
+vi.mock('@/lib/auth/viewer', () => ({ getViewer: async () => ({ orgId: 'org', isDemo: state.isDemo }) }));
 vi.mock('@/lib/people/dates', async (importOriginal) => ({
   ...(await importOriginal<object>()),
   todayInMalaysia: () => '2026-10-23',
@@ -48,6 +52,12 @@ async function render() {
   return renderToStaticMarkup(await OverviewScreen());
 }
 
+beforeEach(() => {
+  state.inputs = async () => inputs;
+  state.isDemo = false;
+  state.clientCreations = 0;
+});
+
 describe('Bendahara Overview (live)', () => {
   it('fills the cash balance, collection rate and the not-yet cards', async () => {
     state.inputs = async () => inputs;
@@ -73,5 +83,15 @@ describe('Bendahara Overview (live)', () => {
     expect(cash).not.toContain('RM ');
     expect(html).toContain('Cash in vs out');
     expect(html).not.toContain('AREA');
+  });
+
+  it('renders the sample dashboard without constructing a Supabase client in preview mode', async () => {
+    state.isDemo = true;
+
+    const html = await render();
+
+    expect(state.clientCreations).toBe(0);
+    expect(html).not.toContain('Couldn&#x27;t load your dashboard');
+    expect(html).toContain('Revenue · MTD');
   });
 });

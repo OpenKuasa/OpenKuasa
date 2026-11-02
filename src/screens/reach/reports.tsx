@@ -20,10 +20,9 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { createClient } from '@/lib/supabase/server';
-import { getReachData } from '@/lib/reach/supabase';
 import { deriveReportsModel, type ReportRange } from '@/lib/reach/reports';
 import { LEAD_STAGES, type LeadChannel, type LeadStage } from '@/lib/reach/types';
+import { loadReachData } from './parts';
 
 const RANGES: readonly ReportRange[] = ['7d', '30d', '90d'];
 const RANGE_LABEL: Record<ReportRange, string> = {
@@ -87,7 +86,7 @@ export default async function ReportsScreen({
   const sp = (await searchParams) ?? {};
   const range = parseRange(sp.range);
 
-  const data = await getReachData(await createClient());
+  const data = await loadReachData();
   const [campaigns, leads, appts] = await Promise.all([
     data.listCampaigns(),
     data.listLeads(),

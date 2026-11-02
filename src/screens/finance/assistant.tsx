@@ -25,7 +25,6 @@ import {
 import { LiveDot } from '@/components/ui/live-dot';
 import { AskBendaharaHero } from '@/components/finance/ask-bendahara-hero';
 import { createClient } from '@/lib/supabase/server';
-import { isLiveChatAllowed } from '@/lib/ai/access';
 import { getViewer } from '@/lib/auth/viewer';
 import { listBills } from '@/lib/finance/bills';
 import { TREND_WEEKS, buildDashboardModel, collectionRate, deltaChip, weeklyCash, type DashboardInputs, type DashboardModel } from '@/lib/finance/dashboard';
@@ -181,11 +180,8 @@ export default async function OverviewScreen() {
   // Started first so the greeting loads alongside the screen's own reads.
   const greetingPromise = loadServerGreeting('finance');
   void greetingPromise.catch(() => {});
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  const isDemo = !isLiveChatAllowed(user);
+  const viewer = await getViewer();
+  const isDemo = viewer.isDemo;
 
   // A signed-in person sees only their own workspace's figures. Anything with no real
   // source yet shows "Not available yet" rather than the sample numbers.
@@ -196,7 +192,7 @@ export default async function OverviewScreen() {
   const today = todayInMalaysia(new Date());
   if (!isDemo) {
     try {
-      const viewer = await getViewer();
+      const supabase = await createClient();
       const ctx = { client: supabase, orgId: viewer.orgId };
       const [invoices, bills, inputs] = await Promise.all([
         listInvoices(ctx),

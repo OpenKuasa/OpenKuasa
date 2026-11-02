@@ -1,5 +1,7 @@
 import type { ReactNode } from 'react';
 import { isLiveChatAllowed } from '@/lib/ai/access';
+import { usesSampleData } from '@/lib/auth/viewer';
+import { createSeedHireData } from '@/lib/hire/seed';
 import { getHireData } from '@/lib/hire/supabase';
 import type { HireData } from '@/lib/hire/types';
 import { createClient } from '@/lib/supabase/server';
@@ -34,17 +36,23 @@ export async function loadHire<T>(
   tag: string,
   build: (data: HireData, now: Date) => Promise<T>,
 ): Promise<{ model: T | null; isDemo: boolean }> {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  // In preview there is no project: the sample company stands in, seen as a demo visitor.
+  const supabase = usesSampleData() ? null : await createClient();
+  let isDemo = true;
+  if (supabase) {
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    isDemo = !isLiveChatAllowed(user);
+  }
   let model: T | null = null;
   try {
-    model = await build(await getHireData(supabase), new Date());
+    const data = supabase ? await getHireData(supabase) : createSeedHireData();
+    model = await build(data, new Date());
   } catch (error) {
     console.error(`[hire/${tag}] data error:`, error);
   }
-  return { model, isDemo: !isLiveChatAllowed(user) };
+  return { model, isDemo };
 }
 
 /** At most `max` slices: the biggest rows, with the rest folded into 'Other' so the slices sum to the total. */
