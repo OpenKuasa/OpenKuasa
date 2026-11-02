@@ -175,10 +175,12 @@ describe('the SST Report return (#222 stage 2)', () => {
     expect(text).toContain('Tax payable (item 14) Not ready yet');
   });
 
-  it('says "their" for more than one line the form has no item for', async () => {
+  it('says a line the form has no item for may be the rate or a sales Part C good', async () => {
     state.settings = async () => SAVED;
     state.rows = async () => ({ lines: [line({ id: 'a', sst_rate: 7 }), line({ id: 'b', sst_rate: 7 })], credits: [] });
-    expect(await render()).toContain('2 lines (RM 2,000.00) are at a rate with no item on this return. Fix their rate or tax type before you file.');
+    expect(await render()).toContain(
+      '2 lines (RM 2,000.00) are at a rate with no item on this return. Either the rate is wrong or the line needs another tax type. Fix it before you file.',
+    );
   });
 
   it('names each Mark as filed and Undo button by its period', async () => {
@@ -213,7 +215,9 @@ describe('the SST Report return (#222 stage 2)', () => {
       credits: [],
     });
     const text = await render();
-    expect(text).toContain('Not on the form: 1 line (RM 1,000.00) is at a rate with no item on this return. Fix its rate or tax type before you file.');
+    expect(text).toContain(
+      'Not on the form: 1 line (RM 1,000.00) is at a rate with no item on this return. Either the rate is wrong or the line needs another tax type. Fix it before you file.',
+    );
     expect(text).toContain('Not on the form: 1 line (RM 50.00) has no SST tax type. Set one before you file.');
   });
 

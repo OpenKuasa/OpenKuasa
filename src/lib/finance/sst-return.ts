@@ -8,9 +8,9 @@
  * Periods: an invoice line counts by its invoice date, a credit note by its credit date. A voided invoice
  * counts nowhere, whenever it was voided: the database refuses a void while the invoice's return is marked
  * filed (FIN71), so a void is either a correction before filing or part of an amended return (Pindaan), and
- * a later sale that falls through is a credit note. A credit note voided in the period it was dated in counts
- * nowhere; one voided in a later period counts in its own period, and the void period's 13(a) goes down by its
- * tax (13(a) may go below 0).
+ * a later sale that falls through is a credit note. A voided credit note counts nowhere too, for the same reason:
+ * the database refuses its void while its return is marked filed (FIN74). So 13(a) is the tax of the live credit
+ * notes dated in the period, and never below zero.
  *
  * Typed-in figures (11(e) cards, 13(b), 13(c), 13(d), 13A) come in as a fifth argument: 11(e) joins item 12, the rest come off item 14.
  */
@@ -92,7 +92,7 @@ export const sstCards = (n: number) => `${n.toLocaleString('en-MY')} ${n === 1 ?
 const CARD_TAX_SEN = 2500;
 
 const CARD_ITEM: SstFormLine = { item: '11(e)', label: 'Credit and charge cards, RM25 each', value: null, tax: 0, typed: true };
-const CREDIT_NOTES = { item: '13(a)', label: 'Tax from credit notes' };
+const CREDIT_NOTES = { item: '13(a)', label: 'Tax deduction from credit note' };
 const BAD_DEBT: SstFormLine = { item: '13(d)', label: 'Bad debt relief (approved)', value: null, tax: 0, typed: true };
 const TYPED_DEDUCTIONS: Record<SstReturnType, SstFormLine[]> = {
   service: [{ item: '13(c)', label: 'Approved service tax deduction', value: null, tax: 0, typed: true }, BAD_DEBT],
@@ -107,20 +107,6 @@ const toSen = (amount: number) => Math.round(amount * 100);
 const fromSen = (sen: number) => sen / 100;
 
 const within = (date: string, p: SstPeriod) => date >= p.start && date <= p.end;
-
-/**
- * How a document dated `date` stands in period p: 'counts' when it belongs to p's return as normal,
- * 'reversed' when it was dated before p and voided within p, else null. A void with no void date is treated
- * as voided where it was dated, so counts nowhere.
- */
-function standing(date: string, isVoid: boolean, voidedOn: string | null, p: SstPeriod): 'counts' | 'reversed' | null {
-  if (within(date, p)) {
-    if (!isVoid) return 'counts';
-    return voidedOn !== null && voidedOn > p.end ? 'counts' : null;
-  }
-  if (isVoid && voidedOn !== null && date < p.start && within(voidedOn, p)) return 'reversed';
-  return null;
-}
 
 /** A credit note's share of its invoice's tax of one type, in sen: amount × tax ÷ invoice total, rounded. */
 function creditTaxSen(c: SstCreditRow, type: SstReturnType): number {
@@ -181,9 +167,9 @@ export function buildSstReturn(
   }
 
   for (const c of credits) {
-    const where = standing(c.credit_date, c.status === 'void', c.voided_on, period);
-    if (where === 'counts') creditNotesSen += creditTaxSen(c, type);
-    else if (where === 'reversed') creditNotesSen -= creditTaxSen(c, type);
+    // A voided credit note counts nowhere (see the top of this file).
+    if (c.status === 'void' || !within(c.credit_date, period)) continue;
+    creditNotesSen += creditTaxSen(c, type);
   }
 
   const b1 = [...groups.entries()]
