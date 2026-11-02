@@ -93,6 +93,10 @@ const REFUSALS: Record<string, string> = {
   [PG_OUT_OF_RANGE]: TOO_LARGE,
 };
 
+// FIN74 (20261128093000): a credit note on a return marked filed cannot be voided. The database words the
+// refusal itself, naming the period and the way out, so its sentence is shown as it is.
+const FIN_VOID_ON_FILED = 'FIN74';
+
 function creditNoteWriteFailed(fnName: string, error: unknown): { ok: false; error: string } {
   const refusal = REFUSALS[pgCode(error) ?? ''];
   return refusal ? { ok: false, error: refusal } : writeFailed(fnName, error);
@@ -218,7 +222,7 @@ export async function issueCreditNote(
   return { ok: true, data: { id, credit_note_no: data as string } };
 }
 
-/** Voids an issued credit note: the invoice owes its amount again. Refused while a refund depends on it. */
+/** Voids an issued credit note: the invoice owes its amount again. Refused while a refund depends on it, or while its return is marked filed (FIN74). */
 export async function voidCreditNote(
   ctx: FinanceWriteContext,
   input: z.input<typeof creditNoteIdInput>,
@@ -231,7 +235,11 @@ export async function voidCreditNote(
     .eq('org_id', ctx.orgId)
     .select('id')
     .maybeSingle();
-  if (error) return creditNoteWriteFailed('voidCreditNote', error);
+  if (error) {
+    const message = (error as { message?: unknown }).message;
+    if (pgCode(error) === FIN_VOID_ON_FILED && typeof message === 'string' && message) return { ok: false, error: message };
+    return creditNoteWriteFailed('voidCreditNote', error);
+  }
   if (!data) return { ok: false, error: M.gone };
   return { ok: true, data: { id: data.id } };
 }
