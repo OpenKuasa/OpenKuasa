@@ -8,7 +8,7 @@ import { ScreenContainer } from '@/components/screen/screen-container';
 import { Button } from '@/components/ui/button';
 import { isLiveChatAllowed } from '@/lib/ai/access';
 import { getCurrentOrg } from '@/lib/auth/current-org';
-import { hasSupabaseEnv } from '@/lib/auth/viewer';
+import { usesSampleData } from '@/lib/auth/viewer';
 import { createSeedPeopleData } from '@/lib/people/seed';
 import { createSupabasePeopleData, getPeopleData } from '@/lib/people/supabase';
 import type { ClaimStatus, PeopleData, PeopleViewer } from '@/lib/people/types';
@@ -48,41 +48,37 @@ export async function loadPeople<T>(
   tag: string,
   build: (data: PeopleData, now: Date, ctx: PeopleLoadContext) => Promise<T>,
 ): Promise<{ model: T | null; viewer: PeopleViewer; chatDemo: boolean; hasWorkspace: boolean }> {
-  if (!hasSupabaseEnv()) {
-    try {
-      const model = await build(createSeedPeopleData(), new Date(), {
-        client: null,
-        orgId: null,
-        viewer: PREVIEW_PEOPLE_VIEWER,
-      });
-      return { model, viewer: PREVIEW_PEOPLE_VIEWER, chatDemo: true, hasWorkspace: true };
-    } catch (error) {
-      console.error(`[people/${tag}] data error:`, error);
-      return { model: null, viewer: PREVIEW_PEOPLE_VIEWER, chatDemo: true, hasWorkspace: true };
-    }
+  // In preview there is no project: the sample company stands in for a workspace.
+  const supabase = usesSampleData() ? null : await createClient();
+  let chatDemo = true;
+  if (supabase) {
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    chatDemo = !isLiveChatAllowed(user);
   }
-
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
   let model: T | null = null;
-  let viewer: PeopleViewer = NO_WORKSPACE_VIEWER;
-  let hasWorkspace = false;
+  let viewer: PeopleViewer = supabase ? NO_WORKSPACE_VIEWER : PREVIEW_PEOPLE_VIEWER;
+  let hasWorkspace = !supabase;
   try {
-    // Resolve the workspace once; the provider and the viewer share it.
-    const org = await getCurrentOrg(supabase);
-    hasWorkspace = org !== null;
-    const data = org ? createSupabasePeopleData(supabase, org.orgId) : await getPeopleData(supabase);
-    viewer = await getPeopleViewer(supabase, org);
-    const context: PeopleLoadContext = org
-      ? { client: supabase, orgId: org.orgId, viewer }
-      : { client: null, orgId: null, viewer };
+    let data: PeopleData;
+    let context: PeopleLoadContext;
+    if (!supabase) {
+      data = createSeedPeopleData();
+      context = { client: null, orgId: null, viewer };
+    } else {
+      // Resolve the workspace once; the provider and the viewer share it.
+      const org = await getCurrentOrg(supabase);
+      hasWorkspace = org !== null;
+      data = org ? createSupabasePeopleData(supabase, org.orgId) : await getPeopleData(supabase);
+      viewer = await getPeopleViewer(supabase, org);
+      context = org ? { client: supabase, orgId: org.orgId, viewer } : { client: null, orgId: null, viewer };
+    }
     model = await build(data, new Date(), context);
   } catch (error) {
     console.error(`[people/${tag}] data error:`, error);
   }
-  return { model, viewer, chatDemo: !isLiveChatAllowed(user), hasWorkspace };
+  return { model, viewer, chatDemo, hasWorkspace };
 }
 
 type Tone = 'good' | 'pending' | 'bad' | 'neutral';

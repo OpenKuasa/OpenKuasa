@@ -10,7 +10,7 @@ const ctl = vi.hoisted(() => ({
 const PREVIEW_DATA = { marker: 'preview' };
 const LIVE_DATA = { marker: 'live' };
 
-vi.mock('@/lib/auth/viewer', () => ({ hasSupabaseEnv: () => ctl.env }));
+vi.mock('@/lib/auth/viewer', () => ({ hasSupabaseEnv: () => ctl.env, usesSampleData: () => !ctl.env }));
 vi.mock('@/lib/hire/seed', () => ({ createSeedHireData: () => PREVIEW_DATA }));
 vi.mock('@/lib/hire/supabase', () => ({
   getHireData: async () => {

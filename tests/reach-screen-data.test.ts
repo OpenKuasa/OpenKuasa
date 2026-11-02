@@ -10,7 +10,7 @@ const PREVIEW_DATA = { marker: 'preview' };
 const LIVE_DATA = { marker: 'live' };
 const CLIENT = { marker: 'client' };
 
-vi.mock('@/lib/auth/viewer', () => ({ hasSupabaseEnv: () => ctl.env }));
+vi.mock('@/lib/auth/viewer', () => ({ hasSupabaseEnv: () => ctl.env, usesSampleData: () => !ctl.env }));
 vi.mock('@/lib/reach/seed', () => ({ createSeedReachData: () => PREVIEW_DATA }));
 vi.mock('@/lib/reach/supabase', () => ({
   getReachData: async (client: unknown) => {

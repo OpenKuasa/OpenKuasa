@@ -4,7 +4,7 @@ import { NextRequest } from 'next/server';
 // viewer.ts imports the server Supabase client, which needs a request scope.
 vi.mock('@/lib/supabase/server', () => ({ createClient: vi.fn() }));
 
-import { deploymentMode, resolveDeploymentMode } from '@/lib/auth/preview-mode';
+import { deploymentMode, resolveDeploymentMode, usesSampleData } from '@/lib/auth/preview-mode';
 import { getViewer } from '@/lib/auth/viewer';
 import { updateSession } from '@/lib/supabase/middleware';
 
@@ -66,6 +66,15 @@ test('losing either value in production counts as missing', () => {
   expect(deploymentMode()).toBe('blocked');
   setEnv({ node: 'production', url: 'https://x.supabase.co', key: 'anon' });
   expect(deploymentMode()).toBe('live');
+});
+
+test('screens read sample data only in preview, and refuse in a blocked production server', () => {
+  setEnv({ node: 'production', url: 'https://x.supabase.co', key: 'anon' });
+  expect(usesSampleData()).toBe(false);
+  setEnv({ node: 'development' });
+  expect(usesSampleData()).toBe(true);
+  setEnv({ node: 'production' });
+  expect(() => usesSampleData()).toThrow(/not configured/);
 });
 
 test('a production request without a project gets a 503, not the sample app', async () => {

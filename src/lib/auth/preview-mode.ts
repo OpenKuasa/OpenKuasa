@@ -42,6 +42,17 @@ export function deploymentMode(): DeploymentMode {
   });
 }
 
+/**
+ * Whether a screen should read the sample data instead of a Supabase project. Only in
+ * preview: a production server that lost its project refuses instead (the proxy answers
+ * 503; this covers a request that reaches a screen without passing through it).
+ */
+export function usesSampleData(): boolean {
+  if (hasSupabaseEnv()) return false;
+  if (deploymentMode() === 'blocked') throw new Error(PREVIEW_BLOCKED_MESSAGE);
+  return true;
+}
+
 export const PREVIEW_BLOCKED_MESSAGE =
   'This server is not configured: NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY must both be set in production. ' +
   'Requests are answered with 503 until they are. To run the sample-data preview on purpose instead, set OPENKUASA_PREVIEW=1.';

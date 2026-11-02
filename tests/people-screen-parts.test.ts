@@ -41,7 +41,7 @@ vi.mock('@/lib/auth/current-org', () => ({
 
 vi.mock('@/lib/auth/viewer', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/auth/viewer')>();
-  return { ...actual, hasSupabaseEnv: () => ctl.env };
+  return { ...actual, hasSupabaseEnv: () => ctl.env, usesSampleData: () => !ctl.env };
 });
 
 vi.mock('@/lib/people/viewer', async (importOriginal) => {
