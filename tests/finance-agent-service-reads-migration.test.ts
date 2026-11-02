@@ -41,7 +41,9 @@ describe('the finance agent service-role migration', () => {
         expect(sql).toContain(table);
       }
       expect(sql).toContain('has_table_privilege(');
-      expect(sql).toContain("'select,insert,update,delete,truncate,references,trigger,maintain'");
+      expect(sql).toContain("'select,insert,update,delete,truncate'");
+      // MAINTAIN only exists from PostgreSQL 17: naming it breaks a replay on 15 or 16.
+      expect(sql).not.toContain('maintain');
       expect(sql).not.toContain('aclexplode(c.relacl)');
     }
   });

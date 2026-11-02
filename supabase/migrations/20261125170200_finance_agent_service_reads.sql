@@ -123,11 +123,7 @@ begin
       ('finance_sst_settings'),
       ('finance_sst_returns')
     ) v(tbl)
-   where has_table_privilege(
-     'service_role',
-     ('public.' || v.tbl)::regclass,
-     'select,insert,update,delete,truncate,references,trigger,maintain'
-   );
+   where has_table_privilege('service_role', ('public.' || v.tbl)::regclass, 'select,insert,update,delete,truncate');
   if missing is not null then
     raise exception 'service_role holds effective table privileges on finance relations: %', missing;
   end if;

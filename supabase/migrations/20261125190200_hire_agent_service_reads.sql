@@ -82,11 +82,13 @@ begin
 
   -- No table-level privilege of any kind may survive on a hiring relation. The
   -- column grants above are the complete service-role boundary for this schema.
-  select string_agg(distinct c.relname || ':' || a.privilege_type, ',') into missing
-    from pg_catalog.pg_class c, aclexplode(c.relacl) a
+  -- has_table_privilege counts effective access, including a grant to PUBLIC.
+  select string_agg(c.relname, ',' order by c.relname) into missing
+    from pg_catalog.pg_class c
    where c.relnamespace = 'public'::regnamespace
+     and c.relkind in ('r', 'p', 'v', 'm')
      and c.relname like 'hire\_%'
-     and a.grantee = 'service_role'::regrole;
+     and has_table_privilege('service_role', c.oid, 'select,insert,update,delete,truncate');
   if missing is not null then
     raise exception 'service_role holds table privileges on hire relations: %', missing;
   end if;

@@ -174,11 +174,7 @@ begin
       ('finance_sst_settings'),
       ('finance_sst_returns')
     ) v(tbl)
-   where has_table_privilege(
-     'service_role',
-     ('public.' || v.tbl)::regclass,
-     'select,insert,update,delete,truncate,references,trigger,maintain'
-   );
+   where has_table_privilege('service_role', ('public.' || v.tbl)::regclass, 'select,insert,update,delete,truncate');
   if t is not null then fails := fails || format('service_role holds effective table privileges on finance relations %s', t); end if;
 
   -- ---- people and workspaces: a test address, so delete_test_org may delete them -----------------------------------

@@ -28,7 +28,9 @@ describe('the hiring agent service-role migration', () => {
 
   it('checks the complete hire schema for surviving table privileges', () => {
     expect(migration).toContain("c.relname like 'hire\\_%'");
-    expect(migration).toContain('aclexplode(c.relacl)');
-    expect(migration).toContain("a.grantee = 'service_role'::regrole");
+    // Effective access, so a grant to PUBLIC is caught too; an ACL entry lookup would miss it.
+    expect(migration).toContain("has_table_privilege('service_role', c.oid, 'select,insert,update,delete,truncate')");
+    expect(migration).not.toContain('aclexplode(c.relacl)');
+    expect(migration).not.toContain('maintain');
   });
 });

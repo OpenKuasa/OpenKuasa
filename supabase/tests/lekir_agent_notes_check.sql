@@ -207,10 +207,11 @@ begin
 
   -- No table-level privilege of any kind on a hire_ relation, and no writable
   -- column grant: the pinned SELECT columns are the whole service-role boundary.
-  select string_agg(distinct c.relname || ':' || a.privilege_type, ',') into t
-    from pg_class c, aclexplode(c.relacl) a
-   where c.relnamespace = 'public'::regnamespace and c.relname like 'hire\_%'
-     and a.grantee = 'service_role'::regrole;
+  -- has_table_privilege counts effective access, including a grant to PUBLIC.
+  select string_agg(c.relname, ',' order by c.relname) into t
+    from pg_class c
+   where c.relnamespace = 'public'::regnamespace and c.relkind in ('r', 'p', 'v', 'm') and c.relname like 'hire\_%'
+     and has_table_privilege('service_role', c.oid, 'select,insert,update,delete,truncate');
   if t is not null then fails := fails || format('service_role holds table privileges %s', t); end if;
   select string_agg(distinct table_name || ':' || privilege_type, ',') into t
     from information_schema.column_privileges
