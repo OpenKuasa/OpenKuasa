@@ -37,7 +37,7 @@ begin
     declare i uuid; n uuid;
     begin
       i := public.finance_save_invoice(o, jsonb_build_object('customer_id', c, 'invoice_date', date '2026-09-01', 'due_date', date '2026-10-01'), lines);
-      -- finance_save_invoice leaves tax_type out; the line form sets it on the draft line, as here.
+      -- finance_save_invoice leaves tax_type out, so it is set on the draft line here.
       update public.finance_invoice_lines l set tax_type = e->>'tax_type'
         from jsonb_array_elements(lines) e
        where l.invoice_id = i and l.description = e->>'description' and e ? 'tax_type';
