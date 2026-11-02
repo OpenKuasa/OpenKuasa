@@ -155,3 +155,28 @@ describe('credit note writes', () => {
     expect(logged).toHaveBeenCalled();
   });
 });
+
+describe('voiding a credit note on a return already marked filed', () => {
+  // The database refuses it (finance_credit_note_void_filed_guard, FIN74) and words the sentence itself.
+  const FILED =
+    'This credit note is on the 1 Sep – 31 Oct 2026 service tax return, which is marked filed. If the credit note should never have been issued, take the filed mark off the return, void the credit note, and file an amended return (Pindaan). A credit taken back in a later period is a debit note, which Bendahara does not issue yet.';
+
+  it('shows the database’s sentence, which names the period and the way out', async () => {
+    const { ctx, calls } = fakeFinance({ data: null, error: { code: 'FIN74', message: FILED } });
+    expect(await voidCreditNote(ctx, { id: ID })).toEqual({ ok: false, error: FILED });
+    // One write, no reads before it: the check lives in the database, so nothing can slip between them.
+    expect(calls.map((c) => c.op)).toEqual(['update']);
+    expect(logged).not.toHaveBeenCalled();
+  });
+
+  it('falls back to the plain failure when the refusal comes with no sentence', async () => {
+    const { ctx } = fakeFinance({ data: null, error: { code: 'FIN74', message: '' } });
+    expect(await voidCreditNote(ctx, { id: ID })).toEqual({ ok: false, error: 'That change could not be saved. Please try again.' });
+    expect(logged).toHaveBeenCalled();
+  });
+
+  it('never passes on the text of any other database error', async () => {
+    const { ctx } = fakeFinance({ data: null, error: { code: 'XX000', message: 'internal detail' } });
+    expect(await voidCreditNote(ctx, { id: ID })).toEqual({ ok: false, error: 'That change could not be saved. Please try again.' });
+  });
+});
