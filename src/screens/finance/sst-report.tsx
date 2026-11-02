@@ -104,8 +104,8 @@ const shown = (l: SstFormLine) => ({
 const lines = (n: number) => (n === 1 ? '1 line' : `${n} lines`);
 
 /**
- * The "Not on the form" notes of a return: lines with no form item, tax a voided credit note puts back up, and an
- * item 14 below zero.
+ * The "Not on the form" notes of a return: lines with no form item, lines with no tax type, and an item 14 below
+ * zero.
  */
 function notesOf(ret: SstReturn): string[] {
   const notes: string[] = [];
@@ -114,18 +114,13 @@ function notesOf(ret: SstReturn): string[] {
     const found = `${lines(ret.offForm.count)} (${rm(ret.offForm.value)})`;
     notes.push(
       ret.type === 'sales'
-        ? `Not on the form: ${found} ${one(ret.offForm.count) ? 'is' : 'are'} at a rate with no item on this return. Either the rate is wrong, or it is a Part C (item 17) good, which this return does not count yet: a Schedule 2 good taxed per litre, per kilogram, or at a rate other than 5% or 10%. Add it on the form.`
+        ? `Not on the form: ${found} ${one(ret.offForm.count) ? 'is' : 'are'} at a rate with no item on this return. If the rate or tax type is wrong, fix it before you file. If it is a Part C (item 17) good, a Schedule 2 good taxed at a rate other than 5% or 10%, add it on the form yourself: this return does not count Part C yet.`
         : `Not on the form: ${found} ${one(ret.offForm.count) ? 'is' : 'are'} at a rate with no item on this return. Either the rate is wrong or the line needs another tax type. Fix it before you file.`,
     );
   }
   if (ret.untyped.count > 0) {
     notes.push(
       `Not on the form: ${lines(ret.untyped.count)} (${rm(ret.untyped.value)}) ${one(ret.untyped.count) ? 'has' : 'have'} no SST tax type. Set one before you file.`,
-    );
-  }
-  if (ret.creditReversed > 0) {
-    notes.push(
-      `Not on the form: 13(a) is held at 0 because a credit note counted in an earlier return was voided this period. ${rm(ret.creditReversed)} of tax goes back up: add it in this period's B1 and item 12 as a debit note.`,
     );
   }
   if (ret.item14 < 0) {
@@ -287,8 +282,10 @@ export function SstReturnBody({ ret, settings, companyName }: { ret: SstReturn; 
         icon={ShieldCheck}
         className="col-span-2 md:col-span-12"
       >
-        <p className="mb-1 text-sm font-medium">Item 18: sales of taxable goods / taxable services</p>
-        <p className="text-sm text-muted-foreground">Part D is worked out once invoice lines can carry an exemption reason.</p>
+        <p className="text-sm text-muted-foreground">
+          {service ? 'Part D is' : 'Item 18 (sales of taxable goods / taxable services) is'} worked out once invoice lines can carry
+          an exemption reason.
+        </p>
       </BentoCard>
     </>
   );

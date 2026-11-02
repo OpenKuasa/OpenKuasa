@@ -125,7 +125,7 @@ describe('the return body', () => {
     );
   });
 
-  it('prints the B1 titles and columns, and Part D with item 18, as the form does', () => {
+  it('prints the B1 titles and columns, and the Part D title, as the form does', () => {
     const invoiceBasis = { ...settings, service_tax_basis: 'invoice' as const };
     const service = textOf(
       renderToStaticMarkup(<SstReturnBody ret={buildSstReturn('service', period, [], [])} settings={invoiceBasis} companyName="Rimba" />),
@@ -134,7 +134,6 @@ describe('the return body', () => {
     expect(service).toContain('Value of free services');
     expect(service).not.toContain('Own use or free');
     expect(service).toContain('Sales / services exempted from tax / non-taxable service');
-    expect(service).toContain('Item 18: sales of taxable goods / taxable services');
 
     const sales = textOf(
       renderToStaticMarkup(<SstReturnBody ret={buildSstReturn('sales', period, [], [])} settings={invoiceBasis} companyName="Rimba" />),
@@ -172,7 +171,10 @@ describe('the return body', () => {
       ),
     );
     expect(sales).toContain('Part C (item 17)');
-    expect(sales).toContain('Add it on the form');
+    // A mistyped rate is the likelier cause, so the fix comes first; per-litre or per-kg rates cannot be on a line.
+    expect(sales).toContain('If the rate or tax type is wrong, fix it before you file.');
+    expect(sales).toContain('add it on the form yourself');
+    expect(sales).not.toContain('per litre');
 
     const service = textOf(
       renderToStaticMarkup(
@@ -187,7 +189,7 @@ describe('the return body', () => {
     expect(service).not.toContain('Part C');
   });
 
-  it('carries a voided credit note in a note, with 13(a) held at 0', () => {
+  it('has no note for a credit note voided after its period: it counts in no return', () => {
     const invoiceBasis = { ...settings, service_tax_basis: 'invoice' as const };
     const nov = sstPeriodFor('2026-11-10', 9);
     const ret = buildSstReturn('service', nov, [], [
@@ -202,9 +204,18 @@ describe('the return body', () => {
       },
     ]);
     const body = textOf(renderToStaticMarkup(<SstReturnBody ret={ret} settings={invoiceBasis} companyName="Rimba" />));
-    expect(body).toContain('13(a) is held at 0');
-    expect(body).toContain('RM 80.00');
-    expect(body).toContain('as a debit note');
-    expect(body).not.toContain('13(a) is below zero');
+    expect(body).not.toContain('debit note');
+    expect(body).not.toContain('13(a) is');
+    expect(ret.item14).toBe(0);
+  });
+
+  it('names item 18 on a sales return only, and never as a line with no figure', () => {
+    const invoiceBasis = { ...settings, service_tax_basis: 'invoice' as const };
+    const period = sstPeriodFor('2026-09-10', 9);
+    const sales = textOf(renderToStaticMarkup(<SstReturnBody ret={buildSstReturn('sales', period, [], [])} settings={invoiceBasis} companyName="Rimba" />));
+    expect(sales).toContain('Item 18 (sales of taxable goods / taxable services) is worked out once');
+    const service = textOf(renderToStaticMarkup(<SstReturnBody ret={buildSstReturn('service', period, [], [])} settings={invoiceBasis} companyName="Rimba" />));
+    expect(service).not.toContain('Item 18');
+    expect(service).toContain('Part D is worked out once');
   });
 });

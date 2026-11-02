@@ -8,9 +8,9 @@
  * Periods: an invoice line counts by its invoice date, a credit note by its credit date. A voided invoice
  * counts nowhere, whenever it was voided: the database refuses a void while the invoice's return is marked
  * filed (FIN71), so a void is either a correction before filing or part of an amended return (Pindaan), and
- * a later sale that falls through is a credit note. A credit note voided in the period it was dated in counts
- * nowhere; one voided in a later period counts in its own period, and the void period's 13(a) goes down by its
- * tax, held at 0 as the form has it, with the rest reported as `creditReversed` to add back as a debit note.
+ * a later sale that falls through is a credit note. A voided credit note counts nowhere too, for the same reason:
+ * the database refuses its void while its return is marked filed (FIN74). So 13(a) is the tax of the live credit
+ * notes dated in the period, and never below zero.
  *
  * Typed-in figures (11(e) cards, 13(b), 13(c), 13(d), 13A) come in as a fifth argument: 11(e) joins item 12, the rest come off item 14.
  */
@@ -60,12 +60,6 @@ export type SstReturn = {
   item14: number;
   offForm: { count: number; value: number; tax: number };
   untyped: { count: number; value: number };
-  /**
-   * Tax of a credit note counted in an earlier return and voided in this one, in ringgit, where it is more than
-   * the tax this period's own credit notes deduct. The form takes 0 for 13(a), never a negative, so this amount
-   * goes back up as a debit note and the screen says so.
-   */
-  creditReversed: number;
 };
 
 /** The form's rate items per return: a line of the type at any other rate is off the form. */
@@ -113,20 +107,6 @@ const toSen = (amount: number) => Math.round(amount * 100);
 const fromSen = (sen: number) => sen / 100;
 
 const within = (date: string, p: SstPeriod) => date >= p.start && date <= p.end;
-
-/**
- * How a document dated `date` stands in period p: 'counts' when it belongs to p's return as normal,
- * 'reversed' when it was dated before p and voided within p, else null. A void with no void date is treated
- * as voided where it was dated, so counts nowhere.
- */
-function standing(date: string, isVoid: boolean, voidedOn: string | null, p: SstPeriod): 'counts' | 'reversed' | null {
-  if (within(date, p)) {
-    if (!isVoid) return 'counts';
-    return voidedOn !== null && voidedOn > p.end ? 'counts' : null;
-  }
-  if (isVoid && voidedOn !== null && date < p.start && within(voidedOn, p)) return 'reversed';
-  return null;
-}
 
 /** A credit note's share of its invoice's tax of one type, in sen: amount × tax ÷ invoice total, rounded. */
 function creditTaxSen(c: SstCreditRow, type: SstReturnType): number {
@@ -187,9 +167,9 @@ export function buildSstReturn(
   }
 
   for (const c of credits) {
-    const where = standing(c.credit_date, c.status === 'void', c.voided_on, period);
-    if (where === 'counts') creditNotesSen += creditTaxSen(c, type);
-    else if (where === 'reversed') creditNotesSen -= creditTaxSen(c, type);
+    // A voided credit note counts nowhere (see the top of this file).
+    if (c.status === 'void' || !within(c.credit_date, period)) continue;
+    creditNotesSen += creditTaxSen(c, type);
   }
 
   const b1 = [...groups.entries()]
@@ -213,10 +193,7 @@ export function buildSstReturn(
       ? { '13(c)': figures.deduction13c, '13(d)': figures.badDebt13d }
       : { '13(b)': figures.deduction13b, '13A': figures.adjustment13a, '13(d)': figures.badDebt13d };
   const typed = TYPED_DEDUCTIONS[type].map((d) => ({ ...d, tax: fromSen(toSen(typedAmount[d.item] ?? 0)) }));
-  // The form takes 0 for 13(a): a voided credit note beyond what this period deducts goes back up as a debit note.
-  const creditReversedSen = creditNotesSen < 0 ? -creditNotesSen : 0;
-  const heldCreditSen = creditNotesSen < 0 ? 0 : creditNotesSen;
-  const item14Sen = item12Sen - heldCreditSen - typed.reduce((s, d) => s + toSen(d.tax), 0);
+  const item14Sen = item12Sen - creditNotesSen - typed.reduce((s, d) => s + toSen(d.tax), 0);
 
   const b2: SstFormLine[] = items.map((i, n) => ({ item: i.item, label: i.label, value: fromSen(b2Sen[n].value), tax: fromSen(b2Sen[n].tax) }));
   if (type === 'service') b2.push({ ...CARD_ITEM, value: cards > 0 ? cards : null, tax: fromSen(cardsTaxSen) });
@@ -228,11 +205,10 @@ export function buildSstReturn(
     b1Total: fromSen(b1TotalSen),
     b2,
     item12: fromSen(item12Sen),
-    deductions: [{ ...CREDIT_NOTES, value: null, tax: fromSen(heldCreditSen) }, ...typed],
+    deductions: [{ ...CREDIT_NOTES, value: null, tax: fromSen(creditNotesSen) }, ...typed],
     item14: fromSen(item14Sen),
     offForm: { count: offForm.count, value: fromSen(offForm.value), tax: fromSen(offForm.tax) },
     untyped: { count: untyped.count, value: fromSen(untyped.value) },
-    creditReversed: fromSen(creditReversedSen),
   };
 }
 

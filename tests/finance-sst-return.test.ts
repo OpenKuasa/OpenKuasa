@@ -210,7 +210,7 @@ describe('buildSstReturn: voids', () => {
     expect(nov.offForm).toEqual({ count: 0, value: 0, tax: 0 });
   });
 
-  it('holds 13(a) at 0 when a credit note counted earlier is voided, and names that tax as a debit note', () => {
+  it('leaves a credit note voided after its period out of every return, as a voided invoice', () => {
     const c = credit({
       credit_date: '2026-09-15',
       status: 'void',
@@ -219,15 +219,15 @@ describe('buildSstReturn: voids', () => {
       invoice_total_myr: 10800,
       invoice_sst_myr: { service: 800, sales: 0 },
     });
-    expect(item(buildSstReturn('service', SEP_OCT, [], [c]).deductions, '13(a)')?.tax).toBe(80);
-    // The form takes 0, not a negative: the tax goes back up as a debit note instead.
+    // The database refuses the void while Sep-Oct is marked filed (FIN74), so this void happened before filing,
+    // or with the mark taken off for an amended return: Sep-Oct deducts nothing for it, and Nov-Dec has nothing to undo.
+    expect(item(buildSstReturn('service', SEP_OCT, [], [c]).deductions, '13(a)')?.tax).toBe(0);
     const nov = buildSstReturn('service', NOV_DEC, [], [c]);
     expect(item(nov.deductions, '13(a)')?.tax).toBe(0);
     expect(nov.item14).toBe(0);
-    expect(nov.creditReversed).toBe(80);
   });
 
-  it('has nothing to add back when this period own credit notes cover the voided one', () => {
+  it('deducts only the live credit notes of the period in 13(a), and item 14 is 12 less them', () => {
     const voided = credit({
       credit_date: '2026-09-15',
       status: 'void',
@@ -236,16 +236,12 @@ describe('buildSstReturn: voids', () => {
       invoice_total_myr: 10800,
       invoice_sst_myr: { service: 800, sales: 0 },
     });
-    const issued = credit({ credit_date: '2026-11-05', amount_myr: 1080, invoice_total_myr: 10800, invoice_sst_myr: { service: 800, sales: 0 } });
-    const nov = buildSstReturn('service', NOV_DEC, [], [voided, issued]);
-    expect(item(nov.deductions, '13(a)')?.tax).toBe(0);
-    expect(nov.creditReversed).toBe(0);
-
-    // Part of the void is covered: only the shortfall goes back up.
-    const small = credit({ credit_date: '2026-11-05', amount_myr: 540, invoice_total_myr: 10800, invoice_sst_myr: { service: 800, sales: 0 } });
-    const part = buildSstReturn('service', NOV_DEC, [], [voided, small]);
-    expect(item(part.deductions, '13(a)')?.tax).toBe(0);
-    expect(part.creditReversed).toBe(40);
+    const issued = credit({ credit_date: '2026-11-05', amount_myr: 1620, invoice_total_myr: 10800, invoice_sst_myr: { service: 800, sales: 0 } });
+    const sale = line({ invoice_date: '2026-11-10', amount_myr: 2000, sst_amount_myr: 160, sst_rate: 8 });
+    const nov = buildSstReturn('service', NOV_DEC, [sale], [voided, issued]);
+    expect(nov.item12).toBe(160);
+    expect(item(nov.deductions, '13(a)')?.tax).toBe(120);
+    expect(nov.item14).toBe(40);
   });
 
   it('leaves out a credit note voided in the period it was issued in', () => {
