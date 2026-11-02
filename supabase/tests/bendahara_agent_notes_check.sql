@@ -165,6 +165,17 @@ begin
      or has_table_privilege('service_role', 'public.finance_agent_notes', 'select') then
     fails := fails || 'service_role may read a note''s body or label'::text;
   end if;
+  -- Effective privileges include grants to PUBLIC, which do not appear under a
+  -- service_role-only aclexplode filter.
+  select string_agg(v.tbl, ',') into t
+    from (values
+      ('finance_settings'),
+      ('finance_sst_return_figures'),
+      ('finance_sst_settings'),
+      ('finance_sst_returns')
+    ) v(tbl)
+   where has_table_privilege('service_role', ('public.' || v.tbl)::regclass, 'select,insert,update,delete,truncate');
+  if t is not null then fails := fails || format('service_role holds effective table privileges on finance relations %s', t); end if;
 
   -- ---- people and workspaces: a test address, so delete_test_org may delete them -----------------------------------
   insert into auth.users (id, instance_id, aud, role, email, encrypted_password,

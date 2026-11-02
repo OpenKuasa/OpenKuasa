@@ -28,6 +28,18 @@ describe('the Kasturi agent worker may read what it scans', () => {
     expect([...granted('crm_contacts')]).toEqual(['company']);
   });
 
+  test('removes fresh-project table grants before adding the column grants', () => {
+    const revokeAt = sql.indexOf('revoke all on');
+    const firstGrantAt = sql.indexOf('grant select (');
+
+    expect(revokeAt).toBeGreaterThan(-1);
+    expect(firstGrantAt).toBeGreaterThan(revokeAt);
+    for (const table of ['public.crm_deals', 'public.crm_activities', 'public.crm_notes']) {
+      expect(sql.slice(revokeAt, firstGrantAt)).toContain(table);
+    }
+    expect(sql.slice(revokeAt, firstGrantAt)).toContain('from service_role;');
+  });
+
   test('crm_activities: no body', () => {
     expect([...granted('crm_activities')].sort()).toEqual(
       ['id', 'org_id', 'title', 'contact_id', 'deal_id', 'type', 'due_at', 'completed_at', 'created_at'].sort(),
@@ -40,9 +52,14 @@ describe('the Kasturi agent worker may read what it scans', () => {
     expect(notes.has('body')).toBe(false);
   });
 
-  test('never emails or phones, and grants nothing else', () => {
-    expect(sql).not.toMatch(/\b(email|phone|body|notes)\b/);
+  test('grants no private columns or write privileges', () => {
+    const grants = [...sql.matchAll(/grant select \(([^)]+)\)/g)].map((match) => match[1]).join(',');
+
+    expect(grants).not.toMatch(/\b(email|phone|body|notes)\b/);
     expect(sql.match(/\bgrant\b/g)).toHaveLength(4);
-    expect(sql).not.toMatch(/\b(insert|update|delete|all)\b/);
+    expect(sql).not.toMatch(/grant\s+(insert|update|delete|all)\b/);
+    expect(sql).toContain("has_table_privilege('service_role', ('public.' || r.tbl)::regclass, 'select')");
+    expect(sql).toContain("('crm_contacts', 'email')");
+    expect(sql).toContain("('crm_notes', 'body')");
   });
 });

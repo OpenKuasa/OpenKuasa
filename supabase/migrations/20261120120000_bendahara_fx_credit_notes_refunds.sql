@@ -742,7 +742,7 @@ begin
    where org_id = target_org and id = tid;
   return tid;
 end $$;
-revoke all on function public.finance_record_refund(uuid, jsonb) from public, anon;
+revoke all on function public.finance_record_refund(uuid, jsonb) from public, anon, service_role;
 grant execute on function public.finance_record_refund(uuid, jsonb) to authenticated;
 
 -- ============================================================================
