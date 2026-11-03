@@ -25,11 +25,15 @@
 --         foreign RFQ with no rate has no cost (it cannot be compared).
 --   * The rule for a line: a reason is needed when another RFQ's comparable
 --     price for the same row is strictly lower (a tie needs none; a line nobody
---     else priced needs none), or, in a group quoted in several currencies,
---     when the line has no cost. The rule for a whole RFQ (Make purchase
---     order): another quoted RFQ that asks for exactly the same rows is
---     at the same quantities is strictly lower in total (ringgit when the quotes are in several
---     currencies, to the sen), or, in such a group, this RFQ has no ringgit total.
+--     else quoted needs none), or, in a group quoted in several currencies,
+--     when the line has no cost and another RFQ quoted the same row. The rule
+--     for a whole RFQ (Make purchase order): another quoted RFQ is strictly
+--     lower, to the sen, on the rows both ask for at the same quantities: in
+--     total when it asks for exactly the same rows (ringgit when the quotes
+--     are in several currencies), else summed over the rows they share; or, in
+--     a group quoted in several currencies, this RFQ has no ringgit total and
+--     another RFQ quoted one of its rows. So a quote that asks for one more
+--     row cannot hide a lower price on the rows both quoted.
 --   * private.finance_make_rfq_order: what Make purchase order always did,
 --     taking the lines to copy (all when null) and the reason. Both callers use it.
 --   * public.finance_award_rfq_lines(org, awards): the split. awards is
@@ -226,9 +230,11 @@ $$;
 revoke all on function private.finance_rfq_comparison(uuid, uuid) from public, anon, service_role;
 grant execute on function private.finance_rfq_comparison(uuid, uuid) to authenticated;
 
--- Make purchase order from this RFQ: does it need a reason? Another quoted RFQ of the group that asks for exactly
--- the same rows is strictly lower in total; or the quotes are in several currencies and this one has no ringgit total.
--- A quote asking for other rows, or for other quantities of them, is not compared.
+-- Make purchase order from this RFQ: does it need a reason? Another quoted RFQ of the group is strictly lower on the
+-- rows both ask for at the same quantities: in total when it asks for exactly the same rows, else summed over the
+-- rows they share (each line's cost x quantity, rounded to the sen; a line with no cost is left out on both sides).
+-- Or the quotes are in several currencies, this one has no ringgit total, and another RFQ quoted one of its rows.
+-- A quote that shares no row at the same quantity is not compared.
 create function private.finance_rfq_total_needs_reason(target_org uuid, target_rfq uuid)
 returns boolean
 language sql
@@ -236,12 +242,15 @@ stable
 security invoker
 set search_path = ''
 as $$
-  with sets as (
-    select c.rfq_id, array_agg(c.row_key || '@' || c.quantity::text order by c.row_key) as keys, bool_or(c.mixed) as mixed
-    from private.finance_rfq_comparison(
+  with c as materialized (
+    select * from private.finance_rfq_comparison(
       target_org,
       (select coalesce(r.source_rfq_id, r.id) from public.finance_rfqs r where r.org_id = target_org and r.id = target_rfq)
-    ) c
+    )
+  ),
+  sets as (
+    select c.rfq_id, array_agg(c.row_key || '@' || c.quantity::text order by c.row_key) as keys, bool_or(c.mixed) as mixed
+    from c
     group by c.rfq_id
   ),
   figs as (
@@ -252,10 +261,23 @@ as $$
                 else t.total_myr end as fig
     from sets s
     join public.finance_rfq_totals t on t.org_id = target_org and t.id = s.rfq_id
+  ),
+  -- Each other RFQ against this one, over the rows both ask for at the same quantities and both priced.
+  shared as (
+    select o.rfq_id,
+           round(sum(o.quantity * o.cost) / 100, 2) as theirs,
+           round(sum(f.quantity * f.cost) / 100, 2) as ours
+    from c f
+    join c o on o.row_key = f.row_key and o.quantity = f.quantity and o.rfq_id <> f.rfq_id
+    where f.rfq_id = target_rfq and f.cost is not null and o.cost is not null
+    group by o.rfq_id
   )
   select coalesce((
-    select (f.mixed and f.fig is null)
+    select (f.mixed and f.fig is null
+            and exists (select 1 from c x join c y on y.row_key = x.row_key and y.rfq_id <> x.rfq_id where x.rfq_id = f.rfq_id))
            or exists (select 1 from figs o where o.rfq_id <> f.rfq_id and o.keys = f.keys and o.fig < f.fig)
+           or exists (select 1 from figs o join shared sh on sh.rfq_id = o.rfq_id
+                      where o.rfq_id <> f.rfq_id and o.keys <> f.keys and sh.theirs < sh.ours)
     from figs f
     where f.rfq_id = target_rfq
   ), false);
@@ -443,8 +465,8 @@ begin
     raise exception 'a line can go to only one supplier' using errcode = 'FIN76';
   end if;
 
-  -- An order needs its reason when a line of it is not comparable (the quotes are in several currencies and its RFQ has
-  -- no rate), or another supplier's price for the same row is strictly lower.
+  -- An order needs its reason when a line of it is not comparable (the quotes are in several currencies, its RFQ has
+  -- no rate, and another RFQ quoted the same row), or another supplier's price for the same row is strictly lower.
   if exists (
     with cmp as materialized (select * from private.finance_rfq_comparison(target_org, groups[1]))
     select 1
@@ -453,7 +475,8 @@ begin
       and exists (
         select 1 from cmp c
         where c.rfq_id = p.rfq_id and c.line_id = any (p.line_ids)
-          and ((c.mixed and c.cost is null)
+          and ((c.mixed and c.cost is null
+                and exists (select 1 from cmp o where o.row_key = c.row_key and o.rfq_id <> c.rfq_id))
                or exists (select 1 from cmp o where o.row_key = c.row_key and o.rfq_id <> c.rfq_id and o.cost < c.cost))
       )
   ) then

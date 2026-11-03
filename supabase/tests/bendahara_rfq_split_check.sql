@@ -28,6 +28,8 @@ declare
   rc1 uuid; rc2 uuid; rt1 uuid; rt2 uuid; rs1 uuid;
   rn1 uuid; rn2 uuid; rn3 uuid; rn4 uuid;
   re1 uuid; re2 uuid; re3 uuid; rf1 uuid; rf2 uuid; rp1 uuid; rp2 uuid;
+  -- W: a copy asks for one more row. U: a dollar quote with no rate, and a ringgit quote for another row.
+  rw1 uuid; rw2 uuid; ru1 uuid; ru2 uuid;
   made uuid[];
   po uuid;
   n integer;
@@ -244,7 +246,8 @@ begin
   perform public.bendahara_split_clear(org);
 
   -- ==== 5: Make purchase order, whole RFQ ====================================================
-  -- Totals: R1 830.00, R2 852.00 (702 for the press), R3 954.00 but it asks for a fourth row, so it is compared with nobody.
+  -- Totals: R1 830.00, R2 852.00 (702 for the press), R3 954.00. R3 asks for a fourth row, so it is compared with the
+  -- others on the three rows they share: 945.00 against R1's 830.00.
   fails := fails || public.bendahara_split_try('5: R2 costs more than R1 for the same rows', 'FIN75',
     format('select public.finance_convert_rfq(%L, %L)', org, ra2));
   if public.bendahara_split_orders(ra2) <> 0 then fails := fails || '5: a refused Make purchase order left an order'::text; end if;
@@ -255,8 +258,10 @@ begin
   select award_reason into t from public.finance_purchase_orders where rfq_id = ra2 and status = 'draft';
   if t is distinct from 'its delivery is next day' then fails := fails || format('5: the order reads %L', t); end if;
   perform public.bendahara_split_clear(org);
-  fails := fails || public.bendahara_split_try('5: R3 asks for other rows, so it is not compared', 'ok',
+  fails := fails || public.bendahara_split_try('5: R3 asks for one more row, and costs more on the rows it shares', 'FIN75',
     format('select public.finance_convert_rfq(%L, %L)', org, ra3));
+  fails := fails || public.bendahara_split_try('5: R3 with a reason', 'ok',
+    format('select public.finance_convert_rfq(%L, %L, %L)', org, ra3, 'one order for all four'));
   perform public.bendahara_split_clear(org);
   fails := fails || public.bendahara_split_try('5: R1 is the lowest, called with two arguments', 'ok',
     format('select public.finance_convert_rfq(%L, %L)', org, ra1));
@@ -279,6 +284,21 @@ begin
   select count(*) into n from public.finance_purchase_order_lines l join public.finance_purchase_orders p on p.id = l.purchase_order_id
    where p.rfq_id = ra1 and p.status = 'draft';
   if n <> 3 then fails := fails || format('5: the whole-RFQ order has %s lines', n); end if;
+  perform public.bendahara_split_clear(org);
+
+  -- ==== 5b: one more row does not hide a lower price (fixture W) ==============================
+  -- W1 asks for Nails and Screws at 10.00 each; its copy W2 asks for both and Glue too, at 5.00 each.
+  rw1 := public.bendahara_split_rfq(org, s1, 'MYR', null, null,
+    '[{"description":"Nails","quantity":1,"sst_rate":0},{"description":"Screws","quantity":1,"sst_rate":0}]', array[10.00, 10.00]);
+  rw2 := public.bendahara_split_rfq(org, s2, 'MYR', null, rw1,
+    '[{"description":"Nails","quantity":1,"sst_rate":0},{"description":"Screws","quantity":1,"sst_rate":0},{"description":"Glue","quantity":1,"sst_rate":0}]',
+    array[5.00, 5.00, 5.00]);
+  fails := fails || public.bendahara_split_try('5b: W1 as a whole costs more on the rows W2 also quoted', 'FIN75',
+    format('select public.finance_convert_rfq(%L, %L)', org, rw1));
+  fails := fails || public.bendahara_split_try('5b: the same two lines of W1, awarded', 'FIN75',
+    format('select public.finance_award_rfq_lines(%L, %L)', org, jsonb_build_array(public.bendahara_split_aw(rw1, array[1, 2]))));
+  fails := fails || public.bendahara_split_try('5b: W2 as a whole is lower on the rows they share', 'ok',
+    format('select public.finance_convert_rfq(%L, %L)', org, rw2));
   perform public.bendahara_split_clear(org);
 
   -- ==== 6: two lines for one item (fixture C) ===============================================
@@ -349,6 +369,21 @@ begin
     format('select public.finance_award_rfq_lines(%L, %L)', org, jsonb_build_array(public.bendahara_split_aw(rf2, array[1]))));
   fails := fails || public.bendahara_split_try('8: one currency, whole RFQ, higher', 'FIN75', format('select public.finance_convert_rfq(%L, %L)', org, rf2));
   fails := fails || public.bendahara_split_try('8: one currency, whole RFQ, lower', 'ok', format('select public.finance_convert_rfq(%L, %L)', org, rf1));
+  perform public.bendahara_split_clear(org);
+
+  -- ==== 8b: no rate, but nobody else quoted the row (fixture U) ================================
+  -- U1 in dollars with no rate asks for Drill; U2 in ringgit asks for Saw. The group is in two currencies, but nobody
+  -- else quoted Drill, so there is nothing to be lower than.
+  ru1 := public.bendahara_split_rfq(org, s4, 'USD', null, null, '[{"description":"Drill","quantity":1,"sst_rate":0}]', array[50.00]);
+  ru2 := public.bendahara_split_rfq(org, s1, 'MYR', null, ru1, '[{"description":"Saw","quantity":1,"sst_rate":0}]', array[500.00]);
+  fails := fails || public.bendahara_split_try('8b: a line with no rate that nobody else quoted', 'ok',
+    format('select public.finance_award_rfq_lines(%L, %L)', org, jsonb_build_array(public.bendahara_split_aw(ru1, array[1]))));
+  perform public.bendahara_split_clear(org);
+  fails := fails || public.bendahara_split_try('8b: a whole RFQ with no rate that shares no row', 'ok',
+    format('select public.finance_convert_rfq(%L, %L)', org, ru1));
+  perform public.bendahara_split_clear(org);
+  fails := fails || public.bendahara_split_try('8b: each to its own supplier', 'ok',
+    format('select public.finance_award_rfq_lines(%L, %L)', org, jsonb_build_array(public.bendahara_split_aw(ru1, array[1]), public.bendahara_split_aw(ru2, array[1]))));
   perform public.bendahara_split_clear(org);
 
   -- ==== 9: the same product worded differently (fixture P) ====================================

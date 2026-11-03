@@ -1954,10 +1954,14 @@ than one currency it is also multiplied by the RFQ's rate (ringgit is 1), and a 
 cannot be compared; with one currency the prices are compared as they are.
 
 - **A line** needs a reason when another RFQ's comparable cost for the same row is strictly lower, or, in a group quoted in several
-  currencies, when the line has no cost. A tie needs none, and neither does a line nobody else priced.
-- **A whole RFQ** (Make purchase order) needs a reason when another quoted RFQ that asks for exactly the same rows has a strictly
-  lower total (the ringgit total in a group quoted in several currencies, else the total, to the sen), or, in such a group, when
-  it has no ringgit total. A quote that asks for other rows is not compared, and an RFQ with no other quote needs none.
+  currencies, when the line has no cost and another RFQ quoted the same row. A tie needs none, and neither does a line nobody else
+  quoted.
+- **A whole RFQ** (Make purchase order) needs a reason when another quoted RFQ is strictly lower, to the sen, on the rows both ask
+  for at the same quantities: in total when it asks for exactly the same rows (the ringgit total in a group quoted in several
+  currencies, else the total), else summed over the rows they share (each line's cost times its quantity; a line with no cost is
+  left out on both sides). In a group quoted in several currencies it also needs one when it has no ringgit total and another RFQ
+  quoted one of its rows. So a quote that asks for one more row cannot hide a lower price on the rows both quoted. A quote that
+  shares no row at the same quantity is not compared, and an RFQ with no other quote needs none.
 
 **Calls.**
 
