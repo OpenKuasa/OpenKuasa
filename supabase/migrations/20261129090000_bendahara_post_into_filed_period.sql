@@ -13,18 +13,53 @@
 -- change, file Pindaan).
 --
 -- The period comes from the mark, never from the workspace's settings, so a
--- changed period start or a missing settings row cannot open a gap. The tax
--- kind of a line is read the way the return reads it (src/lib/finance/sst.ts,
--- taxTypeForRate): 5 and 10 are sales, 6 and 8 service, and a line with no type
--- takes its rate's type. A credit note has no lines, so its invoice's lines
--- decide what the note can deduct, as creditTaxSen does in
--- src/lib/finance/sst-return.ts.
+-- changed period start or a missing settings row cannot open a gap.
+--
+-- Which returns a document is on comes from one helper,
+-- private.finance_invoice_sst_kinds, read the way the return reads it
+-- (src/lib/finance/sst.ts taxTypeForRate, src/lib/finance/sst-return.ts): a line
+-- with no tax type takes its rate's type (5 and 10 sales, 6 and 8 service).
+--   * An invoice is on a return when it has a line at one of that return's form
+--     rates (service 6 or 8, sales 5 or 10). A line at another rate is reported
+--     beside the return, never on it.
+--   * A credit note has no lines: it deducts a share of every taxed line of its
+--     invoice whose type is the return's, at any rate (creditTaxSen), so a note
+--     against a service line at 7% is in 13(a) too.
+-- All four guards use it: posting (FIN72) and voiding (FIN71) an invoice, and
+-- issuing (FIN73) and voiding (FIN74) a credit note. The two void guards had
+-- their own copies (20261128092000, 20261128093000); they are replaced here with
+-- the same refusals, word for word, so the four cannot drift apart.
 --
 -- Error codes FIN72 and FIN73 are new; no code is reused. FIN74 was taken before
 -- them by 20261128093000_bendahara_credit_note_void_on_filed_return.sql, so the
--- codes are not in file order. That file keeps its own copy of the period
--- arithmetic because it is already applied in existing projects: lifting it into
--- this helper would reach fresh installs only.
+-- codes are not in file order.
+
+create function private.finance_invoice_sst_kinds(target_org uuid, target_invoice uuid, form_only boolean)
+returns text[]
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select array_agg(distinct t.kind order by t.kind)
+    from (
+      select coalesce(
+               l.tax_type,
+               case when l.sst_rate in (5, 10) then 'sales' when l.sst_rate in (6, 8) then 'service' end
+             ) as kind,
+             l.sst_rate
+        from public.finance_invoice_lines l
+       where l.org_id = target_org
+         and l.invoice_id = target_invoice
+         and l.sst_rate > 0
+    ) t
+   where t.kind in ('sales', 'service')
+     and (not form_only
+          or (t.kind = 'service' and t.sst_rate in (6, 8))
+          or (t.kind = 'sales' and t.sst_rate in (5, 10)));
+$$;
+
+revoke all on function private.finance_invoice_sst_kinds(uuid, uuid, boolean) from public, anon, authenticated, service_role;
 
 create function private.finance_filed_period_label(target_org uuid, doc_date date, kinds text[])
 returns text
@@ -83,17 +118,7 @@ begin
     return new;
   end if;
 
-  select array_agg(distinct t.kind) into kinds
-    from (
-      select case
-               when l.sst_rate in (6, 8) and coalesce(l.tax_type, 'service') = 'service' then 'service'
-               when l.sst_rate in (5, 10) and coalesce(l.tax_type, 'sales') = 'sales' then 'sales'
-             end as kind
-        from public.finance_invoice_lines l
-       where l.org_id = old.org_id
-         and l.invoice_id = old.id
-    ) t
-   where t.kind is not null;
+  kinds := private.finance_invoice_sst_kinds(old.org_id, old.id, true);
   if kinds is null then
     return new;
   end if;
@@ -128,19 +153,9 @@ begin
     return new;
   end if;
 
-  -- A credit note has no lines of its own: it deducts a share of the tax its
-  -- invoice carries, so only a type the invoice carries can be affected.
-  select array_agg(distinct t.kind) into kinds
-    from (
-      select case
-               when l.sst_rate in (6, 8) and coalesce(l.tax_type, 'service') = 'service' then 'service'
-               when l.sst_rate in (5, 10) and coalesce(l.tax_type, 'sales') = 'sales' then 'sales'
-             end as kind
-        from public.finance_invoice_lines l
-       where l.org_id = old.org_id
-         and l.invoice_id = old.invoice_id
-    ) t
-   where t.kind is not null;
+  -- A credit note has no lines of its own: it deducts a share of every taxed
+  -- line of its invoice, at any rate, so each type the invoice carries counts.
+  kinds := private.finance_invoice_sst_kinds(old.org_id, old.invoice_id, false);
   if kinds is null then
     return new;
   end if;
@@ -161,6 +176,53 @@ create trigger finance_credit_note_issue_filed_guard
   before update of status on public.finance_credit_notes
   for each row execute function private.finance_credit_note_issue_filed_guard();
 
+-- ---- the two void guards, on the same rule ------------------------------------------
+-- Same triggers, same codes, same sentences as 20261128092000 and 20261128093000.
+
+create or replace function private.finance_invoice_void_filed_guard()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  label text;
+begin
+  if not (old.status = 'posted' and new.status = 'void') then
+    return new;
+  end if;
+  label := private.finance_filed_period_label(old.org_id, old.invoice_date, private.finance_invoice_sst_kinds(old.org_id, old.id, true));
+  if label is null then
+    return new;
+  end if;
+  raise exception
+    'This invoice is on the % return, which is marked filed. Issue a credit note instead. If the invoice should never have been issued, take the filed mark off the return, void the invoice, and file an amended return (Pindaan).',
+    label
+    using errcode = 'FIN71';
+end $$;
+
+create or replace function private.finance_credit_note_void_filed_guard()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  label text;
+begin
+  if not (old.status = 'issued' and new.status = 'void') then
+    return new;
+  end if;
+  label := private.finance_filed_period_label(old.org_id, old.credit_date, private.finance_invoice_sst_kinds(old.org_id, old.invoice_id, false));
+  if label is null then
+    return new;
+  end if;
+  raise exception
+    'This credit note is on the % return, which is marked filed. If the credit note should never have been issued, take the filed mark off the return, void the credit note, and file an amended return (Pindaan). A credit taken back in a later period is a debit note, which Bendahara does not issue yet.',
+    label
+    using errcode = 'FIN74';
+end $$;
+
 -- ---- self-check -----------------------------------------------------------------
 do $$
 begin
@@ -178,5 +240,8 @@ begin
   end if;
   if has_function_privilege('authenticated', 'private.finance_filed_period_label(uuid, date, text[])', 'execute') then
     raise exception 'authenticated can call finance_filed_period_label directly';
+  end if;
+  if has_function_privilege('authenticated', 'private.finance_invoice_sst_kinds(uuid, uuid, boolean)', 'execute') then
+    raise exception 'authenticated can call finance_invoice_sst_kinds directly';
   end if;
 end $$;

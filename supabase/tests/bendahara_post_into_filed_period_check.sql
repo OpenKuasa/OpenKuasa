@@ -16,6 +16,7 @@ declare
   cust uuid;
   inv uuid;
   note uuid;
+  prod uuid;
   got text;
   fails text[] := '{}';
   sep text := 'This invoice is dated in the 1 Sep – 31 Oct 2026 service tax return, which is marked filed. Date it in the current period, or take the filed mark off the return and file an amended return (Pindaan).';
@@ -197,6 +198,44 @@ begin
   got := public.bendahara_filed_void((select id from public.finance_invoices where org_id = org and invoice_date = '2026-10-03'));
   if got not like 'FIN71: This invoice is on the 1 Sep – 31 Oct 2026 service tax return,%' then
     fails := fails || format('14: the void guard answered %s', got);
+  end if;
+
+  -- ---- 15: a line typed by its product at a rate with no form item ===================
+  -- A product's type stands at any rate (finance_invoice_line_tax), so a 'service'
+  -- product at 7% gives its line tax_type 'service'. The line is beside the return,
+  -- never on it, so the invoice posts and voids freely; but a credit note against it
+  -- deducts a share of that tax in 13(a) (creditTaxSen), so it cannot be issued, or
+  -- voided, inside the filed period.
+  insert into public.finance_products (org_id, name, type, price, sst_rate, tax_type)
+    values (org, 'Typed 7%', 'service', 100, 7, 'service') returning id into prod;
+  inv := public.bendahara_filed_draft(org, cust, '2026-09-11',
+    jsonb_build_array(jsonb_build_object('product_id', prod, 'description', 'Typed 7%', 'quantity', 1, 'unit_price', 100, 'sst_rate', 7)));
+  select tax_type into got from public.finance_invoice_lines where invoice_id = inv;
+  if got is distinct from 'service' then fails := fails || format('15: the product''s line was stored as %s', got); end if;
+  got := public.bendahara_filed_post(inv);
+  if got <> 'ok' then fails := fails || format('15: a typed 7%% invoice answered %s on posting', got); end if;
+  note := public.bendahara_filed_note(org, inv, '2026-10-17', 10);
+  got := public.bendahara_filed_issue(org, note);
+  if got is distinct from 'FIN73: ' || nsep then fails := fails || format('15: its credit note answered %s', got); end if;
+  -- A second one with no credit note against it (FIN12 holds a void back while one exists).
+  inv := public.bendahara_filed_draft(org, cust, '2026-09-13',
+    jsonb_build_array(jsonb_build_object('product_id', prod, 'description', 'Typed 7%', 'quantity', 1, 'unit_price', 100, 'sst_rate', 7)));
+  perform public.bendahara_filed_post(inv);
+  got := public.bendahara_filed_void(inv);
+  if got <> 'ok' then fails := fails || format('15: voiding a typed 7%% invoice answered %s', got); end if;
+
+  -- ---- 16: a 'sales' product at 6% is sales tax, never service =========================
+  insert into public.finance_products (org_id, name, price, sst_rate, tax_type)
+    values (org, 'Sales at 6%', 100, 6, 'sales') returning id into prod;
+  inv := public.bendahara_filed_draft(org, cust, '2026-09-12',
+    jsonb_build_array(jsonb_build_object('product_id', prod, 'description', 'Sales at 6%', 'quantity', 1, 'unit_price', 100, 'sst_rate', 6)));
+  got := public.bendahara_filed_post(inv);
+  if got <> 'ok' then fails := fails || format('16: a sales line at 6%% answered %s on posting', got); end if;
+  -- Both Sep-Oct returns are marked (case 9); the note is on the sales one only.
+  note := public.bendahara_filed_note(org, inv, '2026-10-18', 10);
+  got := public.bendahara_filed_issue(org, note);
+  if got not like 'FIN73: This credit note is dated in the 1 Sep – 31 Oct 2026 sales tax return,%' then
+    fails := fails || format('16: its credit note answered %s', got);
   end if;
 
   exception when others then
