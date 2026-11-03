@@ -71,6 +71,14 @@ export function fakeFinance(answer: FinanceAnswer | ((call: FinanceCall) => Fina
           call.filters[`${column} gt`] = value;
           return builder;
         },
+        gte(column: string, value: unknown) {
+          call.filters[`${column} gte`] = value;
+          return builder;
+        },
+        lte(column: string, value: unknown) {
+          call.filters[`${column} lte`] = value;
+          return builder;
+        },
         in(column: string, values: unknown[]) {
           call.filters[`${column} in`] = values;
           return builder;

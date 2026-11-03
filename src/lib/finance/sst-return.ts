@@ -13,8 +13,16 @@
  * notes dated in the period, and never below zero.
  *
  * Typed-in figures (11(e) cards, 13(b), 13(c), 13(d), 13A) come in as a fifth argument: 11(e) joins item 12, the rest come off item 14.
+ *
+ * Payment basis (#222 stage 3): a service tax return of a workspace that counts tax when the money arrives
+ * follows the receipts instead of the invoice dates, and `paid` carries each invoice with every receipt and
+ * credit note dated up to the period's end. Tax to date is the invoice's own tax on the share of what it still
+ * owes that has been paid, so it stops at the invoice's tax and falls only when a credit note takes something
+ * off. A period's figure is the change between the period's first day and its last, which is how the periods
+ * add up to the invoice's tax with no rounding left over. A fall goes to 13(a) and never to a negative B2 line:
+ * a sale that drops after the tax was counted is corrected by a credit note, not by a value below zero.
  */
-import { type SstPeriod, type SstSettings, type SstTaxType, sstPeriodFor, taxTypeForRate } from './sst';
+import { type SstBasis, type SstPeriod, type SstSettings, type SstTaxType, sstPeriodFor, taxTypeForRate } from './sst';
 
 export type SstReturnType = 'service' | 'sales';
 
@@ -44,6 +52,27 @@ export type SstCreditRow = {
   invoice_total_myr: number;
   invoice_sst_myr: Record<SstReturnType, number>;
 };
+
+/**
+ * One invoice a payment-basis return follows: its own totals, every receipt and credit note dated up to the
+ * period's end (the receipts from the invoice's first one, not only those inside the period), and its own lines
+ * for Part B1.
+ */
+export type SstPaidInvoice = {
+  invoice_id: string;
+  invoice_date: string;
+  total_myr: number;
+  sst_myr: Record<SstReturnType, number>;
+  /** Posted receipts against the invoice, oldest first, each the ringgit it settled. */
+  receipts: { id: string; paid_on: string; amount_myr: number }[];
+  /** Issued credit notes on the invoice, oldest first, gross as the note's amount stands on the invoice. */
+  credits: { credit_date: string; amount_myr: number }[];
+  /** The invoice's lines, for Part B1 and the rate items. */
+  rows: SstLineRow[];
+};
+
+/** Which basis the workspace files service tax on, and the invoices a payment-basis return follows. */
+export type SstReturnOptions = { basis?: SstBasis; paid?: SstPaidInvoice[] };
 
 export type SstFormLine = { item: string; label: string; value: number | null; tax: number; typed?: boolean };
 
@@ -121,6 +150,7 @@ export function buildSstReturn(
   lines: SstLineRow[],
   credits: SstCreditRow[],
   figures: SstTypedFigures = NO_TYPED_FIGURES,
+  options: SstReturnOptions = {},
 ): SstReturn {
   const items = SST_FORM_ITEMS[type];
   const b2Sen = items.map(() => ({ value: 0, tax: 0 }));
@@ -128,10 +158,12 @@ export function buildSstReturn(
   const offForm = { count: 0, value: 0, tax: 0 };
   const untyped = { count: 0, value: 0 };
   let creditNotesSen = 0;
+  const paymentBasis = (options.basis ?? 'invoice') === 'payment';
 
   for (const l of lines) {
     // A voided invoice counts nowhere (see the top of this file).
     if (l.invoice_status === 'void' || !within(l.invoice_date, period)) continue;
+    if (paymentBasis) continue; // counted when its money arrives, below.
     const effective = l.tax_type ?? taxTypeForRate(l.sst_rate);
     if (effective === null) {
       if (l.sst_rate > 0) {
@@ -169,7 +201,81 @@ export function buildSstReturn(
   for (const c of credits) {
     // A voided credit note counts nowhere (see the top of this file).
     if (c.status === 'void' || !within(c.credit_date, period)) continue;
+    // On payment basis a credit note lowers what its invoice still owes, so the fall in the running total is
+    // the 13(a) figure; counting creditTaxSen here as well would count the same money twice.
+    if (paymentBasis) continue;
     creditNotesSen += creditTaxSen(c, type);
+  }
+
+  if (paymentBasis) {
+    const firstDay = previousDay(period.start);
+    for (const inv of options.paid ?? []) {
+      const totalSen = toSen(inv.total_myr);
+      const rows = inv.rows.filter((r) => r.invoice_status !== 'void');
+      if (totalSen <= 0 || rows.length === 0) continue;
+      /**
+       * What has been counted by `date`, as a share of the invoice's own total: the money in, capped at what the
+       * invoice still owes after its credit notes. Tax and value at a date are the invoice's own figures times it.
+       */
+      const counted = (date: string) => {
+        const received = inv.receipts.reduce((s, r) => (r.paid_on <= date ? s + toSen(r.amount_myr) : s), 0);
+        const credited = inv.credits.reduce((s, c) => (c.credit_date <= date ? s + toSen(c.amount_myr) : s), 0);
+        const owed = Math.max(0, totalSen - credited);
+        return Math.min(received, owed) / totalSen;
+      };
+      const shareBefore = counted(firstDay);
+      const shareAfter = counted(period.end);
+      if (shareBefore === shareAfter) continue;
+
+      for (const [at, formItem] of items.entries()) {
+        const ofItem = rows.filter((r) => (r.tax_type ?? taxTypeForRate(r.sst_rate)) === type && r.sst_rate === formItem.rate);
+        const itemTaxSen = ofItem.reduce((s, r) => s + toSen(r.sst_amount_myr), 0);
+        if (itemTaxSen === 0) continue;
+        // The invoice's own tax at each share; what it lost is 13(a), never a value below zero.
+        const taxDelta = Math.round(itemTaxSen * shareAfter) - Math.round(itemTaxSen * shareBefore);
+        if (taxDelta < 0) {
+          creditNotesSen -= taxDelta;
+          continue;
+        }
+        if (taxDelta === 0) continue;
+        b2Sen[at].tax += taxDelta;
+        const itemValueSen = ofItem.reduce((s, r) => s + toSen(r.amount_myr), 0);
+        const valueDelta = Math.round(itemValueSen * shareAfter) - Math.round(itemValueSen * shareBefore);
+        if (valueDelta <= 0) continue;
+        b2Sen[at].value += valueDelta;
+
+        // Part B1: the item's own lines, each at the share it has been paid; the largest line takes the
+        // rounding difference so the lines add up to the item's value.
+        const parts = ofItem.map((r) => {
+          const description = r.description.trim();
+          return {
+            key: `${r.product_id !== null ? `p:${r.product_id}` : `d:${description.toLowerCase()}`}\u0000${r.sst_code ?? ''}`,
+            description,
+            code: r.sst_code,
+            id: r.id,
+            date: r.invoice_date,
+            delta: Math.round(toSen(r.amount_myr) * shareAfter) - Math.round(toSen(r.amount_myr) * shareBefore),
+          };
+        });
+        const partsSen = parts.reduce((s, p) => s + p.delta, 0);
+        const largest = parts.reduce((a, b) => (b.delta > a.delta ? b : a));
+        for (const p of parts) {
+          const move = p === largest ? p.delta + (valueDelta - partsSen) : p.delta;
+          if (move === 0) continue;
+          const g = groups.get(p.key);
+          if (!g) {
+            groups.set(p.key, { label: p.description, labelDate: p.date, labelId: p.id, code: p.code, value: move });
+            continue;
+          }
+          g.value += move;
+          if (p.date > g.labelDate || (p.date === g.labelDate && p.id > g.labelId)) {
+            g.label = p.description;
+            g.labelDate = p.date;
+            g.labelId = p.id;
+          }
+        }
+      }
+    }
   }
 
   const b1 = [...groups.entries()]
@@ -217,6 +323,13 @@ function monthBefore(date: string): string {
   const year = Number(date.slice(0, 4));
   const month = Number(date.slice(5, 7));
   return month === 1 ? `${year - 1}-12-01` : `${year}-${String(month - 1).padStart(2, '0')}-01`;
+}
+
+/** The day before `date` (YYYY-MM-DD). */
+function previousDay(date: string): string {
+  const d = new Date(`${date}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() - 1);
+  return d.toISOString().slice(0, 10);
 }
 
 /** The current period (by `today`, Malaysian) and those before it, newest first. */
