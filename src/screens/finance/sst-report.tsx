@@ -1,7 +1,6 @@
 import type { ReactNode } from 'react';
 import {
   FileText,
-  Hourglass,
   Landmark,
   ListChecks,
   Receipt,
@@ -38,6 +37,7 @@ import {
   type SstCreditRow,
   type SstFormLine,
   type SstLineRow,
+  type SstPaidInvoice,
   type SstReturn,
   type SstTypedFigures,
   NO_TYPED_FIGURES,
@@ -46,7 +46,7 @@ import {
   recentSstPeriods,
   sstCards,
 } from '@/lib/finance/sst-return';
-import { listSstFiled, listSstFigures, readSstRows } from '@/lib/finance/sst-return-data';
+import { listSstFiled, listSstFigures, readSstPaidInvoices, readSstRows } from '@/lib/finance/sst-return-data';
 import { displayDate } from '@/lib/finance/view-helpers';
 import { todayInMalaysia } from '@/lib/people/dates';
 import { createClient } from '@/lib/supabase/server';
@@ -70,8 +70,6 @@ const SAMPLE_SETTINGS: SstSettings = {
   service_tax_basis: 'invoice',
 };
 const SAMPLE_COMPANY = 'Rimba Ventures Sdn Bhd';
-
-const NOT_READY = 'Not ready yet';
 
 /** One numbered line of the form: item, label, an optional value, and the amount. */
 function FormRow({ line, strong }: { line: { item: string; label: string; value?: string; tax: string; typed?: boolean }; strong?: boolean }) {
@@ -131,29 +129,25 @@ function notesOf(ret: SstReturn): string[] {
   return notes;
 }
 
-/** Only the service tax return of a payment-basis workspace waits for payments (ruling 7). */
-const isNotReady = (type: SstReturn['type'], settings: SstSettings) => type === 'service' && settings.service_tax_basis === 'payment';
-
 function basisNote(type: SstReturn['type'], settings: SstSettings): string {
-  if (type === 'sales') return 'Not on the form: sales tax is counted when the goods are sold, by the invoice date.';
+  if (type === 'sales') return 'Sales tax is counted when the goods are sold, by the invoice date.';
   return settings.service_tax_basis === 'payment'
-    ? 'Not on the form: service tax is counted when payment is received (payment basis), unless Customs has approved invoice basis.'
-    : 'Not on the form: service tax is counted when the invoice is issued (invoice basis, approved by Customs).';
+    ? 'Service tax is counted when the payment is received (payment basis), less any credit note issued since.'
+    : 'Service tax is counted when the invoice is issued (invoice basis, approved by Customs).';
 }
 
 /**
  * The return for one period: the four stats, Part A, then B1, B2 with item 12, the deductions with item 14 and
- * any "Not on the form" note, and Part D. The service tax return of a payment-basis workspace shows one "not ready
- * yet" card in place of B1 to 14.
+ * any "Not on the form" note, and Part D. Payment basis is worked out from the money received, so its service
+ * return reads the same parts as an invoice-basis one.
  */
 export function SstReturnBody({ ret, settings, companyName }: { ret: SstReturn; settings: SstSettings; companyName: string }) {
-  const notReady = isNotReady(ret.type, settings);
   const service = ret.type === 'service';
   const registration = (service ? settings.service_tax_no : settings.sales_tax_no) || 'Not registered: add the number in SST settings above';
   const deductionsTotal = ret.deductions.reduce((s, d) => s + Math.round(d.tax * 100), 0) / 100;
-  const notes = notReady ? [] : notesOf(ret);
-  // The items the tile sums; a not-ready return has no items to name.
-  const deductionsHint = notReady ? 'this period' : service ? '13(a), 13(c) and 13(d)' : '13(a), 13(b), 13A and 13(d)';
+  const notes = notesOf(ret);
+  // The items the tile sums.
+  const deductionsHint = service ? '13(a), 13(c) and 13(d)' : '13(a), 13(b), 13A and 13(d)';
   const partA = [
     { label: service ? 'Service tax no.' : 'Sales tax no.', value: registration },
     { label: 'Name', value: companyName },
@@ -165,13 +159,13 @@ export function SstReturnBody({ ret, settings, companyName }: { ret: SstReturn; 
     <>
       {/* Items 12, 13, 14 and the due date */}
       <BentoCard tone="primary" className="col-span-2 md:col-span-3">
-        <BentoStat label="Total tax (item 12)" value={notReady ? NOT_READY : rm(ret.item12)} delta="this period" deltaTone="flat" onPrimary />
+        <BentoStat label="Total tax (item 12)" value={rm(ret.item12)} delta="this period" deltaTone="flat" onPrimary />
       </BentoCard>
       <BentoCard className="col-span-2 md:col-span-3">
-        <BentoStat label="Deductions (item 13)" value={notReady ? NOT_READY : rm(deductionsTotal)} delta={deductionsHint} deltaTone="flat" />
+        <BentoStat label="Deductions (item 13)" value={rm(deductionsTotal)} delta={deductionsHint} deltaTone="flat" />
       </BentoCard>
       <BentoCard className="col-span-2 md:col-span-3">
-        <BentoStat label="Tax payable (item 14)" value={notReady ? NOT_READY : rm(ret.item14)} delta="to Customs (JKDM)" deltaTone="flat" />
+        <BentoStat label="Tax payable (item 14)" value={rm(ret.item14)} delta="to Customs (JKDM)" deltaTone="flat" />
       </BentoCard>
       <BentoCard className="col-span-2 md:col-span-3">
         <BentoStat label="Return and payment due" value={displayDate(ret.period.due)} delta="last day of the next month" deltaTone="flat" />
@@ -190,14 +184,6 @@ export function SstReturnBody({ ret, settings, companyName }: { ret: SstReturn; 
         <p className="mt-3 text-xs text-muted-foreground">{basisNote(ret.type, settings)}</p>
       </BentoCard>
 
-      {notReady ? (
-        <BentoCard title={NOT_READY} subtitle="Parts B1 and B2, items 12 to 14" icon={Hourglass} className="col-span-2 md:col-span-7">
-          <p className="text-sm text-muted-foreground">
-            Not ready yet: service tax on payment basis is counted from payments received, which comes in the next step.
-          </p>
-        </BentoCard>
-      ) : (
-        <>
           {/* Part B1 */}
           <BentoCard
             title="Part B1"
@@ -272,9 +258,6 @@ export function SstReturnBody({ ret, settings, companyName }: { ret: SstReturn; 
               </div>
             </BentoCard>
           ) : null}
-        </>
-      )}
-
       {/* Part D */}
       <BentoCard
         title="Part D"
@@ -304,6 +287,8 @@ type Loaded = {
   filed: (type: SstReturn['type']) => Promise<Record<string, string>>;
   /** The typed-in figures of one tax type: period start → figures. */
   figures: (type: SstReturn['type']) => Promise<Record<string, SstTypedFigures>>;
+  /** The invoices a payment-basis service return follows: the money received and the credit notes issued. */
+  paid: (span: { start: string; end: string }) => Promise<SstPaidInvoice[]>;
 };
 
 /**
@@ -323,6 +308,7 @@ async function load(): Promise<Loaded> {
       rows: async () => ({ lines: [], credits: [] }),
       filed: async () => ({}),
       figures: async () => ({}),
+      paid: async () => [],
     };
   }
   const viewer = await getViewer();
@@ -347,6 +333,7 @@ async function load(): Promise<Loaded> {
     rows: (span) => readSstRows(ctx, span),
     filed: (type) => listSstFiled(ctx, type),
     figures: (type) => listSstFigures(ctx, type),
+    paid: (span) => readSstPaidInvoices(ctx, span),
   };
 }
 
@@ -388,19 +375,26 @@ export default async function SstReportScreen({
   const oldest = periods[periods.length - 1].start;
   const span = { start: view.period.start < oldest ? view.period.start : oldest, end: periods[0].end };
   // The figures are read once too, and each period is built with its own (none is zeros).
-  const [{ lines: rows, credits }, filed, figures] = await Promise.all([
+  // Payment basis counts money received, so its service return reads the receipts as well (and only then).
+  const onPayments = view.type === 'service' && settings.service_tax_basis === 'payment';
+  const [{ lines: rows, credits }, filed, figures, paid] = await Promise.all([
     data.rows(span),
     data.filed(view.type),
     data.figures(view.type),
+    onPayments ? data.paid(span) : Promise.resolve([]),
   ]);
+  const build = (period: SstPeriod) =>
+    buildSstReturn(view.type, period, rows, credits, figures[period.start], {
+      basis: settings.service_tax_basis,
+      paid,
+    });
 
-  const ret = buildSstReturn(view.type, view.period, rows, credits, figures[view.period.start]);
-  const notReady = isNotReady(view.type, settings);
+  const ret = build(view.period);
   const periodRows: SstPeriodRow[] = periods.map((p) => ({
     start: p.start,
     label: sstPeriodLabel(p),
     due: displayDate(p.due),
-    payable: notReady ? NOT_READY.toLowerCase() : rm(buildSstReturn(view.type, p, rows, credits, figures[p.start]).item14),
+    payable: rm(build(p).item14),
     filedOn: filed[p.start] ? displayDate(filed[p.start]) : null,
     ended: today > p.end,
   }));
@@ -420,17 +414,14 @@ export default async function SstReportScreen({
       <BentoGrid>
         {card}
         <SstReturnBody ret={ret} settings={settings} companyName={data.companyName} />
-        {/* No return body to put figures in while the service return is not ready (ruling 6). */}
-        {notReady ? null : (
-          <SstFiguresCard
-            key={`${view.type}-${view.period.start}`}
-            type={view.type}
-            periodStart={view.period.start}
-            figures={figures[view.period.start] ?? NO_TYPED_FIGURES}
-            filed={Boolean(filed[view.period.start])}
-            save={data.canDecide ? saveSstFiguresAction : undefined}
-          />
-        )}
+        <SstFiguresCard
+          key={`${view.type}-${view.period.start}`}
+          type={view.type}
+          periodStart={view.period.start}
+          figures={figures[view.period.start] ?? NO_TYPED_FIGURES}
+          filed={Boolean(filed[view.period.start])}
+          save={data.canDecide ? saveSstFiguresAction : undefined}
+        />
         <SstPeriodsCard
           type={view.type}
           shownStart={view.period.start}

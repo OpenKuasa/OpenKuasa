@@ -158,6 +158,7 @@ test('nothing in src edits a payment that is not a draft, sends one back to draf
     'src/lib/finance/cash-receipts.ts: 1',
     'src/lib/finance/money.ts: 2',
     'src/lib/finance/refunds.ts: 1',
+    'src/lib/finance/sst-return-data.ts: 1',
     'src/lib/finance/vouchers.ts: 2',
   ]);
 });

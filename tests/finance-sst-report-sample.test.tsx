@@ -67,14 +67,14 @@ describe('the return body', () => {
   const period = sstPeriodFor('2026-10-10', 9);
   const settings = { period_start_month: 9, service_tax_no: 'W10', sales_tax_no: null, service_tax_basis: 'payment' as const };
 
-  it('on payment basis, the service tax return is not ready yet and shows no deductions', () => {
+  it('on payment basis, the service tax return shows its parts, at zero with nothing received', () => {
     const html = renderToStaticMarkup(
       <SstReturnBody ret={buildSstReturn('service', period, [], [])} settings={settings} companyName="Rimba" />,
     );
     const body = textOf(html);
-    expect(body).toContain('Not ready yet');
-    expect(body).toContain('Not ready yet: service tax on payment basis is counted from payments received, which comes in the next step.');
-    expect(body).not.toContain('13(a)');
+    expect(body).not.toContain('Not ready yet');
+    for (const item of ['11(c)', '11(d)', '13(a)', '13(c)', '13(d)', '14']) expect(body).toContain(item);
+    expect(body).toContain('Service tax is counted when the payment is received (payment basis)');
     expect(body).toContain('Part A');
   });
 

@@ -23,6 +23,7 @@ const state = vi.hoisted(() => ({
   settings: async (): Promise<unknown> => null,
   company: async (): Promise<{ name: string; sstNo: string }> => ({ name: 'Rimba Ventures Sdn Bhd', sstNo: '' }),
   rows: async (): Promise<{ lines: unknown[]; credits: unknown[] }> => ({ lines: [], credits: [] }),
+  paid: async (): Promise<unknown[]> => [],
   filed: async (): Promise<Record<string, string>> => ({}),
   figures: async (): Promise<Record<string, unknown>> => ({}),
   figureReads: [] as string[],
@@ -37,6 +38,7 @@ vi.mock('@/lib/finance/sst-return-data', async (importOriginal) => ({
     state.spans.push(span);
     return state.rows();
   },
+  readSstPaidInvoices: () => state.paid(),
   listSstFiled: () => state.filed(),
   listSstFigures: (_ctx: unknown, type: string) => {
     state.figureReads.push(type);
@@ -61,6 +63,7 @@ beforeEach(() => {
   state.settings = async () => null;
   state.company = async () => ({ name: 'Rimba Ventures Sdn Bhd', sstNo: '' });
   state.rows = async () => ({ lines: [], credits: [] });
+  state.paid = async () => [];
   state.filed = async () => ({});
   state.figures = async () => ({});
   state.figureReads = [];
@@ -162,17 +165,27 @@ describe('the SST Report return (#222 stage 2)', () => {
     expect(text).toContain('Not registered: add the number in SST settings above');
   });
 
-  it('keeps the service tax return of a payment-basis workspace not ready, but still lists its periods', async () => {
+  it('works out the service return of a payment-basis workspace from the money received', async () => {
     state.settings = async () => ({ ...SAVED, service_tax_basis: 'payment' });
+    state.rows = async () => ({ lines: [line({ invoice_date: '2026-09-15' })], credits: [] });
+    state.paid = async () => [
+      {
+        invoice_id: 'i1',
+        invoice_date: '2026-09-15',
+        total_myr: 1080,
+        sst_myr: { service: 80, sales: 0 },
+        receipts: [{ id: 't1', paid_on: '2026-09-20', amount_myr: 540 }],
+        credits: [],
+        rows: [line({ invoice_date: '2026-09-15' })],
+      },
+    ];
     const text = await render();
-    expect(text).toContain('Not ready yet: service tax on payment basis is counted from payments received, which comes in the next step.');
-    expect(text).not.toContain('13(a)');
-    expect(text).toContain('Periods');
+    // Half of the invoice has been paid, so half of its 80.00 of tax is counted this period.
+    expect(text).toContain('Tax payable (item 14) RM 40.00');
+    expect(text).toContain('payable RM 40.00');
+    expect(text).toContain('13(a)');
+    expect(text).not.toContain('Not ready yet');
     expect(text).toContain('1 Jul – 31 Aug 2026');
-    // Mid-line in the periods list it is lower case; the stat tiles keep the capital.
-    expect(text).toContain('payable not ready yet');
-    expect(text).not.toContain('payable Not ready yet');
-    expect(text).toContain('Tax payable (item 14) Not ready yet');
   });
 
   it('says a line the form has no item for may be the rate or a sales Part C good', async () => {
@@ -349,9 +362,10 @@ describe('the typed-in figures on the SST Report (#222 stage 5)', () => {
     for (const i of open) expect(i).not.toMatch(/\sdisabled=""/);
   });
 
-  it('shows no figures card on the not-ready payment-basis service return, nor before the settings', async () => {
+  it('shows the figures card on a payment-basis service return, and none before the settings', async () => {
+    // Stage 3 made the payment-basis service return readable, so it takes typed-in figures like any other.
     state.settings = async () => ({ ...SAVED, service_tax_basis: 'payment' });
-    expect(textOf(await html())).not.toContain('Typed-in figures');
+    expect(textOf(await html())).toContain('Typed-in figures');
     expect(textOf(await html({ tax: 'sales' }))).toContain('Typed-in figures');
     state.settings = async () => null;
     expect(textOf(await html())).not.toContain('Typed-in figures');
