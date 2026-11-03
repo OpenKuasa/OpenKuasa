@@ -1,8 +1,8 @@
 -- New tables in public stop giving service_role anything by default (issue #431).
 --
 -- A fresh Supabase project's default gives service_role ALL on every table a
--- migration creates; the hosted project's default still gives it DELETE,
--- TRUNCATE, REFERENCES, TRIGGER and MAINTAIN. 20261201090000 closes that on the
+-- migration creates; the hosted project's default still gives it TRUNCATE,
+-- REFERENCES, TRIGGER and MAINTAIN. 20261201090000 closes that on the
 -- crm_ relations that exist now, but a table made later would inherit it again.
 -- Changing the default closes it at the source.
 --

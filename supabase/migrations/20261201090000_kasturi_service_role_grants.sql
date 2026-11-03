@@ -5,7 +5,9 @@
 -- INSERT, TRUNCATE and UPDATE on every crm_ relation, and reads every column of
 -- them, including a contact's email and phone and every chatbot message. The
 -- hosted project has the same gap in part: its default for new tables still gives
--- service_role DELETE, TRUNCATE, REFERENCES and TRIGGER (issue #431).
+-- service_role TRUNCATE, REFERENCES, TRIGGER and MAINTAIN, so most crm_ relations
+-- there hold those table-wide, and crm_broadcast_recipients a table-wide SELECT
+-- as well (issue #431).
 --
 -- This file closes it for the crm_ relations that exist now. The next migration
 -- (20261201090100) changes the default, so a crm_ relation made later starts with
