@@ -211,6 +211,7 @@ import {
   type SaveAndSendRfqResult,
   closeRfq,
   convertRfq,
+  convertRfqInput,
   deleteRfq,
   getRfq,
   getRfqGroup,
@@ -826,7 +827,7 @@ export async function getRfqComparisonAction(input: unknown): Promise<FinResult<
 
 /** Makes a draft purchase order from a quoted RFQ, and refreshes Purchase Orders as well. */
 export async function convertRfqAction(input: unknown) {
-  return run(CONVERT_RFQ_PATHS, rfqIdInput, input, convertRfq);
+  return run(CONVERT_RFQ_PATHS, convertRfqInput, input, convertRfq);
 }
 
 /* ---- purchase orders --------------------------------------------------- */

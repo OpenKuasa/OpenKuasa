@@ -278,6 +278,28 @@ describe('convertRfq', () => {
     expect(calls[0]).toMatchObject({ kind: 'rpc', name: 'finance_convert_rfq' });
     expect(calls[0].args).toEqual({ target_org: 'org-1', target_rfq: ID });
   });
+  it('sends the reason when one is given, trimmed, and leaves it out when there is none', async () => {
+    const { ctx, calls } = fakeFinance({ data: PO, error: null });
+    await convertRfq(ctx, { id: ID, reason: '  Delivers next day ' });
+    expect(calls[0].args).toEqual({ target_org: 'org-1', target_rfq: ID, reason: 'Delivers next day' });
+    for (const reason of ['', '   ', null, undefined]) {
+      await convertRfq(ctx, { id: ID, reason });
+      expect(calls[calls.length - 1].args, String(reason)).toEqual({ target_org: 'org-1', target_rfq: ID });
+    }
+  });
+  it('refuses a reason longer than 200 characters before calling the database', async () => {
+    const { ctx, calls } = fakeFinance({ data: PO, error: null });
+    await expect(convertRfq(ctx, { id: ID, reason: 'x'.repeat(201) })).rejects.toThrow();
+    expect(calls).toEqual([]);
+  });
+  it('says a reason is needed for FIN75, and what to do', async () => {
+    const { ctx } = fakeFinance({ data: null, error: { code: 'FIN75' } });
+    expect(await convertRfq(ctx, { id: ID })).toEqual({
+      ok: false,
+      error: 'Another supplier quoted this for less, or it has no exchange rate to compare. Say why this supplier was chosen.',
+    });
+    expect(RFQ_MESSAGES.needsReason).toContain('Say why');
+  });
   it('says the RFQ already has an order for FIN22 and for a unique-key clash', async () => {
     const sentence = 'This RFQ already has a purchase order. Cancel that order first to make another.';
     for (const code of ['FIN22', '23505']) {

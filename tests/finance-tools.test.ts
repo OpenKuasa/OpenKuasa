@@ -160,6 +160,18 @@ describe('Bendahara write tools', () => {
     }
   });
 
+  it('lets the convertRfq tool take a reason, and tells the model when one is needed', () => {
+    const w = createBendaharaTools({ client: {} as never, orgId: 'o', canWrite: true }) as unknown as Record<
+      string,
+      { description: string; inputSchema: { safeParse: (v: unknown) => { success: boolean } } }
+    >;
+    const id = '33333333-3333-4333-8333-333333333333';
+    expect(w.convertRfq.inputSchema.safeParse({ id }).success).toBe(true);
+    expect(w.convertRfq.inputSchema.safeParse({ id, reason: 'Delivers next day' }).success).toBe(true);
+    expect(w.convertRfq.inputSchema.safeParse({ id, reason: 'x'.repeat(201) }).success).toBe(false);
+    expect(w.convertRfq.description).toMatch(/quoted the same items for less/);
+  });
+
   it('adds the purchase-order write tools for a writer, none for a viewer', () => {
     const names = ['savePurchaseOrder', 'submitPurchaseOrder', 'receivePurchaseOrder', 'billFromPurchaseOrder'];
     const w = createBendaharaTools({ client: {} as never, orgId: 'o', canWrite: true });
