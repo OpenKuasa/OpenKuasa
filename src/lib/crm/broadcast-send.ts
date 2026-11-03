@@ -47,6 +47,8 @@ export const SEND_MESSAGES = {
     'This send started more than 23 hours ago, so it can no longer be retried: the email provider no longer remembers who already received it. Some of the recipients shown as not sent may in fact have received it.',
   optedOut: 'Not retried: someone in this group has unsubscribed since, and the group cannot be sent again without them.',
   notConfirmed: 'The provider did not confirm this message.',
+  notRecorded:
+    'This server was not allowed to record who the broadcast went to, so it stopped sending. Some emails may already have gone out. Do not write a new broadcast for it; use "Finish sending" on this one once that is fixed.',
   noAddress: 'Your account has no email address to send a test to.',
   testFailed: 'The test could not be sent.',
 } as const;
@@ -314,7 +316,8 @@ async function deliver(
   const rows = claimed.recipients;
   const settings = { senderEmail: claimed.senderEmail, senderName: claimed.senderName };
 
-  const mark = async (marks: { row: Recipient; patch: Record<string, unknown> }[]) => {
+  /** Marks how each recipient ended. False when the database refuses this server the marking at all. */
+  const mark = async (marks: { row: Recipient; patch: Record<string, unknown> }[]): Promise<boolean> => {
     for (let i = 0; i < marks.length; i += UPDATE_CONCURRENCY) {
       const answers = await Promise.all(
         marks.slice(i, i + UPDATE_CONCURRENCY).map(({ row, patch }) => {
@@ -325,7 +328,11 @@ async function deliver(
       );
       const unmarked = answers.filter((answer) => answer.error).length;
       if (unmarked > 0) console.error('[broadcast-send] recipients could not be marked:', unmarked);
+      // Permission denied is not a passing fault: every later mark would be refused
+      // too, so nobody would ever be recorded as sent.
+      if (answers.some((answer) => answer.error?.code === '42501')) return false;
     }
+    return true;
   };
 
   for (let start = 0; start < rows.length; start += PROVIDER_BATCH_SIZE) {
@@ -334,7 +341,9 @@ async function deliver(
     if (unsent.length === 0) continue;
 
     if (unsent.length === batch.length && batch.some((row) => row.opted_out)) {
-      await mark(unsent.map((row) => ({ row, patch: { status: 'failed', error: M.optedOut } })));
+      if (!(await mark(unsent.map((row) => ({ row, patch: { status: 'failed', error: M.optedOut } }))))) {
+        return { ok: false, error: M.notRecorded };
+      }
       continue;
     }
 
@@ -358,7 +367,8 @@ async function deliver(
     );
 
     const now = new Date().toISOString();
-    await mark(
+    // Stop before handing the provider anything more: it went out, but nobody could be recorded.
+    const recorded = await mark(
       batch
         .map((row, index) => ({ row, result: results[index] ?? { ok: false as const, error: M.notConfirmed } }))
         .filter(({ row }) => row.status !== 'sent')
@@ -369,6 +379,7 @@ async function deliver(
             : { status: 'failed', error: result.error.slice(0, 200) },
         })),
     );
+    if (!recorded) return { ok: false, error: M.notRecorded };
   }
 
   // The totals are counted by the database from the recipients, and those are what is reported.

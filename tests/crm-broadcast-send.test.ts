@@ -86,7 +86,7 @@ function fakeSession(answer: unknown = claimed(3), error: { code: string } | nul
 }
 
 /** The server's own client: marks each recipient and finishes the send. */
-function fakeService(options: { finish?: unknown; finishError?: { code: string } } = {}) {
+function fakeService(options: { finish?: unknown; finishError?: { code: string }; markError?: { code: string } } = {}) {
   const updates: { id: string; patch: Record<string, unknown>; unlessSent: boolean }[] = [];
   const rpc = vi.fn(async () => {
     if (options.finishError) return { data: null, error: options.finishError };
@@ -99,7 +99,7 @@ function fakeService(options: { finish?: unknown; finishError?: { code: string }
       eq: (_column: string, id: string) => {
         const entry = { id, patch, unlessSent: false };
         updates.push(entry);
-        const done = { error: null };
+        const done = { error: options.markError ?? null };
         return {
           // `.neq('status', 'sent')`: only rows that are not already sent.
           neq: (column: string, value: string) => {
@@ -265,6 +265,25 @@ describe('sending a broadcast', () => {
     expect(!outcome.ok && outcome.error).toContain('Do not write a new broadcast');
   });
 
+  it('stops sending when the database refuses to let it record anyone, instead of sending everything unrecorded', async () => {
+    const { provider, calls } = fakeProvider();
+    const service = fakeService({ markError: { code: '42501' } });
+    const session = fakeSession(claimed(250));
+    const outcome = await sendBroadcast(context({ provider, service, session }).ctx, BROADCAST, 3);
+    expect(calls).toHaveLength(1);
+    expect(service.rpc).not.toHaveBeenCalled();
+    expect(outcome).toEqual({ ok: false, error: M.notRecorded });
+  });
+
+  it('carries on past a mark that fails for any other reason', async () => {
+    const { provider, calls } = fakeProvider();
+    const service = fakeService({ markError: { code: 'XX000' } });
+    const session = fakeSession(claimed(250));
+    await sendBroadcast(context({ provider, service, session }).ctx, BROADCAST, 3);
+    expect(calls).toHaveLength(3);
+    expect(service.rpc).toHaveBeenCalledTimes(1);
+  });
+
   describe('sends nothing, and does not even ask for the broadcast', () => {
     const refusedBefore = async (expected: string, over?: Parameters<typeof context>[0]) => {
       const { provider, calls } = fakeProvider();
@@ -391,6 +410,15 @@ describe('finishing or retrying a send', () => {
     expect(service.updates.map((update) => update.patch)).toEqual(
       [1, 2, 3].map(() => ({ status: 'failed', error: M.optedOut })),
     );
+  });
+
+  it('stops there too when the database refuses to record a call left out for an unsubscribe', async () => {
+    const { provider, calls } = fakeProvider();
+    const service = fakeService({ markError: { code: '42501' } });
+    const { ctx } = context({ provider, service, session: fakeSession(resumed(['failed', 'pending', 'failed'], [2])) });
+    expect(await resumeBroadcast(ctx, BROADCAST)).toEqual({ ok: false, error: M.notRecorded });
+    expect(calls).toEqual([]);
+    expect(service.rpc).not.toHaveBeenCalled();
   });
 
   it('still repeats a call that certainly went out, though someone in it has unsubscribed since', async () => {
