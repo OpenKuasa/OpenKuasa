@@ -192,6 +192,16 @@ describe('convertRfqAction', () => {
     expect(ctl.calls).toEqual([{ fn: 'convertRfq', orgId: 'org1', input: { id: RFQ } }]);
     expect(ctl.revalidated).toEqual(['/finance/rfqs', '/finance/purchase-orders']);
   });
+  it('passes the reason on, trimmed, and refuses one that is too long with the field sentence', async () => {
+    await actions.convertRfqAction({ id: RFQ, reason: ' Delivers next day ' });
+    expect(ctl.calls).toEqual([{ fn: 'convertRfq', orgId: 'org1', input: { id: RFQ, reason: 'Delivers next day' } }]);
+    ctl.calls = [];
+    expect(await actions.convertRfqAction({ id: RFQ, reason: 'x'.repeat(201) })).toEqual({
+      ok: false,
+      error: 'That is too long. Keep it to 200 characters or fewer.',
+    });
+    expect(ctl.calls).toEqual([]);
+  });
   it('refuses a viewer and the demo workspace before parsing, and an id that is not an id with the RFQ sentence', async () => {
     expect(await actions.convertRfqAction({ id: 'nope' })).toEqual(GONE);
     expect(ctl.calls).toEqual([]);

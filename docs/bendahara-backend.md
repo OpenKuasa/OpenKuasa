@@ -1931,6 +1931,62 @@ x"), shows "RM y credit open from this supplier" on bills that still owe, offers
 form, that bill chosen), and words `FIN59`. Journals, ledger links and the
 audit trail now send a supplier credit note to this screen.
 
+## Splitting an RFQ comparison between suppliers
+
+`20261202090000_bendahara_rfq_split` (issue #236, the database half; the screen comes next). A comparison can be
+awarded whole, with Make purchase order from one supplier's column, or line by line, with each line going to
+one supplier and one draft order made for each supplier chosen. Either way, an order that does not go to the lowest
+quote needs a **reason**, and the database holds the rule, so Tuah and any other caller meet it as well as the screen.
+
+**The reason.** `finance_purchase_orders.award_reason` (null, or not blank) says why the supplier was chosen; it is the last
+column of `finance_purchase_order_totals`. `rejection_reason` is the approver's and is cleared on submit, so this is a
+field of its own. It can be changed while the order is a draft and, once set, not emptied (`FIN75`); once the order leaves
+draft it is locked (`FIN01`, trigger `finance_purchase_order_reason_lock`, which also holds where the order guard stands aside
+because nobody is signed in). A rejection returns the order to draft with its reason. Nothing is written to the audit log
+for it. The reason is a plain table update on a draft; `finance_save_purchase_order` is unchanged.
+
+**What "lower" means.** `private.finance_rfq_comparison` is `rfq-compare.ts` in SQL. A group is the first RFQ and its copies. Only
+an RFQ whose answer was recorded (`quoted_at`) has prices, so a price typed on an RFQ nobody answered is no rival. Closed RFQs
+and RFQs that already have an order are in the group, as they are in Compare quotes. A row is the product, else the
+description trimmed, whitespace collapsed and lower case, in the same unit and pack size, and the n-th time one RFQ asks for it
+(lines taken in position, then id, order). A line costs its unit price times (100 + SST rate). When the quotes are in more
+than one currency it is also multiplied by the RFQ's rate (ringgit is 1), and a foreign RFQ with no rate has no cost, so it
+cannot be compared; with one currency the prices are compared as they are.
+
+- **A line** needs a reason when another RFQ's comparable cost for the same row is strictly lower, or, in a group quoted in several
+  currencies, when the line has no cost. A tie needs none, and neither does a line nobody else priced.
+- **A whole RFQ** (Make purchase order) needs a reason when another quoted RFQ that asks for exactly the same rows has a strictly
+  lower total (the ringgit total in a group quoted in several currencies, else the total, to the sen), or, in such a group, when
+  it has no ringgit total. A quote that asks for other rows is not compared, and an RFQ with no other quote needs none.
+
+**Calls.**
+
+- `finance_convert_rfq(target_org, target_rfq, reason default null)`: as before, with the total rule. The two-argument
+  call still works; the old two-argument function is dropped, so there is no overload for PostgREST to choose between. A blank reason is none.
+- `finance_award_rfq_lines(target_org, awards)`: `awards` is `[{ rfq_id, line_ids, reason }]` and the answer is the new orders' ids,
+  in the order given. One draft order per award, from that RFQ, holding only those lines at the quoted quantity, price and
+  position, made the way Make purchase order makes it (its currency, its rate). It is all or none: a refusal anywhere leaves
+  no order. It refuses an empty list or an award with no lines, an RFQ named twice, RFQs of different requests, a line
+  that is not on its RFQ and one line given to two suppliers (`FIN76`); an RFQ that is not there (`FIN11`), not quoted (`FIN01`)
+  or already holding an order (`FIN22`); and an order that needs a reason and has none (`FIN75`). RFQs are locked in id order.
+- Both make their orders through `private.finance_make_rfq_order`, so an order is made the same way by either.
+
+**Known limits.**
+
+- A direct insert into `finance_purchase_orders` can still attach an order to an RFQ with no reason: the rule is held by the two
+  functions, as the sign-off checks are.
+- The matching exists twice, in `rfq-compare.ts` and in SQL. `tests/bendahara-rfq-split.test.ts` holds them together by
+  asking the database about every line of a few quotes and comparing its answer with `compareQuotes`.
+  `supabase/tests/bendahara_rfq_split_check.sql` is the database's own check.
+- The reason is not shown to the approver yet: that, choosing a supplier for each line, the split total and the minimum-order
+  note are the screen's. Until then Make purchase order has a reason box in Compare quotes and in the RFQ's row menu, and an order needs one
+  only when the database says so.
+- Lower case beyond ASCII follows the database's locale in SQL and the browser's in the comparison.
+- One row given to two suppliers is refused within one call. Calls made one after another are not compared, because an order does not record which RFQ line it came from.
+- The reason can't be edited from a screen yet: the database allows it on a draft, and the screen comes with the next PR.
+- Deploy window: between the migration and the matching app, the old app has no reason box, so a Make purchase order that needs a
+  reason is refused (`FIN75`) and the old app shows its general message.
+
 ## SST settings and tax type
 
 `20261124100000_bendahara_sst_settings` (database only; the screens come
@@ -2282,6 +2338,8 @@ anyone else.
 | `finance_import_statement(target_org, target_account, file_name, lines)` | Stores one statement for one account. `lines` is a list of `{ line_date, description, money_in, money_out }` in the file's order, at most 1,000. Returns the import's id. |
 | `finance_next_number(target_org, doc)` | The next document number. Runs as its owner; the only writer of `finance_sequences`. |
 | `finance_account_numbers(target_org)` | The account numbers of the workspace, one row per account, for someone who may write there; nobody else gets a row. |
+| `finance_convert_rfq(target_org, target_rfq, reason)` | Makes a draft purchase order from a quoted RFQ and returns its id. `reason` is optional, and kept on the order; `FIN75` when the order needs one and has none. See "Splitting an RFQ comparison between suppliers". |
+| `finance_award_rfq_lines(target_org, awards)` | Makes one draft purchase order for each `{ rfq_id, line_ids, reason }` in `awards`, holding only those lines, all or none. Returns the orders' ids. |
 | `finance_save_rfq(target_org, rfq, lines)` | Creates a draft RFQ or replaces a draft's header and lines, and returns the id. Since `20261116090000_bendahara_rfq_source` it writes `rfq.source_rfq_id` when it creates a draft. Saving a draft again leaves the link as it is, whatever is sent. |
 
 The same migration changes two more things. The RFQ guard
@@ -2365,6 +2423,8 @@ quotation, a credit note or a refund by the file that made the call.
 | `FIN57` | A supplier credit note cannot be voided while its credit is used on another bill: take it off that bill first |
 | `FIN58` | Credit can only be applied to a bill from the same supplier as the credit note |
 | `FIN59` | A bill with a draft or issued supplier credit note against it, or with credit applied to it, cannot be voided |
+| `FIN75` | A purchase order made from an RFQ needs a reason when another supplier quoted the same items for less, or the quote has no exchange rate to compare by; a draft's reason is not emptied. `rfqs.ts`: "Another supplier quoted this for less, or it has no exchange rate to compare. Say why this supplier was chosen." |
+| `FIN76` | An award of RFQ lines is not valid: nothing to order, an RFQ named twice, RFQs of different requests, a line that is not on its RFQ, or one line given to two suppliers. No screen reaches it yet |
 
 `FIN23`, `FIN24` and `FIN25` are not the Receipts Inbox's alone. The ledger
 migrations (`20261108091500` to `20261108094500`) raise `FIN23` to `FIN27` with

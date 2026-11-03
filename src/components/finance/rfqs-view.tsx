@@ -8,6 +8,7 @@ import { downloadCsv } from '@/components/finance/download-csv';
 import { RfqCompareCard } from '@/components/finance/rfq-compare-card';
 import { RfqFormCard, type RfqFormActions } from '@/components/finance/rfq-form-card';
 import { type QuoteRfq, RfqPricesCard } from '@/components/finance/rfq-prices-card';
+import { RfqReasonInput } from '@/components/finance/rfq-reason-input';
 import { RowMenu, type RowMenuItem } from '@/components/finance/row-menu';
 import { SavedNoteCard } from '@/components/finance/saved-note-card';
 import { useFinanceAction } from '@/components/finance/use-finance-action';
@@ -120,6 +121,8 @@ export function RfqsView({
   const [filter, setFilter] = useState<RfqFilter>('open');
   const [showAll, setShowAll] = useState(false);
   const [open, setOpen] = useState<Open>(null);
+  // Why the supplier being ordered from was chosen, as typed; kept when the database refuses the order.
+  const [reason, setReason] = useState('');
   const confirm = useFinanceAction();
   const loader = useFinanceAction('read');
 
@@ -140,11 +143,13 @@ export function RfqsView({
   /** Opens one thing, dropping whatever message the last question left behind. */
   const ask = (next: Exclude<Open, null>) => {
     confirm.clear();
+    setReason('');
     setOpen(next);
   };
   /** Closes whatever is open, and the message that went with it. */
   const close = () => {
     confirm.clear();
+    setReason('');
     setOpen(null);
   };
 
@@ -257,7 +262,7 @@ export function RfqsView({
             pendingLabel="Making…"
             onConfirm={() =>
               confirm.run(
-                () => actions.convert(id),
+                () => actions.convert({ ...id, reason }),
                 // The row's question goes; the note at the top of the page says where the order is.
                 () => ask({ kind: 'converted', rfq }),
               )
@@ -266,6 +271,7 @@ export function RfqsView({
             Make a draft purchase order from {number} to {who} ({money(rfq.total, rfq.currency)})? It gets the same supplier and
             lines, at the prices quoted{rfq.currency !== BASE_CURRENCY ? `, in ${rfq.currency} at Bank Negara Malaysia's selling rate for today when it has one` : ''},
             and stays a draft on Purchase Orders until it is submitted for approval.
+            <RfqReasonInput value={reason} onChange={setReason} disabled={confirm.pending} />
           </ConfirmRow>
         );
       case 'close':

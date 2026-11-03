@@ -5,6 +5,7 @@ import type { FinanceContact } from '@/lib/finance/contacts';
 import { RfqCompareCard } from '@/components/finance/rfq-compare-card';
 import { RfqFormCard } from '@/components/finance/rfq-form-card';
 import { RfqPricesCard } from '@/components/finance/rfq-prices-card';
+import { RfqReasonInput } from '@/components/finance/rfq-reason-input';
 import { type RfqActions, RfqsView } from '@/components/finance/rfqs-view';
 import { rfqActions } from '@/lib/finance/purchase-views';
 import { priceDrafts, quoteFormError, quotePayload, submitPrices } from '@/lib/finance/rfq-form';
@@ -388,5 +389,14 @@ describe('Compare quotes', () => {
     expect(text(substituted).match(/A4 paper 80gsm/g)).toHaveLength(1);
     expect(text(substituted)).toContain('Lowest RM 9.00 Qty 10 · No SST · RM 90.00 A4 paper 70gsm (substitute)');
     expect(classesOf(substituted, 'A4 paper 70gsm \\(substitute\\)')).toEqual(expect.arrayContaining(['whitespace-normal', 'break-words']));
+  });
+});
+
+describe('the reason beside Make purchase order', () => {
+  it('is a labelled box of at most 200 characters that shows what was typed', () => {
+    const html = renderToStaticMarkup(<RfqReasonInput value="Delivers next day" onChange={() => {}} />);
+    expect(html).toContain('aria-label="Why this supplier was chosen"');
+    expect(html).toContain('maxLength="200"');
+    expect(html).toContain('value="Delivers next day"');
   });
 });
