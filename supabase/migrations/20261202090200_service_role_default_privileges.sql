@@ -2,7 +2,7 @@
 --
 -- A fresh Supabase project's default gives service_role ALL on every table a
 -- migration creates; the hosted project's default still gives it TRUNCATE,
--- REFERENCES, TRIGGER and MAINTAIN. 20261201090000 closes that on the
+-- REFERENCES, TRIGGER and MAINTAIN. 20261202090100 closes that on the
 -- crm_ relations that exist now, but a table made later would inherit it again.
 -- Changing the default closes it at the source.
 --

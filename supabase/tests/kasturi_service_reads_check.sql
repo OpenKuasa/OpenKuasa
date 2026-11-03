@@ -1,10 +1,10 @@
--- Kasturi boundary check (20261201090000_kasturi_service_role_grants.sql, issue #431).
+-- Kasturi boundary check (20261202090100_kasturi_service_role_grants.sql, issue #431).
 -- Leaves nothing behind: the block always ends with RAISE, so every row below is
 -- rolled back. Read the message:
 --   KASTURI_SERVICE_READS_CHECK PASSED ...   or   ... FAILED (n): <what went wrong>
 --
 --   begin;
---   \i supabase/migrations/20261201090000_kasturi_service_role_grants.sql
+--   \i supabase/migrations/20261202090100_kasturi_service_role_grants.sql
 --   \i supabase/tests/kasturi_service_reads_check.sql
 --   rollback;
 --

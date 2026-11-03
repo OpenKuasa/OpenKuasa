@@ -10,8 +10,8 @@ function statements(path: string): string {
     .join('\n');
 }
 
-const sql = statements('supabase/migrations/20261201090000_kasturi_service_role_grants.sql');
-const defaults = statements('supabase/migrations/20261201090100_service_role_default_privileges.sql');
+const sql = statements('supabase/migrations/20261202090100_kasturi_service_role_grants.sql');
+const defaults = statements('supabase/migrations/20261202090200_service_role_default_privileges.sql');
 const check = statements('supabase/tests/kasturi_service_reads_check.sql');
 
 /** Every `grant <verb> (cols) on public.<table> to service_role;` in the migration, as table.column. */

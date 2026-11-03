@@ -10,7 +10,7 @@
 -- as well (issue #431).
 --
 -- This file closes it for the crm_ relations that exist now. The next migration
--- (20261201090100) changes the default, so a crm_ relation made later starts with
+-- (20261202090200) changes the default, so a crm_ relation made later starts with
 -- nothing for service_role instead of inheriting this gap again.
 --
 -- Revoking a table privilege drops the column grants held on that relation too.
