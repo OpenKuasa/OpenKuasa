@@ -18,7 +18,8 @@
 --     four review columns, judged with has_column_privilege on every crm_ column
 --     (insert, update, references) so a grant made to PUBLIC cannot hide, and the
 --     file proves that sensitivity by granting one column to PUBLIC and rolling it
---     back; a real marking update runs as service_role;
+--     back; the marking update, in the form PostgREST sends it, runs as
+--     service_role;
 --   * a real read of the pinned columns as service_role, and a refused read, a
 --     refused insert and a refused update beside it.
 do $$
@@ -32,19 +33,14 @@ declare
   rcpt uuid := gen_random_uuid();
   rcpt2 uuid := gen_random_uuid();
   r record;
-  -- The write inventory, kept in one place so the assertion below and the PUBLIC
-  -- probe judge the schema with the same statement rather than two copies of it.
+  -- What service_role may write, as private.crm_service_role_access() reports it.
+  -- That function is the migration's own self-check too, so both judge the
+  -- boundary with one statement.
   inv constant text := $q$
-    select string_agg(c.relname || '.' || a.attname || ':' || p.priv,
-                      ',' order by c.relname, a.attname, p.priv)
-      from pg_catalog.pg_class c
-      join pg_catalog.pg_attribute a
-        on a.attrelid = c.oid and a.attnum > 0 and not a.attisdropped
-      cross join (values ('INSERT'), ('UPDATE'), ('REFERENCES')) p(priv)
-     where c.relnamespace = 'public'::regnamespace
-       and c.relname like 'crm\_%'
-       and c.relkind in ('r', 'p', 'v', 'm', 'f')
-       and has_column_privilege('service_role', c.oid, a.attname, p.priv)$q$;
+    select string_agg(a.relation || '.' || a.col || ':' || a.privilege, ','
+                      order by a.relation, a.col, a.privilege)
+      from private.crm_service_role_access() a
+     where a.col is not null and a.privilege <> 'SELECT'$q$;
   expected constant text := 'crm_broadcast_recipients.error:UPDATE,crm_broadcast_recipients.provider_id:UPDATE,'
                           || 'crm_broadcast_recipients.sent_at:UPDATE,crm_broadcast_recipients.status:UPDATE';
 begin
@@ -54,24 +50,17 @@ begin
   end if;
 
   -- ---- 1. no table privilege of any kind on a crm_ relation ----
-  select string_agg(c.relname, ', ' order by c.relname) into t
-    from pg_catalog.pg_class c
-   where c.relnamespace = 'public'::regnamespace
-     and c.relname like 'crm\_%'
-     and c.relkind in ('r', 'p', 'v', 'm', 'f')
-     and (has_table_privilege('service_role', c.oid, 'select')
-       or has_table_privilege('service_role', c.oid, 'insert')
-       or has_table_privilege('service_role', c.oid, 'update')
-       or has_table_privilege('service_role', c.oid, 'delete')
-       or has_table_privilege('service_role', c.oid, 'truncate')
-       or has_table_privilege('service_role', c.oid, 'references')
-       or has_table_privilege('service_role', c.oid, 'trigger'));
+  select string_agg(a.relation || ':' || a.privilege, ', ' order by a.relation, a.privilege) into t
+    from private.crm_service_role_access() a
+   where a.col is null;
   if t is not null then fails := fails || format('service_role holds a table privilege on %s', t); end if;
 
   -- ---- 2. the pin: what the Kasturi worker reads, and why ----
   -- src/lib/crm/agent/context.ts selects, filters, sorts and embeds through these.
   -- src/lib/crm/broadcast-send.ts:321 reads id and status in its own where clause
   -- and writes the four below. A new grant fails here until it is reviewed.
+  -- The same list as the migration's grants; tests/crm-service-role-grants-migration.test.ts
+  -- fails when the two disagree.
   pinned := array[
     'crm_contacts.id', 'crm_contacts.org_id', 'crm_contacts.first_name', 'crm_contacts.last_name',
     'crm_contacts.status', 'crm_contacts.source', 'crm_contacts.tags', 'crm_contacts.created_at',
@@ -89,13 +78,10 @@ begin
   if t is not null then fails := fails || format('service_role may not read %s', t); end if;
 
   -- ---- 3. and nothing readable outside the pin ----
-  select string_agg(c.table_name || '.' || c.column_name, ',' order by c.table_name, c.column_name) into t
-    from information_schema.columns c
-    join pg_catalog.pg_class k on k.relname = c.table_name and k.relnamespace = 'public'::regnamespace
-   where c.table_schema = 'public'
-     and c.table_name like 'crm\_%'
-     and has_column_privilege('service_role', k.oid, c.column_name, 'select')
-     and (c.table_name || '.' || c.column_name) <> all (pinned);
+  select string_agg(a.relation || '.' || a.col, ',' order by a.relation, a.col) into t
+    from private.crm_service_role_access() a
+   where a.col is not null and a.privilege = 'SELECT'
+     and (a.relation || '.' || a.col) <> all (pinned);
   if t is not null then fails := fails || format('service_role may also read %s', t); end if;
 
   -- ---- 4. the private sample, by name, so a reader sees what is closed ----
@@ -138,7 +124,7 @@ begin
      where table_schema = 'public' and table_name like 'crm\_%' and grantee = 'service_role'
        and privilege_type <> 'SELECT';
     if coalesce(t, '') ~ 'crm_contacts\.status' then
-      fails := fails || 'the grantee filter saw the PUBLIC grant, so the probe proves nothing';
+      fails := fails || 'the grantee filter saw the PUBLIC grant, so the probe proves nothing'::text;
     end if;
 
     execute inv into t;
@@ -180,13 +166,28 @@ begin
     values (rcpt, org, bcast, 'qa@example.com', 'pending'),
            (rcpt2, org, bcast, 'retry@example.com', 'pending');
 
+  -- The statements below are the ones PostgREST builds for the sender's
+  -- `.update(patch).eq('id', id)` and `.neq('status', 'sent')`, copied from the
+  -- hosted project's pg_stat_statements (2026-11-04) with the parameters filled
+  -- in: it sets only the patch's columns from a json_to_record of the body,
+  -- filters on id (and status), and returns a constant. A hand-written UPDATE
+  -- would not prove the request the app sends is allowed.
   begin
     set local role service_role;
-    -- The two forms src/lib/crm/broadcast-send.ts sends.
-    update public.crm_broadcast_recipients
-       set status = 'sent', sent_at = now(), provider_id = 'p-1', error = null
-     where id = rcpt;
-    get diagnostics n = row_count;
+    execute $u$
+      WITH pgrst_source AS (
+        UPDATE "public"."crm_broadcast_recipients"
+           SET "error" = "pgrst_body"."error", "provider_id" = "pgrst_body"."provider_id",
+               "sent_at" = "pgrst_body"."sent_at", "status" = "pgrst_body"."status"
+          FROM (SELECT $1 AS json_data) pgrst_payload,
+               LATERAL (SELECT "error", "provider_id", "sent_at", "status"
+                          FROM json_to_record(pgrst_payload.json_data)
+                            AS _("error" text, "provider_id" text, "sent_at" timestamp with time zone, "status" text)) pgrst_body
+         WHERE "public"."crm_broadcast_recipients"."id" = $2
+        RETURNING 1)
+      SELECT pg_catalog.count(_postgrest_t) FROM (SELECT * FROM pgrst_source) _postgrest_t$u$
+      into n
+      using json_build_object('status', 'sent', 'provider_id', 'p-1', 'sent_at', now(), 'error', null), rcpt;
     if n <> 1 then fails := fails || format('the marking update matched %s recipients, expected 1', n); end if;
     reset role;
   exception when others then
@@ -198,9 +199,19 @@ begin
   -- kept sent by crm_broadcast_recipients_keep_sent, so it would match no row.
   begin
     set local role service_role;
-    update public.crm_broadcast_recipients set status = 'failed', error = 'refused'
-     where id = rcpt2 and status <> 'sent';
-    get diagnostics n = row_count;
+    execute $u$
+      WITH pgrst_source AS (
+        UPDATE "public"."crm_broadcast_recipients"
+           SET "error" = "pgrst_body"."error", "status" = "pgrst_body"."status"
+          FROM (SELECT $1 AS json_data) pgrst_payload,
+               LATERAL (SELECT "error", "status"
+                          FROM json_to_record(pgrst_payload.json_data) AS _("error" text, "status" text)) pgrst_body
+         WHERE "public"."crm_broadcast_recipients"."id" = $2
+           AND "public"."crm_broadcast_recipients"."status" <> $3
+        RETURNING 1)
+      SELECT pg_catalog.count(_postgrest_t) FROM (SELECT * FROM pgrst_source) _postgrest_t$u$
+      into n
+      using json_build_object('status', 'failed', 'error', 'refused'), rcpt2, 'sent';
     if n <> 1 then fails := fails || format('the retry form matched %s recipients, expected 1', n); end if;
     reset role;
   exception when others then
