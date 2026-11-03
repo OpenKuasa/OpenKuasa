@@ -172,6 +172,8 @@ export const setEInvoiceInput = z
 
 /** The invoice is on a return marked filed (private trigger finance_invoice_void_filed_guard, #222). */
 const FIN_VOID_ON_FILED = 'FIN71';
+/** The invoice is dated inside a return marked filed (private trigger finance_invoice_post_filed_guard, #222). */
+const FIN_POST_ON_FILED = 'FIN72';
 
 const REFUSALS: Record<string, string> = {
   FIN01: M.locked,
@@ -460,7 +462,12 @@ export async function postInvoice(
     target_org: ctx.orgId,
     target_invoice: id,
   });
-  if (error || !data) return invoiceWriteFailed('postInvoice', error);
+  if (error || !data) {
+    // The database words this refusal itself: it names the filed period and both ways out (#222).
+    const message = (error as { message?: unknown } | null)?.message;
+    if (pgCode(error) === FIN_POST_ON_FILED && typeof message === 'string' && message) return { ok: false, error: message };
+    return invoiceWriteFailed('postInvoice', error);
+  }
   return { ok: true, data: { id, invoice_no: data as string } };
 }
 

@@ -132,9 +132,10 @@ begin
   -- finance_credit_notes_audit: 20261125120000 (audit trail).
   -- finance_period_lock: 20261125140000 (accounting settings, the books lock).
   -- finance_credit_note_void_filed_guard: 20261128093000 (no void on a filed SST return).
+  -- finance_credit_note_issue_filed_guard: 20261129090000 (no issue into a filed SST return).
   select string_agg(tgname, ',' order by tgname) into t from pg_trigger
    where tgrelid = 'public.finance_credit_notes'::regclass and not tgisinternal and tgenabled = 'O';
-  if t is distinct from 'finance_credit_note_guard,finance_credit_note_sign_off,finance_credit_note_to_ringgit,finance_credit_note_void_filed_guard,finance_credit_notes_audit,finance_period_lock,finance_void_stamp' then
+  if t is distinct from 'finance_credit_note_guard,finance_credit_note_issue_filed_guard,finance_credit_note_sign_off,finance_credit_note_to_ringgit,finance_credit_note_void_filed_guard,finance_credit_notes_audit,finance_period_lock,finance_void_stamp' then
     fails := fails || format('triggers on finance_credit_notes are: %s', t);
   end if;
   select string_agg(attname, ',' order by attnum) into t from pg_attribute

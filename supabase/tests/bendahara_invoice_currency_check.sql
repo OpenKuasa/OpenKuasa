@@ -65,10 +65,11 @@ begin
   -- finance_invoices_audit: 20261125120000 (audit trail).
   -- finance_period_lock: 20261125140000 (accounting settings, the books lock).
   -- finance_invoice_void_filed_guard: 20261128092000 (no void on a filed SST return).
+  -- finance_invoice_post_filed_guard: 20261129090000 (no document dated in a filed SST return).
   select string_agg(tgname, ',' order by tgname) into t from pg_trigger
    where tgrelid = 'public.finance_invoices'::regclass and not tgisinternal;
   if t is distinct from 'finance_invoice_doc_discount_fits,finance_invoice_doc_discount_split,'
-       || 'finance_invoice_guard,finance_invoice_rate_to_lines,finance_invoice_sign_off,'
+       || 'finance_invoice_guard,finance_invoice_post_filed_guard,finance_invoice_rate_to_lines,finance_invoice_sign_off,'
        || 'finance_invoice_to_ringgit,finance_invoice_void_contra,finance_invoice_void_filed_guard,finance_invoices_audit,'
        || 'finance_period_lock,finance_void_stamp' then
     fails := fails || format('triggers on finance_invoices are: %s', t);
