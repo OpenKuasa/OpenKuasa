@@ -63,12 +63,18 @@ grant update (status, provider_id, error, sent_at) on public.crm_broadcast_recip
 
 -- The final shape, judged with has_table_privilege and has_column_privilege
 -- rather than aclexplode: a privilege granted to PUBLIC has no grantee row for
--- service_role, so an aclexplode filter would pass on a writable relation.
+-- service_role, so an aclexplode filter would pass on a writable relation. The
+-- same reason rules out information_schema.column_privileges filtered on
+-- grantee = 'service_role': a column grant made to PUBLIC is recorded once, with
+-- PUBLIC as the grantee, while service_role inherits it and section below only
+-- samples columns. So the write inventory asks has_column_privilege about every
+-- column of every crm_ relation.
 do $$
 declare
   left_over text;
   missing text;
   readable text;
+  writable text;
 begin
   select string_agg(c.relname, ', ' order by c.relname) into left_over
     from pg_catalog.pg_class c
@@ -109,5 +115,20 @@ begin
    where has_column_privilege('service_role', ('public.' || v.tbl)::regclass, v.col, 'select');
   if readable is not null then
     raise exception 'service_role may read private crm_ columns: %', readable;
+  end if;
+
+  select string_agg(c.relname || '.' || a.attname || ':' || p.priv,
+                    ',' order by c.relname, a.attname, p.priv) into writable
+    from pg_catalog.pg_class c
+    join pg_catalog.pg_attribute a
+      on a.attrelid = c.oid and a.attnum > 0 and not a.attisdropped
+    cross join (values ('INSERT'), ('UPDATE'), ('REFERENCES')) p(priv)
+   where c.relnamespace = 'public'::regnamespace
+     and c.relname like 'crm\_%'
+     and c.relkind in ('r', 'p', 'v', 'm', 'f')
+     and has_column_privilege('service_role', c.oid, a.attname, p.priv);
+  if coalesce(writable, '') <> 'crm_broadcast_recipients.error:UPDATE,crm_broadcast_recipients.provider_id:UPDATE,'
+                             || 'crm_broadcast_recipients.sent_at:UPDATE,crm_broadcast_recipients.status:UPDATE' then
+    raise exception 'service_role may write more than the marking columns: %', coalesce(writable, 'nothing');
   end if;
 end $$;

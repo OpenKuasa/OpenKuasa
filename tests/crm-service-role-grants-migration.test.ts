@@ -61,4 +61,34 @@ describe('no crm_ relation keeps the table grant a fresh project gives service_r
     expect(sql).not.toMatch(/grant (all|insert|delete|truncate|references|trigger)/);
     expect(sql).not.toMatch(/\bon public\.crm_\w+ to (anon|authenticated|public)\b/);
   });
+
+  // A column grant made to PUBLIC is inherited by service_role and has no
+  // service_role grantee row, so a sampled or grantee-filtered write check passes
+  // on a writable column. The inventory has to ask has_column_privilege about
+  // every column of every crm_ relation, for insert, update and references.
+  test('the inline self-check judges every crm_ column for write privileges', () => {
+    expect(sql).toMatch(/has_column_privilege\('service_role', c\.oid, a\.attname, p\.priv\)/);
+    expect(sql).toMatch(/cross join \(values \('INSERT'\), \('UPDATE'\), \('REFERENCES'\)\) p\(priv\)/);
+    expect(sql).toMatch(/crm_broadcast_recipients\.error:UPDATE/);
+  });
+});
+
+describe('the boundary check judges writes by effective column privilege', () => {
+  const check = readFileSync(join(process.cwd(), 'supabase/tests/kasturi_service_reads_check.sql'), 'utf8')
+    .split('\n')
+    .filter((line) => !line.trimStart().startsWith('--'))
+    .join('\n');
+
+  test('inventories every crm_ column for insert, update and references', () => {
+    expect(check).toMatch(/cross join \(values \('INSERT'\), \('UPDATE'\), \('REFERENCES'\)\) p\(priv\)/);
+    expect(check).toMatch(/has_column_privilege\('service_role', c\.oid, a\.attname, p\.priv\)/);
+  });
+
+  // The arbiter's own sensitivity is proved inside the file: grant one column to
+  // PUBLIC, expect the inventory to name it, then prove the grant is gone.
+  test('proves it catches a column grant made to PUBLIC, and rolls that grant back', () => {
+    expect(check).toMatch(/grant update \(status\) on public\.crm_contacts to public;/);
+    expect(check).toMatch(/does not see a column grant made to PUBLIC/);
+    expect(check).toMatch(/the PUBLIC probe grant was not rolled back/);
+  });
 });

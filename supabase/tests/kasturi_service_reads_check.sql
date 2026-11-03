@@ -15,7 +15,10 @@
 --     on that relation is readable, and the private sample (an email, a phone, a
 --     note body, a chatbot message, an audit row, the lost-reason setting) is refused;
 --   * the only write privilege on the whole schema is the broadcast marking path's
---     four review columns, and a real marking update runs as service_role;
+--     four review columns, judged with has_column_privilege on every crm_ column
+--     (insert, update, references) so a grant made to PUBLIC cannot hide, and the
+--     file proves that sensitivity by granting one column to PUBLIC and rolling it
+--     back; a real marking update runs as service_role;
 --   * a real read of the pinned columns as service_role, and a refused read, a
 --     refused insert and a refused update beside it.
 do $$
@@ -29,6 +32,21 @@ declare
   rcpt uuid := gen_random_uuid();
   rcpt2 uuid := gen_random_uuid();
   r record;
+  -- The write inventory, kept in one place so the assertion below and the PUBLIC
+  -- probe judge the schema with the same statement rather than two copies of it.
+  inv constant text := $q$
+    select string_agg(c.relname || '.' || a.attname || ':' || p.priv,
+                      ',' order by c.relname, a.attname, p.priv)
+      from pg_catalog.pg_class c
+      join pg_catalog.pg_attribute a
+        on a.attrelid = c.oid and a.attnum > 0 and not a.attisdropped
+      cross join (values ('INSERT'), ('UPDATE'), ('REFERENCES')) p(priv)
+     where c.relnamespace = 'public'::regnamespace
+       and c.relname like 'crm\_%'
+       and c.relkind in ('r', 'p', 'v', 'm', 'f')
+       and has_column_privilege('service_role', c.oid, a.attname, p.priv)$q$;
+  expected constant text := 'crm_broadcast_recipients.error:UPDATE,crm_broadcast_recipients.provider_id:UPDATE,'
+                          || 'crm_broadcast_recipients.sent_at:UPDATE,crm_broadcast_recipients.status:UPDATE';
 begin
   -- ---- 0. nothing to judge? then say so instead of passing quietly ----
   if to_regclass('public.crm_deals') is null then
@@ -97,15 +115,46 @@ begin
     end if;
   end loop;
 
-  -- ---- 5. the whole schema's writes: the marking path's four columns, nothing else ----
-  select string_agg(table_name || '.' || column_name || ':' || privilege_type, ',' order by table_name, column_name, privilege_type)
-    into t
-    from information_schema.column_privileges
-   where table_schema = 'public' and table_name like 'crm\_%' and grantee = 'service_role'
-     and privilege_type <> 'SELECT';
-  if coalesce(t, '') <> 'crm_broadcast_recipients.error:UPDATE,crm_broadcast_recipients.provider_id:UPDATE,'
-                     || 'crm_broadcast_recipients.sent_at:UPDATE,crm_broadcast_recipients.status:UPDATE' then
+  -- ---- 5. the whole schema's writes, judged per column ----
+  -- information_schema.column_privileges filtered on grantee = 'service_role' cannot
+  -- see a column grant made to PUBLIC, and service_role inherits that grant, so the
+  -- inventory asks has_column_privilege about every crm_ column instead.
+  execute inv into t;
+  if coalesce(t, '') <> expected then
     fails := fails || format('service_role writes more than the marking path: %s', coalesce(t, 'nothing'));
+  end if;
+
+  -- ---- 5b. prove that inventory sees a grant the grantee filter cannot ----
+  -- grant update (status) on public.crm_contacts to public records PUBLIC as the
+  -- grantee, so the older information_schema query stays blind to it while
+  -- service_role can write the column. The block rolls the grant back, and the
+  -- inventory is run again after it to prove the state came back.
+  begin
+    grant update (status) on public.crm_contacts to public;
+
+    select string_agg(table_name || '.' || column_name || ':' || privilege_type, ',')
+      into t
+      from information_schema.column_privileges
+     where table_schema = 'public' and table_name like 'crm\_%' and grantee = 'service_role'
+       and privilege_type <> 'SELECT';
+    if coalesce(t, '') ~ 'crm_contacts\.status' then
+      fails := fails || 'the grantee filter saw the PUBLIC grant, so the probe proves nothing';
+    end if;
+
+    execute inv into t;
+    if t is distinct from expected || ',crm_contacts.status:UPDATE' then
+      fails := fails || format('the write inventory does not see a column grant made to PUBLIC: %s',
+                               coalesce(t, 'nothing'));
+    end if;
+
+    raise exception using errcode = 'KS001', message = 'roll the probe grant back';
+  exception when sqlstate 'KS001' then
+    null;
+  end;
+
+  execute inv into t;
+  if coalesce(t, '') <> expected then
+    fails := fails || format('the PUBLIC probe grant was not rolled back: %s', coalesce(t, 'nothing'));
   end if;
 
   -- ---- 6. a real read of each relation's pinned columns, as service_role ----
