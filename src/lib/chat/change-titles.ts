@@ -2303,7 +2303,7 @@ export function approvalDetail(
     const parts = [line, why && `Description: “${why}”`].filter(Boolean);
     return parts.length > 0 ? parts.join(' · ') : null;
   }
-  if (toolName === 'submitOvertime') {
+  if (toolName === 'submitOvertime' || toolName === 'convertRfq') {
     const why = text(i.reason);
     return why ? `Reason: “${why}”` : null;
   }

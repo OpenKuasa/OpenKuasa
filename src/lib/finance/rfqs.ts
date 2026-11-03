@@ -64,6 +64,8 @@ export const RFQ_MESSAGES = {
   unpriced: 'Enter a price for every line before marking the RFQ as quoted.',
   numberTaken: 'That RFQ number is already used.',
   missing: 'The supplier or a product on this RFQ no longer exists.',
+  // FIN75: another supplier's quote for the same request is lower, or this one has no exchange rate to compare by.
+  needsReason: 'Another supplier quoted this for less, or it has no exchange rate to compare. Say why this supplier was chosen.',
   // FIN22, or the database's one-order-per-RFQ key
   hasOrder: 'This RFQ already has a purchase order. Cancel that order first to make another.',
   // Compare quotes, when the group came apart since the page was loaded.
@@ -154,6 +156,9 @@ export const saveRfqToolInput = saveRfqBase
 
 export const rfqIdInput = z.object({ id: z.string({ error: M.gone }).uuid(M.gone) });
 
+/** Make purchase order: the RFQ, and why this supplier was chosen, which the database asks for when it is not the lowest quote. */
+export const convertRfqInput = rfqIdInput.extend({ reason: optionalText.optional() });
+
 /** The supplier's answer: a price for each line they priced, and their own reference if they gave one. */
 export const quoteRfqInput = rfqIdInput.extend({
   supplier_ref: optionalText.default(null),
@@ -176,6 +181,7 @@ const REFUSALS: Record<string, string> = {
   FIN11: M.gone,
   FIN19: M.unpriced,
   FIN39: M.notBnmRate,
+  FIN75: M.needsReason,
   [PG_UNIQUE]: M.numberTaken,
   [PG_FOREIGN_KEY]: M.missing,
   [PG_FORBIDDEN]: NOT_ALLOWED,
@@ -497,16 +503,19 @@ export async function deleteRfq(
  * Makes a draft purchase order from a quoted RFQ: the same supplier, notes and
  * lines, dated today, in the RFQ's currency at the SST rule's rate for that
  * day when Bank Negara has one (the RFQ's rate was indicative). The RFQ stays quoted. Refused while a purchase order
- * made from it stands; a cancelled one frees it.
+ * made from it stands; a cancelled one frees it. The reason is kept on the order; the database asks for one when
+ * another supplier quoted the same items for less (FIN75).
  */
 export async function convertRfq(
   ctx: FinanceWriteContext,
-  input: z.input<typeof rfqIdInput>,
+  input: z.input<typeof convertRfqInput>,
 ): Promise<FinResult<{ id: string; purchase_order_id: string }>> {
-  const { id } = rfqIdInput.parse(input);
+  const { id, reason } = convertRfqInput.parse(input);
   const { data, error } = await ctx.client.rpc('finance_convert_rfq', {
     target_org: ctx.orgId,
     target_rfq: id,
+    // Left out when blank: a call with none reads as it always did.
+    ...(reason ? { reason } : {}),
   });
   if (error || !data) {
     // Here a clash on the unique key is the second order for one RFQ, not a taken number.

@@ -153,6 +153,7 @@ import {
 import {
   closeRfq,
   convertRfq,
+  convertRfqInput,
   getRfq,
   getRfqGroup,
   listRfqs,
@@ -595,8 +596,9 @@ export function createBendaharaTools(access: FinanceAccess) {
       description:
         "Make a draft purchase order from a quoted RFQ. An RFQ in another currency becomes an order in that currency at " +
         "Bank Negara Malaysia's selling rate for today when it has one; otherwise with no rate, which the order needs " +
-        'before it is submitted.',
-      inputSchema: rfqIdInput,
+        'before it is submitted. When another supplier quoted the same items for less, or this quote is in another currency ' +
+        'with no exchange rate to compare by, pass reason: why this supplier was chosen. Without one the order is refused.',
+      inputSchema: convertRfqInput,
       execute: async (input) => convertRfq(ctx, input),
     }),
     closeRfq: tool({

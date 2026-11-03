@@ -3,6 +3,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { BadgeCheck, ClipboardCheck, Scale } from 'lucide-react';
 import { BentoCard } from '@/components/bento/bento';
+import { RfqReasonInput } from '@/components/finance/rfq-reason-input';
 import { useFinanceAction } from '@/components/finance/use-finance-action';
 import { Button } from '@/components/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
@@ -49,6 +50,8 @@ export function RfqCompareCard({
   const totals = quoteTotals(rfqs);
   const mixed = quotesInSeveralCurrencies(rfqs);
   const [confirming, setConfirming] = useState<RfqDetail | null>(null);
+  // Why the supplier being ordered from was chosen, as typed; kept when the database refuses the order.
+  const [reason, setReason] = useState('');
   const action = useFinanceAction();
   // The question is asked of the group as it now reads, not as it read when the question was opened.
   const asked = orderableRfq(rfqs, confirming?.id ?? null);
@@ -63,6 +66,7 @@ export function RfqCompareCard({
     // The refusal belonged to the question, so it goes with it, as ConfirmRow's does.
     action.clear();
     setConfirming(null);
+    setReason('');
     opener.current?.focus();
   };
   // A question whose RFQ can no longer be ordered goes, and its buttons with it: focus goes to Close, not to the page.
@@ -184,6 +188,7 @@ export function RfqCompareCard({
                       onClick={(event) => {
                         opener.current = event.currentTarget;
                         action.clear();
+                        setReason('');
                         setConfirming(r);
                       }}
                     >
@@ -219,6 +224,7 @@ export function RfqCompareCard({
               <span className="font-medium">{asked.supplier_name}</span> ({money(asked.total, asked.currency)})? It gets the same supplier
               and lines, at the prices quoted, and stays a draft on Purchase Orders until it is submitted for approval. The
               other RFQs stay as they are.
+              <RfqReasonInput value={reason} onChange={setReason} disabled={action.pending} />
             </p>
             {/* aria-disabled rather than disabled, as in ConfirmRow: a disabled button drops focus to the page. */}
             <Button
@@ -231,7 +237,7 @@ export function RfqCompareCard({
                 if (action.pending) return;
                 action.run(
                   async () => {
-                    const result = await convert({ id: asked.id });
+                    const result = await convert({ id: asked.id, reason });
                     if (!result.ok) {
                       try {
                         await reload?.();

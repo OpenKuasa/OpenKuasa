@@ -80,13 +80,13 @@ begin
   end if;
   select string_agg(tgname, ',' order by tgname) into t from pg_trigger
    where tgrelid = 'public.finance_purchase_orders'::regclass and not tgisinternal;
-  if t is distinct from 'finance_purchase_order_guard,finance_purchase_order_log,finance_purchase_order_to_ringgit' then
+  if t is distinct from 'finance_purchase_order_guard,finance_purchase_order_log,finance_purchase_order_reason_lock,finance_purchase_order_to_ringgit' then
     fails := fails || format('triggers on finance_purchase_orders are: %s', t);
   end if;
   select string_agg(attname, ',' order by attnum) into t from pg_attribute
    where attrelid = 'public.finance_purchase_order_totals'::regclass and attnum > 23 and not attisdropped;
   if t is distinct from 'supplier_name,rfq_no,subtotal,sst_total,total,delivery,received_total,billed_total,over_billed,'
-       || 'billed_over_received,currency,fx_rate,fx_rate_source,fx_rate_date,total_myr' then
+       || 'billed_over_received,currency,fx_rate,fx_rate_source,fx_rate_date,total_myr,award_reason' then
     fails := fails || format('finance_purchase_order_totals ends with: %s', t);
   end if;
   select count(*) into n from pg_proc p join pg_namespace s on s.oid = p.pronamespace

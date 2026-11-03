@@ -2,6 +2,10 @@ import { describe, expect, it } from 'vitest';
 import { approvalTitle, approvalDetail, collectNames, nameIn } from '@/lib/chat/change-titles';
 
 describe('finance approve-card titles', () => {
+  it('shows the reason a purchase order goes to a supplier that is not the lowest', () => {
+    expect(approvalDetail('convertRfq', { id: 'r1', reason: 'Delivers sooner' })).toBe('Reason: “Delivers sooner”');
+    expect(approvalDetail('convertRfq', { id: 'r1' })).toBeNull();
+  });
   it('names the invoice lifecycle specifically, not generically', () => {
     const named = () => 'INV-001';
     expect(approvalTitle('postInvoice', { id: 'i1' }, named)).toBe('Post invoice “INV-001”?');
