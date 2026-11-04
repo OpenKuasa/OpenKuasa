@@ -9,6 +9,7 @@ import {
   formatEnv,
   missingHostedSettings,
   parseEnv,
+  postgrestFiles,
   resolveSecrets,
   verifyJwt,
 } from '../scripts/local-init.mjs';
@@ -146,6 +147,18 @@ describe('online Supabase (hosted mode)', () => {
   });
 });
 
+describe('postgrestFiles', () => {
+  // PostgREST's amd64 image has no shell, so it reads these two straight from files.
+  it('builds the database address with the password encoded, and passes the JWT secret as is', () => {
+    const files = postgrestFiles({ POSTGRES_PASSWORD: 'p@ss/w:rd?#%', JWT_SECRET: 'a'.repeat(40) });
+    expect(files['postgrest-db-uri']).toBe(
+      `postgres://authenticator:${encodeURIComponent('p@ss/w:rd?#%')}@db:5432/postgres`,
+    );
+    expect(new URL(files['postgrest-db-uri']).password).toBe(encodeURIComponent('p@ss/w:rd?#%'));
+    expect(files['postgrest-jwt-secret']).toBe('a'.repeat(40));
+  });
+});
+
 describe('local-init CLI', () => {
   it('writes the settings file readable by its group (other stack users) but not by everyone', () => {
     const dir = mkdtempSync(path.join(tmpdir(), 'li-'));
@@ -156,6 +169,46 @@ describe('local-init CLI', () => {
     });
     expect(statSync(file).mode & 0o777).toBe(0o640);
     expect(Object.keys(parseEnv(readFileSync(file, 'utf8')))).toEqual(expect.arrayContaining([...GENERATED]));
+  });
+
+  it('writes the two PostgREST files from the final settings, readable by the stack only', () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'li-'));
+    const file = path.join(dir, 'generated.env');
+    const run = () =>
+      execFileSync(process.execPath, [path.resolve(__dirname, '../scripts/local-init.mjs')], {
+        env: { PATH: process.env.PATH ?? '', OPENKUASA_SECRETS_FILE: file, POSTGRES_PASSWORD: 'typed@pw' } as unknown as NodeJS.ProcessEnv,
+        encoding: 'utf8',
+      });
+    run();
+    const values = parseEnv(readFileSync(file, 'utf8'));
+    const uri = readFileSync(path.join(dir, 'postgrest-db-uri'), 'utf8');
+    const jwt = readFileSync(path.join(dir, 'postgrest-jwt-secret'), 'utf8');
+    expect(uri).toBe('postgres://authenticator:typed%40pw@db:5432/postgres');
+    expect(jwt).toBe(values.JWT_SECRET);
+    for (const name of ['postgrest-db-uri', 'postgrest-jwt-secret']) {
+      expect(statSync(path.join(dir, name)).mode & 0o777).toBe(0o640);
+    }
+    run();
+    expect(readFileSync(path.join(dir, 'postgrest-jwt-secret'), 'utf8')).toBe(jwt);
+  });
+
+  it('writes no PostgREST files for an online Supabase', () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'li-'));
+    const file = path.join(dir, 'generated.env');
+    execFileSync(process.execPath, [path.resolve(__dirname, '../scripts/local-init.mjs')], {
+      env: {
+        PATH: process.env.PATH ?? '',
+        OPENKUASA_SECRETS_FILE: file,
+        OPENKUASA_INIT_MODE: 'hosted',
+        NEXT_PUBLIC_SUPABASE_URL: 'https://abc.supabase.co',
+        NEXT_PUBLIC_SUPABASE_ANON_KEY: 'anon',
+        SUPABASE_SERVICE_ROLE_KEY: 'service',
+        DATABASE_URL: 'postgres://u:p@h:5432/postgres',
+      } as unknown as NodeJS.ProcessEnv,
+      encoding: 'utf8',
+    });
+    expect(() => statSync(path.join(dir, 'postgrest-db-uri'))).toThrow();
+    expect(() => statSync(path.join(dir, 'postgrest-jwt-secret'))).toThrow();
   });
 });
 

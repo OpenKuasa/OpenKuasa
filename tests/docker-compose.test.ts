@@ -71,6 +71,18 @@ describe('docker-compose.yml', () => {
     }
   });
 
+  it('starts PostgREST without a shell, reading its secrets from the files init writes', () => {
+    // The amd64 PostgREST image has no /bin/sh (the arm64 one does), so the
+    // shell wrapper would stop it from starting on Intel and AMD machines.
+    const rest = serviceBlock(compose(), 'rest');
+    expect(rest).toContain('image: public.ecr.aws/supabase/postgrest:');
+    expect(rest).not.toContain('/bin/sh');
+    expect(rest).not.toContain('with-secrets');
+    expect(rest).toContain('PGRST_DB_URI: "@/secrets/postgrest-db-uri"');
+    expect(rest).toContain('PGRST_JWT_SECRET: "@/secrets/postgrest-jwt-secret"');
+    expect(rest).toContain('secrets:/secrets:ro');
+  });
+
   it('starts the app only after migrations succeed', () => {
     const app = serviceBlock(compose(), 'app');
     expect(app).toMatch(/depends_on:\s*\n\s+migrate:\s*\n\s+condition: service_completed_successfully/);
