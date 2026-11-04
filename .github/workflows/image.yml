@@ -3,7 +3,9 @@ name: Publish image
 on:
   push:
     branches: [main]
+    paths-ignore: ['content/**', '**/*.md', 'docs/**']
   pull_request:
+    paths-ignore: ['content/**', '**/*.md', 'docs/**']
   workflow_dispatch:
 
 concurrency:
@@ -21,6 +23,7 @@ jobs:
   image:
     name: Build and push
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     # Fork PRs get a read-only token and cannot push, so skip them.
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     steps:
