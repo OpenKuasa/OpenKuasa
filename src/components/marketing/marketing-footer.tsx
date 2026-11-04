@@ -49,7 +49,7 @@ const COLUMNS: Col[] = [
     title: 'Company',
     links: [
       { label: 'About OpenKuasa', href: '#about' },
-      { label: 'Contact Support', href: '/account/support' },
+      { label: 'Contact Support', href: '/support' },
       { label: 'Terms & Conditions', href: '#terms' },
       { label: 'Privacy Policy', href: '/privacy' },
       { label: 'GDPR', href: '#gdpr' },

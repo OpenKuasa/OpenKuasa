@@ -21,7 +21,7 @@ const ITEMS: { label: string; href: string; needs?: Capability }[] = [
   { label: 'Role Permission', href: '/account/team' },
   { label: 'Change Password', href: '/account/security' },
   { label: 'Product Changelog', href: '/account/changelog' },
-  { label: 'Contact Support', href: '/account/support' },
+  { label: 'Contact Support', href: '/support' },
   { label: 'Tutorials & Docs', href: '/docs' },
   { label: 'Feature Requests', href: '/account/feedback' },
 ];

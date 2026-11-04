@@ -93,7 +93,7 @@ const FAQS = [
   },
   {
     q: 'Is there support?',
-    a: 'Support is community-based, through issues and discussions on GitHub. There is no service-level agreement or warranty.',
+    a: 'Support is community-based, through issues and discussions on GitHub, and the Contact Support page, where Sari answers from our guides and you can email us. There is no service-level agreement or warranty.',
   },
   {
     q: 'Can I use it commercially?',
