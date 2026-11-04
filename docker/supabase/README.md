@@ -6,6 +6,12 @@ at commit **`4a04bb1fc9f74d6d8bcd11c06f205fbf4bd24158`** (2026-11-04).
 `docker-compose.yml` at the repo root is based on that commit's
 `docker-compose.yml` plus its `docker-compose.kong.yml` override.
 
+**Licence.** The files in this folder are © Supabase ("Copyright 2024
+Supabase"), Apache-2.0; the full text is in [`LICENSE`](LICENSE), copied from
+the same commit. OpenKuasa as a whole is AGPL-3.0. Modified by OpenKuasa:
+`api/kong.yml` (trimmed, plus a header comment). Unmodified: `api/kong-entrypoint.sh`,
+`db/roles.sql`, `db/jwt.sql`, `db/webhooks.sql`. The table below describes the changes.
+
 | File here | Upstream file | Changes |
 | --- | --- | --- |
 | `api/kong.yml` | `volumes/api/kong.yml` | Trimmed to the auth, rest and storage routes; the dashboard login, the opaque `sb_` key credentials and the routes to dropped services removed |
