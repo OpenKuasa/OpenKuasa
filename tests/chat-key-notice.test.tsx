@@ -48,6 +48,18 @@ describe('ChatKeyNotice', () => {
     expect(html).not.toContain('Create a key.');
   });
 
+  it('on a server with no free questions it says start, not "you have used your 3"', () => {
+    const owner = render({ freeLimit: 0, freeRemaining: 0 });
+    expect(owner).toContain('Start chatting with your own OpenRouter key');
+    expect(owner).not.toContain('free questions');
+    expect(owner).not.toContain('Keep chatting');
+    expect(owner).toContain('href="/account/ai"');
+
+    const member = render({ freeLimit: 0, freeRemaining: 0, canManageKey: false });
+    expect(member).toContain('add an OpenRouter key to start chatting');
+    expect(member).not.toContain('free questions');
+  });
+
   it('demo and keyed workspaces show nothing', () => {
     expect(render({ isDemo: true })).toBe('');
     expect(render({ hasKey: true })).toBe('');

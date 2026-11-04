@@ -44,9 +44,9 @@ export default async function AiKeyPage() {
               The count resets at midnight UTC (8 am Malaysia time).
             </p>
             <p>
-              Without a key, each person gets{' '}
-              {status?.freeLimit ?? 3} free questions a week across all the
-              assistants.
+              {status?.freeLimit === 0
+                ? 'This server has no free questions, so chat needs a key.'
+                : `Without a key, each person gets ${status?.freeLimit ?? 3} free questions a week across all the assistants.`}
             </p>
             <p>
               Create a key at{' '}
@@ -83,7 +83,9 @@ export default async function AiKeyPage() {
                     <p className="text-sm text-muted-foreground">
                       {status.hasKey
                         ? 'Chat is running on your OpenRouter account.'
-                        : `You have ${status.freeRemaining} of ${status.freeLimit} free questions left this week.`}
+                        : status.freeLimit === 0
+                          ? 'Add a key to start chatting.'
+                          : `You have ${status.freeRemaining} of ${status.freeLimit} free questions left this week.`}
                     </p>
                   </div>
                   <span className="inline-flex shrink-0 items-center rounded-full bg-muted px-2.5 py-0.5 text-xs font-medium text-muted-foreground">

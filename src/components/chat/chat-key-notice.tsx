@@ -130,9 +130,13 @@ export function ChatKeyNotice({
               ? `You have used your ${status.freeLimit} free questions this week. `
               : ''}
             {status.canManageKey ? (
-              <strong className="font-semibold">Keep chatting with your own OpenRouter key</strong>
-            ) : (
+              <strong className="font-semibold">
+                {status.freeLimit > 0 ? 'Keep chatting' : 'Start chatting'} with your own OpenRouter key
+              </strong>
+            ) : status.freeLimit > 0 ? (
               'Ask a workspace owner or admin to add an OpenRouter key to keep chatting.'
+            ) : (
+              'Ask a workspace owner or admin to add an OpenRouter key to start chatting.'
             )}
           </span>
         </p>

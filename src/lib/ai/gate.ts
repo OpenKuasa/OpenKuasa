@@ -151,13 +151,14 @@ export async function getChatStatus(supabase: SupabaseClient): Promise<ChatStatu
   const hint = (row as { key_hint?: string } | null | undefined)?.key_hint ?? null;
   const usedCount = typeof used === 'number' ? used : 0;
 
+  // Without a platform key (a self-hosted copy, say) there is nothing to run
+  // free questions on, so there are none: the limit is 0, not "all used".
+  const freeLimit = hasProviderKey() ? FREE_QUESTIONS_PER_WEEK : 0;
+
   return {
     hasKey: hint !== null,
     keyHint: hint,
-    freeLimit: FREE_QUESTIONS_PER_WEEK,
-    // Without a platform key there is nothing to run free questions on.
-    freeRemaining: hasProviderKey()
-      ? Math.max(0, FREE_QUESTIONS_PER_WEEK - usedCount)
-      : 0,
+    freeLimit,
+    freeRemaining: Math.max(0, freeLimit - usedCount),
   };
 }

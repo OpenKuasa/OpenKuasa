@@ -53,9 +53,9 @@ Use this path to run the app in Docker while your data lives in your own project
 1. Create a project on supabase.com.
 2. Copy the example settings: `cp .env.example .env`.
 3. In `.env`, fill in from the Supabase dashboard:
-   - `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY` and `SUPABASE_SERVICE_ROLE_KEY` (Project Settings → API).
+   - `NEXT_PUBLIC_SUPABASE_URL` (Project Settings → Data API), and `NEXT_PUBLIC_SUPABASE_ANON_KEY` and `SUPABASE_SERVICE_ROLE_KEY` (Project Settings → API Keys → **Legacy API keys**: the long `anon` and `service_role` keys that start with `eyJ`).
    - `DATABASE_URL`: press **Connect**, choose **Session pooler**, and copy the connection string with your database password in it. Use the pooler, not the direct connection: the direct address needs IPv6, which many networks and Docker setups don't have.
-4. Set up Supabase Auth once, as in [step 4 of the hosted steps](#4-set-up-supabase-auth): site URL `http://localhost:58272` (or your own address), anonymous sign-ins on if you want "Try the demo", and paste the email templates.
+4. Set up Supabase Auth once, as in [step 4 of the hosted steps](#4-set-up-supabase-auth): site URL `http://localhost:58272` (or your own address), anonymous sign-ins on if you want "Try the demo", Confirm email off unless you have set up your own email sending, and paste the email templates.
 5. Start it:
 
 ```bash
@@ -97,7 +97,7 @@ Open http://localhost:3000. With no Supabase project set, the app opens in previ
 
 #### 2. Point it at your Supabase project
 
-Create a `.env.local` file in the project root with your project's URL and anon key (Supabase dashboard → Project Settings → API):
+Create a `.env.local` file in the project root with your project's URL and anon key. In the Supabase dashboard the URL is under Project Settings → Data API, and the anon key under Project Settings → API Keys → **Legacy API keys** (the long key that starts with `eyJ`):
 
 ```bash
 NEXT_PUBLIC_SUPABASE_URL=https://<your-project-ref>.supabase.co
@@ -122,6 +122,7 @@ In the Supabase dashboard, under Authentication:
 
 - **Enable Anonymous sign-ins.** It powers the demo workspace and the tests.
 - **Confirm email** is your choice. With it off, signup signs the person in at once and lands on `/command`. With it on, signup stops at a "check your email" message, and the person confirms and then signs in. Either way, an already-registered address always gets that same "check your email" message, so the form never says which addresses have an account.
+  - Leave it off until you set up your own email sending (Authentication → Emails → SMTP Settings). Supabase's built-in email only sends to members of your Supabase team, a few messages an hour, so anyone else who signs up never gets the confirmation email.
 - **Leave hCaptcha off.** The sign-in forms do not send a captcha token yet, so turning hCaptcha on breaks sign-in and signup.
 
 The sign-in email templates are in `supabase/email-templates/`. They are not set by the migrations: paste each file into the matching template in the Supabase dashboard (Authentication → Emails → Templates). Every link in them points at the app's `/auth/confirm` route.
@@ -146,6 +147,7 @@ Some background work runs only when your scheduler calls it. See [Scheduled jobs
 - **Some pages show sample data instead of yours.** The database is missing a table or column that the code needs. Run `pnpm db:migrate` to see which migrations your project lacks.
 - **Rate limits count everyone together.** The app tells clients apart by the `X-Real-IP` header that Railway's edge sets. On a host or proxy that does not set it, every request counts against one shared counter, which has its own, wider limit. A proxy that passes on an `X-Real-IP` the client sent is worse: each client can pick its own counter and dodge the per-client limits. Have the proxy set the header itself, from the connection.
 - **MCP limits don't add up across servers.** The per-key limits on the MCP endpoint are counted in each server process's memory, so with several instances each one counts on its own, and a restart starts the count again.
+- **The app stops working after a quiet week.** Supabase pauses a free-plan project after about a week without activity. Open the project in the Supabase dashboard and press **Restore project**; your data comes back as it was.
 - **Password-reset links are sometimes refused.** If you run several instances or a serverless host, set `AUTH_COOKIE_SECRET` (32+ characters). See [Environment variables](/docs/developers/environment-variables).
 
 ## Related
