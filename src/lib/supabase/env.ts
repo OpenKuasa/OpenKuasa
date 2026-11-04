@@ -33,3 +33,16 @@ export function vapidPublicKey(): string {
 export function publicConfig(): PublicConfig {
   return { supabaseUrl: supabasePublicUrl() ?? null, supabaseAnonKey: supabaseAnonKey() ?? null };
 }
+
+/**
+ * A link the server's Supabase client made (signed or public) points at the address the server uses.
+ * A browser cannot open that when it differs from the public one, so swap the prefix. Unchanged when
+ * the two are equal, either is unset, or the link starts with something else.
+ */
+export function toPublicSupabaseUrl(url: string): string {
+  const server = supabaseServerUrl()?.replace(/\/+$/, '');
+  const pub = supabasePublicUrl()?.replace(/\/+$/, '');
+  if (!server || !pub || server === pub) return url;
+  if (url !== server && !url.startsWith(`${server}/`)) return url;
+  return pub + url.slice(server.length);
+}

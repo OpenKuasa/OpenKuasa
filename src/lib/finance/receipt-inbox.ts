@@ -38,6 +38,7 @@ import {
   pgCode,
   settingsRefusal,
 } from './result';
+import { toPublicSupabaseUrl } from '@/lib/supabase/env';
 
 export const RECEIPT_INBOX_MESSAGES = {
   gone: 'That receipt no longer exists.',
@@ -279,7 +280,7 @@ export async function signReceiptLink(ctx: FinanceWriteContext, file: ReceiptFil
     const { data, error } = await ctx.client.storage
       .from(INBOX_RECEIPT_BUCKET)
       .createSignedUrl(file.path, RECEIPT_LINK_SECONDS, { download: receiptDownloadName(file.type) });
-    if (!error && data?.signedUrl) return { ok: true, data: { url: data.signedUrl } };
+    if (!error && data?.signedUrl) return { ok: true, data: { url: toPublicSupabaseUrl(data.signedUrl) } };
   } catch {
     // Reported the same way as a refused link.
   }

@@ -4,7 +4,9 @@ import {
   supabaseAnonKey,
   supabasePublicUrl,
   supabaseServerUrl,
+  toPublicSupabaseUrl,
 } from '@/lib/supabase/env';
+import { storedPathOf } from '@/lib/chat/attachment-store';
 import { authCookieName, serializePublicConfig } from '@/lib/supabase/public-config';
 
 const NAMES = [
@@ -61,5 +63,33 @@ describe('runtime Supabase settings', () => {
     clear();
     vi.stubEnv('NEXT_PUBLIC_DEMO_ENABLED', '1');
     expect(demoEnabled()).toBe(true);
+  });
+
+  it('rewrites a signed link from the internal host to the public one', () => {
+    clear();
+    vi.stubEnv('SUPABASE_INTERNAL_URL', 'http://kong:8000');
+    vi.stubEnv('SUPABASE_PUBLIC_URL', 'http://localhost:58273');
+    expect(toPublicSupabaseUrl('http://kong:8000/storage/v1/object/sign/b/p.pdf?token=abc')).toBe(
+      'http://localhost:58273/storage/v1/object/sign/b/p.pdf?token=abc',
+    );
+    expect(toPublicSupabaseUrl('https://elsewhere.test/x')).toBe('https://elsewhere.test/x');
+  });
+
+  it('leaves a link alone when both URLs are the same', () => {
+    clear();
+    vi.stubEnv('NEXT_PUBLIC_SUPABASE_URL', 'https://abc.supabase.co');
+    const link = 'https://abc.supabase.co/storage/v1/object/sign/b/p.pdf?token=abc';
+    expect(toPublicSupabaseUrl(link)).toBe(link);
+  });
+
+  it('finds a stored chat path from a link with either prefix', () => {
+    clear();
+    vi.stubEnv('SUPABASE_INTERNAL_URL', 'http://kong:8000');
+    vi.stubEnv('SUPABASE_PUBLIC_URL', 'http://localhost:58273');
+    const id = '11111111-1111-4111-8111-111111111111';
+    const path = `${id}/${id}/${id}`;
+    const tail = `/storage/v1/object/sign/chat-attachments/${path}?token=t`;
+    expect(storedPathOf(`http://localhost:58273${tail}`, id)).toBe(path);
+    expect(storedPathOf(`http://kong:8000${tail}`, id)).toBe(path);
   });
 });
