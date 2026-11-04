@@ -775,15 +775,20 @@ export function BroadcastsView({
                   <TableRow className="bg-muted/40">
                     <TableHead>Broadcast</TableHead>
                     <TableHead>Audience</TableHead>
-                    <TableHead className="text-right">Recipients</TableHead>
+                    {/* When the table is narrow, the count moves under the audience and the audience
+                        wraps, so the pinned Actions do not cover Status. */}
+                    <TableHead className="text-right @max-3xl:hidden">Recipients</TableHead>
                     <TableHead>Status</TableHead>
                     {/* Pinned to the right edge, so the buttons stay in reach when the table is wider than its card. */}
                     <TableHead className="sticky right-0 bg-muted text-right shadow-[-8px_0_8px_-8px_rgba(0,0,0,0.2)]">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {rows.map(({ broadcast, recipients }) =>
-                    actions && deletingId === broadcast.id ? (
+                  {rows.map(({ broadcast, recipients }) => {
+                    // Once sent, who it went to is a record, not a rule worked out again.
+                    const count =
+                      broadcast.status === 'draft' ? recipients.length : broadcast.sentCount + broadcast.failedCount;
+                    return actions && deletingId === broadcast.id ? (
                       <DeleteBroadcastRow
                         key={broadcast.id}
                         broadcast={broadcast}
@@ -816,13 +821,13 @@ export function BroadcastsView({
                           <p className="truncate font-medium">{broadcast.name}</p>
                           <p className="truncate text-xs text-muted-foreground">{broadcast.subject}</p>
                         </TableCell>
-                        <TableCell className="max-w-64 truncate">{audienceSummary(broadcast.audience)}</TableCell>
-                        <TableCell className="text-right tabular-nums">
-                          {/* Once sent, who it went to is a record, not a rule worked out again. */}
-                          {broadcast.status === 'draft'
-                            ? recipients.length.toLocaleString('en-MY')
-                            : (broadcast.sentCount + broadcast.failedCount).toLocaleString('en-MY')}
+                        <TableCell className="max-w-64 @max-3xl:max-w-40">
+                          <p className="truncate @max-3xl:whitespace-normal @max-3xl:break-words">
+                            {audienceSummary(broadcast.audience)}
+                          </p>
+                          <p className="hidden text-xs text-muted-foreground tabular-nums @max-3xl:block">{people(count)}</p>
                         </TableCell>
+                        <TableCell className="text-right tabular-nums @max-3xl:hidden">{count.toLocaleString('en-MY')}</TableCell>
                         <TableCell className="whitespace-nowrap">
                           <span
                             className={cn(
@@ -944,8 +949,8 @@ export function BroadcastsView({
                           </div>
                         </TableCell>
                       </TableRow>
-                    ),
-                  )}
+                    );
+                  })}
                 </TableBody>
               </Table>
             </div>
