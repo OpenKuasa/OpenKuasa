@@ -85,6 +85,9 @@ begin
   if t is not null then fails := fails || format('service_role may also read %s', t); end if;
 
   -- ---- 4. the private sample, by name, so a reader sees what is closed ----
+  -- A sampled column a later migration renamed or dropped would make
+  -- has_column_privilege raise 42703 and abort the whole check, so a gone column
+  -- is reported like a gone table rather than asked about.
   for r in
     select * from (values
       ('crm_contacts', 'email'), ('crm_contacts', 'phone'),
@@ -96,6 +99,12 @@ begin
   loop
     if to_regclass('public.' || r.tbl) is null then
       fails := fails || format('%s is gone, so its columns were not checked', r.tbl);
+    elsif not exists (
+      select 1 from pg_catalog.pg_attribute a
+       where a.attrelid = ('public.' || r.tbl)::regclass
+         and a.attname = r.col and a.attnum > 0 and not a.attisdropped
+    ) then
+      fails := fails || format('%s.%s is gone, so it was not checked', r.tbl, r.col);
     elsif has_column_privilege('service_role', ('public.' || r.tbl)::regclass, r.col, 'select') then
       fails := fails || format('service_role may read %s.%s', r.tbl, r.col);
     end if;
