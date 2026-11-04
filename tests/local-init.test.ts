@@ -1,5 +1,5 @@
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -80,6 +80,19 @@ describe('env file', () => {
   it('round-trips the env file', () => {
     const v = { A: 'x=y==', B: 'a/b+c.d', C: 'plain' };
     expect(parseEnv(formatEnv(v))).toEqual(v);
+  });
+});
+
+describe('local-init CLI', () => {
+  it('writes the settings file readable by its group (other stack users) but not by everyone', () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'li-'));
+    const file = path.join(dir, 'generated.env');
+    execFileSync(process.execPath, [path.resolve(__dirname, '../scripts/local-init.mjs')], {
+      env: { PATH: process.env.PATH ?? '', OPENKUASA_SECRETS_FILE: file } as unknown as NodeJS.ProcessEnv,
+      encoding: 'utf8',
+    });
+    expect(statSync(file).mode & 0o777).toBe(0o640);
+    expect(Object.keys(parseEnv(readFileSync(file, 'utf8')))).toEqual(expect.arrayContaining([...GENERATED]));
   });
 });
 

@@ -6,7 +6,7 @@
  *
  * Runs once in the `init` container. Every name in GENERATED that the user left
  * blank in `.env` gets a fresh value, written to /secrets/generated.env (mode
- * 0600, on a volume every other container mounts). A second run changes nothing:
+ * 0640, on a volume every other container mounts). A second run changes nothing:
  * a value already in the file is kept, so sessions and the database password
  * stay valid. A value the user typed always wins over the file.
  *
@@ -32,6 +32,8 @@ export const GENERATED = [
   'RATE_LIMIT_PEPPER',
   'CRON_SECRET',
 ];
+
+export const SECRETS_FILE_MODE = 0o640;
 
 const KEY_ROLES = { ANON_KEY: 'anon', SERVICE_ROLE_KEY: 'service_role' };
 const TEN_YEARS_SECONDS = 10 * 365 * 24 * 60 * 60;
@@ -123,8 +125,11 @@ function main() {
   if (created.length > 0 || formatEnv(existing) !== formatEnv(values)) {
     mkdirSync(path.dirname(file), { recursive: true });
     const tmp = `${file}.${process.pid}.tmp`;
-    writeFileSync(tmp, formatEnv(values), { mode: 0o600 });
-    chmodSync(tmp, 0o600);
+    // 0640, not 0600: the file is read by containers running as other users
+    // (Kong is uid 1001 and joins this file's group, 1000, via group_add).
+    // Nobody outside the stack mounts the volume.
+    writeFileSync(tmp, formatEnv(values), { mode: SECRETS_FILE_MODE });
+    chmodSync(tmp, SECRETS_FILE_MODE);
     renameSync(tmp, file);
   }
   console.log(created.length > 0 ? `Generated ${created.length} new settings` : 'Settings already in place');
