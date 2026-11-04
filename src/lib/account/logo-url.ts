@@ -1,6 +1,8 @@
+import { readPublicConfig } from '@/lib/supabase/public-config';
+
 /**
  * The read-only half of the workspace logo: the bucket name, the shape of a path and the public address. A leaf
- * with no imports, so a member's page (the letter view) can show a logo without reaching the upload or any write.
+ * with only the client-safe settings reader, so a member's page (the letter view) can show a logo without reaching the upload or any write.
  * `logo.ts` re-exports everything here.
  */
 
@@ -25,7 +27,7 @@ export function isLogoPath(path: string, orgId: string): boolean {
  */
 export function logoUrl(path: string | null, opts: { isDemo: boolean }): string | null {
   if (path === null) return opts.isDemo ? DEMO_LOGO_PATH : null;
-  const base = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const base = readPublicConfig().supabaseUrl;
   if (!base || !LOGO_PATH.test(path)) return null;
   return `${base.replace(/\/+$/, '')}/storage/v1/object/public/${LOGO_BUCKET}/${path}`;
 }

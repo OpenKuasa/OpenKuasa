@@ -164,7 +164,7 @@ function client(ref, token) {
 }
 
 /** Created as the Supabase CLI creates it, for a project it has never touched. */
-const TRACKING_TABLE = `create schema if not exists supabase_migrations;
+export const TRACKING_TABLE = `create schema if not exists supabase_migrations;
 create table if not exists supabase_migrations.schema_migrations (version text not null primary key, statements text[], name text);`;
 
 /** --apply goes ahead only once the project ref has been typed, or passed as --confirm=<ref>. */

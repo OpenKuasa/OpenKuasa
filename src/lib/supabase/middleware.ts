@@ -3,6 +3,8 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { isOAuthClientToken } from '@/lib/auth/oauth-token';
 import { PREVIEW_BLOCKED_MESSAGE, deploymentMode } from '@/lib/auth/preview-mode';
 import { REMEMBER_COOKIE, isPersistent, sessionize } from './remember';
+import { supabaseAnonKey, supabasePublicUrl, supabaseServerUrl } from './env';
+import { authCookieName } from './public-config';
 
 // One log line a minute is enough to find in the host's logs without
 // repeating it for every request.
@@ -57,8 +59,8 @@ function dropAuthCookies(request: NextRequest): NextResponse {
  * project settings answers 503 here, before any page renders (see the README).
  */
 export async function updateSession(request: NextRequest) {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  const url = supabaseServerUrl();
+  const anonKey = supabaseAnonKey();
   if (!url || !anonKey) {
     return deploymentMode() === 'blocked'
       ? serviceUnavailable()
@@ -74,6 +76,7 @@ export async function updateSession(request: NextRequest) {
   const persist = isPersistent(request.cookies.get(REMEMBER_COOKIE)?.value);
 
   const supabase = createServerClient(url, anonKey, {
+    cookieOptions: { name: authCookieName(supabasePublicUrl()!) },
     cookies: {
       getAll() {
         return request.cookies.getAll();

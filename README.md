@@ -12,6 +12,9 @@ volunteer contributors.
 would rather not run it themselves. It is built on the code in this repository,
 which stays open source under AGPL-3.0.
 
+**[Try the demo](https://openkuasa.com/login)** — press "Try the demo" on the
+login page to look around a sample company. No sign-up.
+
 <p align="center">
   <img src="docs/screenshots/dashboard.png" alt="OpenKuasa — the Jebat (Ads) module overview; every module has a dashboard like this" width="900">
 </p>
@@ -28,6 +31,48 @@ which stays open source under AGPL-3.0.
 >   an alternative to.
 > - The software is provided "as is", without warranty of any kind — self-host it
 >   at your own risk.
+
+## Run it on your laptop
+
+You need only [Docker Desktop](https://www.docker.com/products/docker-desktop/)
+(Mac or Windows), or Docker Engine with Compose v2.24 or newer (Linux). No
+Supabase account, no Node.
+
+```bash
+git clone --depth 1 https://github.com/OpenKuasa/OpenKuasa.git
+cd OpenKuasa
+cp .env.example .env      # fill in your own keys (optional ones can stay blank)
+docker compose up -d
+```
+
+- Open the app at <http://localhost:58272>. Sign up to get your own workspace,
+  or press "Try the demo" to see the sample company.
+- Emails are optional. To get password-reset and invite emails, start with
+  `docker compose --profile mail up -d` and read them in the mail viewer at
+  <http://localhost:58274>. Sign-up and sign-in work without it.
+- Every key in `.env` is optional. Add `OPENROUTER_API_KEY` to turn on the AI
+  chat.
+- Update: `git pull && docker compose pull && docker compose up -d`
+- Stop: `docker compose down` (keeps your data)
+- Wipe: `docker compose down -v` (deletes all local data)
+
+### Docker app with your data in online Supabase
+
+Prefer your data in your own project on supabase.com? Fill in the "Hosted
+Supabase" settings in `.env` (project URL, anon key, service-role key, and
+`DATABASE_URL`, the project's **Session pooler** connection string), then run
+`docker compose -f docker-compose.hosted.yml up -d`. Steps, including the
+one-time Supabase Auth settings: [Run your own copy](https://openkuasa.com/docs/developers/self-hosting).
+
+### Troubleshooting
+
+- **Port already in use.** The app uses ports 58272 and 58273 (and 58274 with the mail viewer). On macOS these sit in a range the system lends out briefly to other apps, so another app can hold one now and then. Find it with `lsof -i :58273` (swap in the port from the error). Quit that app or restart the Mac, then run `docker compose up -d` again.
+- **Docker isn't running.** Start Docker Desktop and wait until it says it is running.
+- **"dependency failed to start", or the page never loads.** Run `docker compose logs migrate` (or `docker compose logs init`) to see why. Fix it, then run `docker compose up -d` again. It carries on from where it stopped.
+- **Start over completely.** Run `docker compose down -v`. This deletes all local data. Then run `docker compose up -d`.
+- **Changed `POSTGRES_PASSWORD` after the first run.** The existing database keeps its old password. Set it before the first run, or run `docker compose down -v` to start over.
+
+More in [Run your own copy](https://openkuasa.com/docs/developers/self-hosting).
 
 ## What's inside
 
@@ -205,6 +250,9 @@ repository stays available under AGPL-3.0.
 - **Vitest** for tests
 
 ## Getting Started
+
+This is for contributors. To just run OpenKuasa, use
+[Run it on your laptop](#run-it-on-your-laptop) above.
 
 Requires Node 22+ and [pnpm](https://pnpm.io).
 

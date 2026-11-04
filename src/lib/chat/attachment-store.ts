@@ -9,6 +9,8 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { dataUrlBytes, isFilePart, sniffAttachment } from '@/lib/chat/attachments';
 import { errorCodeOf } from '@/lib/ai/call-log';
 import type { StoredFileRef } from '@/lib/chat/stored-parts';
+import { supabasePublicUrl, supabaseServerUrl } from '@/lib/supabase/env';
+import { toPublicSupabaseUrl } from '@/lib/supabase/public-config';
 
 const BUCKET = 'chat-attachments';
 const SIGNED_FOR_SECONDS = 60 * 60;
@@ -74,17 +76,19 @@ export async function signStoredFiles(
     return links;
   }
   for (const row of data ?? []) {
-    if (row.path && row.signedUrl && !row.error) links.set(row.path, row.signedUrl);
+    if (row.path && row.signedUrl && !row.error) links.set(row.path, toPublicSupabaseUrl(row.signedUrl));
   }
   return links;
 }
 
 /** The storage path a link from `signStoredFiles` points at, or null for any other URL. */
 export function storedPathOf(url: string, userId: string): string | null {
-  const base = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  if (!base) return null;
-  const prefix = `${base.replace(/\/$/, '')}/storage/v1/object/sign/${BUCKET}/`;
-  if (!url.startsWith(prefix)) return null;
+  // Links made before the change carry the server's address, newer ones the public one.
+  const prefix = [supabasePublicUrl(), supabaseServerUrl()]
+    .filter((b): b is string => Boolean(b))
+    .map((b) => `${b.replace(/\/+$/, '')}/storage/v1/object/sign/${BUCKET}/`)
+    .find((p) => url.startsWith(p));
+  if (!prefix) return null;
   let path: string;
   try {
     path = decodeURIComponent(url.slice(prefix.length).split('?')[0]);

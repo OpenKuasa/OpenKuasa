@@ -1,24 +1,90 @@
 ---
 title: Run your own copy
-description: Self-host OpenKuasa on your own Supabase project and any Node server.
+description: Run OpenKuasa on your laptop with Docker, or self-host it on your own Supabase project and any Node server.
 order: 1
-ask: How do I self-host OpenKuasa on my own Supabase project?
+ask: How do I run OpenKuasa myself, on my laptop or on my own Supabase project?
 ---
-OpenKuasa is free to self-host under AGPL-3.0. You need a Supabase project for data and sign-in, and a server that runs Node.
+OpenKuasa is free to self-host under AGPL-3.0. The quickest way is Docker on your own computer. You can also point it at your own Supabase project and run it on any Node server.
 
-## Who can do this
+## Run it on your laptop with Docker
+
+### Before you start
+
+- Docker Desktop (Mac or Windows), or Docker Engine with Compose v2.24 or newer (Linux).
+- Nothing else. No Supabase account and no Node.
+
+### Steps
+
+```bash
+git clone --depth 1 https://github.com/OpenKuasa/OpenKuasa.git
+cd OpenKuasa
+cp .env.example .env      # fill in your own keys (optional ones can stay blank)
+docker compose up -d
+```
+
+Open http://localhost:58272. Sign up to get your own workspace, or press "Try the demo" to see the sample company.
+
+Sign-up is confirmed for you locally, so you don't need email to get started. To get password-reset and invite emails, start with `docker compose --profile mail up -d` and read them in the mail viewer at http://localhost:58274.
+
+Every key in `.env` is optional. Add `OPENROUTER_API_KEY` to turn on the AI chat. See [AI models and keys](/docs/developers/ai-models-and-keys).
+
+### Update, stop and wipe
+
+```bash
+git pull && docker compose pull && docker compose up -d   # update
+docker compose down                                       # stop, keeps your data
+docker compose down -v                                    # wipe, deletes all local data
+```
+
+### Troubleshooting
+
+- **Port already in use.** The app uses ports 58272 and 58273 (and 58274 with the mail viewer). On macOS these sit in a range the system lends out briefly to other apps, so another app can hold one now and then. Find it with `lsof -i :58273` (swap in the port from the error). Quit that app or restart the Mac, then run `docker compose up -d` again.
+- **Docker isn't running.** Start Docker Desktop and wait until it says it is running.
+- **"dependency failed to start", or the page never loads.** Run `docker compose logs migrate` (or `docker compose logs init`) to see why. Fix it, then run `docker compose up -d` again. It carries on from where it stopped.
+- **Start over completely.** Run `docker compose down -v`. This deletes all local data. Then run `docker compose up -d`.
+- **Changed `POSTGRES_PASSWORD` after the first run.** The existing database keeps its old password. Set it before the first run, or run `docker compose down -v` to start over.
+
+## Docker app with online Supabase
+
+Use this path to run the app in Docker while your data lives in your own project on supabase.com, with Supabase's backups. You need only Docker on your machine.
+
+### Steps (online Supabase)
+
+1. Create a project on supabase.com.
+2. Copy the example settings: `cp .env.example .env`.
+3. In `.env`, fill in from the Supabase dashboard:
+   - `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY` and `SUPABASE_SERVICE_ROLE_KEY` (Project Settings → API).
+   - `DATABASE_URL`: press **Connect**, choose **Session pooler**, and copy the connection string with your database password in it. Use the pooler, not the direct connection: the direct address needs IPv6, which many networks and Docker setups don't have.
+4. Set up Supabase Auth once, as in [step 4 of the hosted steps](#4-set-up-supabase-auth): site URL `http://localhost:58272` (or your own address), anonymous sign-ins on if you want "Try the demo", and paste the email templates.
+5. Start it:
+
+```bash
+docker compose -f docker-compose.hosted.yml up -d
+```
+
+Open http://localhost:58272. Every start applies new database changes to your project before the app starts. If a setting is missing, `docker compose -f docker-compose.hosted.yml logs init` names it.
+
+The database connection is encrypted. To also check Supabase's certificate, install its CA certificate and add `?sslmode=verify-full` to `DATABASE_URL`.
+
+Update: `git pull && docker compose -f docker-compose.hosted.yml pull && docker compose -f docker-compose.hosted.yml up -d`. Stop: `docker compose -f docker-compose.hosted.yml down`. Your data stays in Supabase either way.
+
+## Hosted Supabase
+
+Use this path to run OpenKuasa on a server without Docker, with your own Supabase project for data and sign-in and a host that runs Node.
+
+### Who can do this
 
 Anyone running their own copy. You need access to a Supabase project and to the server you deploy on.
 
-## Before you start
+### Before you start (hosted)
 
 - Node 22 or newer.
 - pnpm. Always use pnpm, not npm or yarn.
 - A Supabase project.
 
-## Steps
+### Hosted steps
 
-### 1. Get the code
+#### 1. Get the code
 
 ```bash
 git clone https://github.com/OpenKuasa/OpenKuasa.git
@@ -29,7 +95,7 @@ pnpm dev
 
 Open http://localhost:3000. With no Supabase project set, the app opens in preview mode: every visitor is a read-only "Guest" in a "Preview workspace", and the screens show sample data.
 
-### 2. Point it at your Supabase project
+#### 2. Point it at your Supabase project
 
 Create a `.env.local` file in the project root with your project's URL and anon key (Supabase dashboard → Project Settings → API):
 
@@ -40,7 +106,7 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=<your-anon-key>
 
 The rest of the app is turned on by more variables. See [Environment variables](/docs/developers/environment-variables).
 
-### 3. Create the tables
+#### 3. Create the tables
 
 Run the migrations once against your project:
 
@@ -50,7 +116,7 @@ pnpm db:migrate --apply
 
 It asks you to type the project ref before it writes anything. See [Keep the database up to date](/docs/developers/database-migrations).
 
-### 4. Set up Supabase Auth
+#### 4. Set up Supabase Auth
 
 In the Supabase dashboard, under Authentication:
 
@@ -60,7 +126,7 @@ In the Supabase dashboard, under Authentication:
 
 The sign-in email templates are in `supabase/email-templates/`. They are not set by the migrations: paste each file into the matching template in the Supabase dashboard (Authentication → Emails → Templates). Every link in them points at the app's `/auth/confirm` route.
 
-### 5. Build and run it on your server
+#### 5. Build and run it on your server
 
 ```bash
 pnpm build
@@ -69,7 +135,7 @@ pnpm start
 
 Any host that runs Node 22 and these two commands will do. openkuasa.com runs on Railway.
 
-### 6. Add the scheduler
+#### 6. Add the scheduler
 
 Some background work runs only when your scheduler calls it. See [Scheduled jobs](/docs/developers/scheduled-jobs).
 

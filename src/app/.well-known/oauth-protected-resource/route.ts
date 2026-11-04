@@ -4,11 +4,12 @@
  */
 
 import { originFromHeaders } from '@/lib/reach/form-submissions';
+import { supabasePublicUrl } from '@/lib/supabase/env';
 
 export const dynamic = 'force-dynamic';
 
 export function GET(request: Request): Response {
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL?.replace(/\/+$/, '');
+  const supabaseUrl = supabasePublicUrl()?.replace(/\/+$/, '');
   if (!supabaseUrl) return Response.json({ error: 'Sign-in is not configured.' }, { status: 503 });
   const origin = originFromHeaders((name) => request.headers.get(name)) ?? 'https://openkuasa.com';
   return Response.json(

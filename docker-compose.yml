@@ -1,0 +1,346 @@
+# OpenKuasa on your own machine, with its own local Supabase.
+#
+#   cp .env.example .env
+#   docker compose up -d          then open http://localhost:58272
+#
+#   update   git pull && docker compose pull && docker compose up -d
+#   stop     docker compose down            (keeps your data)
+#   wipe     docker compose down -v         (deletes all local data)
+#
+# Ports: app 58272, Supabase API 58273. Emails are optional: start with
+#   docker compose --profile mail up -d
+# to also run the mail viewer on 58274 (every email the local Supabase sends
+# lands there; without it, password-reset and invite emails can't be sent).
+#
+# Settings come from .env and from the secrets `init` generates on the first
+# run (the `secrets` volume). Nothing here reads your shell's variables: the
+# only `${...}` is the image tag. docker/with-secrets.sh loads the generated
+# secrets into each container; the `sh -c` lines then give them the names each
+# Supabase service expects ($$ is a literal $ for that shell, not Compose).
+#
+# The Supabase part is trimmed from Supabase's own self-hosting setup; see
+# docker/supabase/README.md for the pinned versions and what was left out.
+
+name: openkuasa
+
+x-wrapper: &wrapper ./docker/with-secrets.sh:/openkuasa/with-secrets.sh:ro
+
+services:
+  # One-off: generates every secret left blank in .env, once. Later runs keep them.
+  init:
+    image: ghcr.io/openkuasa/openkuasa:${OPENKUASA_IMAGE_TAG:-latest}
+    command: [node, /app/tools/scripts/local-init.mjs]
+    env_file:
+      - path: .env
+        required: false
+    volumes:
+      - secrets:/secrets
+    restart: "no"
+
+  db:
+    image: public.ecr.aws/supabase/postgres:17.6.1.166
+    restart: unless-stopped
+    depends_on:
+      init:
+        condition: service_completed_successfully
+    entrypoint:
+      - /bin/sh
+      - /openkuasa/with-secrets.sh
+      - /bin/sh
+      - -c
+      - 'export PGPASSWORD="$$POSTGRES_PASSWORD"; exec docker-entrypoint.sh "$$@"'
+      - db
+    command:
+      - postgres
+      - -c
+      - config_file=/etc/postgresql/postgresql.conf
+      - -c
+      - log_min_messages=fatal
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      POSTGRES_HOST: /var/run/postgresql
+      PGPORT: "5432"
+      POSTGRES_PORT: "5432"
+      PGDATABASE: postgres
+      POSTGRES_DB: postgres
+      JWT_EXP: "3600"
+    volumes:
+      - *wrapper
+      - secrets:/secrets:ro
+      - db-data:/var/lib/postgresql/data
+      # pgsodium's key; without it a restarted database refuses its own secrets.
+      - db-config:/etc/postgresql-custom
+      # Creates supabase_functions_admin, which roles.sql gives a password.
+      - ./docker/supabase/db/webhooks.sql:/docker-entrypoint-initdb.d/init-scripts/98-webhooks.sql:ro
+      - ./docker/supabase/db/roles.sql:/docker-entrypoint-initdb.d/init-scripts/99-roles.sql:ro
+      - ./docker/supabase/db/jwt.sql:/docker-entrypoint-initdb.d/init-scripts/99-jwt.sql:ro
+    healthcheck:
+      test: [CMD, pg_isready, -U, postgres, -h, localhost]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+
+  auth:
+    image: public.ecr.aws/supabase/gotrue:v2.197.0
+    restart: unless-stopped
+    depends_on:
+      init:
+        condition: service_completed_successfully
+      db:
+        condition: service_healthy
+    entrypoint:
+      - /bin/sh
+      - /openkuasa/with-secrets.sh
+      - /bin/sh
+      - -c
+      - >-
+        export GOTRUE_JWT_SECRET="$$JWT_SECRET"
+        GOTRUE_DB_DATABASE_URL="postgres://supabase_auth_admin:$$POSTGRES_PASSWORD@db:5432/postgres";
+        exec auth
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      GOTRUE_API_HOST: 0.0.0.0
+      GOTRUE_API_PORT: "9999"
+      API_EXTERNAL_URL: http://localhost:58273
+      GOTRUE_DB_DRIVER: postgres
+      GOTRUE_SITE_URL: http://localhost:58272
+      GOTRUE_URI_ALLOW_LIST: http://localhost:58272,http://localhost:58272/**
+      GOTRUE_DISABLE_SIGNUP: "false"
+      GOTRUE_JWT_ADMIN_ROLES: service_role
+      GOTRUE_JWT_AUD: authenticated
+      GOTRUE_JWT_DEFAULT_GROUP_NAME: authenticated
+      GOTRUE_JWT_EXP: "3600"
+      GOTRUE_JWT_ISSUER: http://localhost:58273/auth/v1
+      GOTRUE_EXTERNAL_EMAIL_ENABLED: "true"
+      GOTRUE_MAILER_AUTOCONFIRM: "true"
+      # "Try the demo" signs in anonymously.
+      GOTRUE_EXTERNAL_ANONYMOUS_USERS_ENABLED: "true"
+      GOTRUE_EXTERNAL_PHONE_ENABLED: "false"
+      GOTRUE_SMS_AUTOCONFIRM: "false"
+      GOTRUE_SMTP_ADMIN_EMAIL: noreply@openkuasa.local
+      GOTRUE_SMTP_HOST: mail
+      GOTRUE_SMTP_PORT: "1025"
+      GOTRUE_SMTP_SENDER_NAME: OpenKuasa
+      GOTRUE_MAILER_URLPATHS_INVITE: /auth/v1/verify
+      GOTRUE_MAILER_URLPATHS_CONFIRMATION: /auth/v1/verify
+      GOTRUE_MAILER_URLPATHS_RECOVERY: /auth/v1/verify
+      GOTRUE_MAILER_URLPATHS_EMAIL_CHANGE: /auth/v1/verify
+      # The repo's own email templates, served inside the stack only.
+      GOTRUE_MAILER_TEMPLATES_CONFIRMATION: http://email-templates/confirm-signup.html
+      GOTRUE_MAILER_TEMPLATES_INVITE: http://email-templates/invite.html
+      GOTRUE_MAILER_TEMPLATES_MAGIC_LINK: http://email-templates/magic-link.html
+      GOTRUE_MAILER_TEMPLATES_EMAIL_CHANGE: http://email-templates/change-email.html
+      GOTRUE_MAILER_TEMPLATES_RECOVERY: http://email-templates/reset-password.html
+      GOTRUE_MAILER_TEMPLATES_REAUTHENTICATION: http://email-templates/reauthentication.html
+    volumes:
+      - *wrapper
+      - secrets:/secrets:ro
+    healthcheck:
+      test: [CMD, wget, --no-verbose, --tries=1, --spider, http://127.0.0.1:9999/health]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 10s
+
+  rest:
+    image: public.ecr.aws/supabase/postgrest:v14.18
+    restart: unless-stopped
+    depends_on:
+      init:
+        condition: service_completed_successfully
+      db:
+        condition: service_healthy
+    entrypoint:
+      - /bin/sh
+      - /openkuasa/with-secrets.sh
+      - /bin/sh
+      - -c
+      - >-
+        export PGRST_JWT_SECRET="$$JWT_SECRET"
+        PGRST_DB_URI="postgres://authenticator:$$POSTGRES_PASSWORD@db:5432/postgres";
+        exec postgrest
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      PGRST_DB_SCHEMAS: public,graphql_public
+      PGRST_DB_MAX_ROWS: "1000"
+      PGRST_DB_EXTRA_SEARCH_PATH: public
+      PGRST_DB_ANON_ROLE: anon
+      PGRST_ADMIN_SERVER_PORT: "3001"
+      PGRST_ADMIN_SERVER_HOST: localhost
+      PGRST_DB_USE_LEGACY_GUCS: "false"
+      PGRST_APP_SETTINGS_JWT_EXP: "3600"
+    volumes:
+      - *wrapper
+      - secrets:/secrets:ro
+    healthcheck:
+      test: [CMD, postgrest, --ready]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  storage:
+    image: public.ecr.aws/supabase/storage-api:v1.81.0
+    restart: unless-stopped
+    depends_on:
+      init:
+        condition: service_completed_successfully
+      db:
+        condition: service_healthy
+      rest:
+        condition: service_started
+    entrypoint:
+      - /bin/sh
+      - /openkuasa/with-secrets.sh
+      - /bin/sh
+      - -c
+      - >-
+        export SERVICE_KEY="$$SERVICE_ROLE_KEY"
+        AUTH_JWT_SECRET="$$JWT_SECRET"
+        DATABASE_URL="postgres://supabase_storage_admin:$$POSTGRES_PASSWORD@db:5432/postgres";
+        exec docker-entrypoint.sh node dist/start/server.js
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      POSTGREST_URL: http://rest:3000
+      STORAGE_PUBLIC_URL: http://localhost:58273
+      REQUEST_ALLOW_X_FORWARDED_PATH: "true"
+      FILE_SIZE_LIMIT: "52428800"
+      STORAGE_BACKEND: file
+      FILE_STORAGE_BACKEND_PATH: /var/lib/storage
+      GLOBAL_S3_BUCKET: stub
+      TENANT_ID: stub
+      REGION: stub
+      ENABLE_IMAGE_TRANSFORMATION: "false"
+    volumes:
+      - *wrapper
+      - secrets:/secrets:ro
+      - storage-data:/var/lib/storage
+    healthcheck:
+      test: [CMD, wget, --no-verbose, --tries=1, --spider, http://127.0.0.1:5000/status]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 10s
+
+  # The API gateway the browser and the app both talk to.
+  kong:
+    image: kong/kong:3.9.3
+    restart: unless-stopped
+    depends_on:
+      init:
+        condition: service_completed_successfully
+    # Kong runs as uid 1001; the generated secrets file is readable by group 1000.
+    group_add:
+      - "1000"
+    entrypoint:
+      - /bin/sh
+      - /openkuasa/with-secrets.sh
+      - /bin/sh
+      - -c
+      - 'export SUPABASE_SERVICE_KEY="$$SERVICE_ROLE_KEY"; exec /bin/sh /home/kong/kong-entrypoint.sh'
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      KONG_DATABASE: "off"
+      KONG_DECLARATIVE_CONFIG: /usr/local/kong/kong.yml
+      KONG_ROUTER_FLAVOR: expressions
+      KONG_DNS_ORDER: LAST,A,CNAME
+      KONG_DNS_NOT_FOUND_TTL: "1"
+      KONG_DNS_VALID_TTL: "5"
+      KONG_PLUGINS: request-transformer,cors,key-auth,acl,post-function
+      KONG_NGINX_PROXY_PROXY_BUFFER_SIZE: 160k
+      KONG_NGINX_PROXY_PROXY_BUFFERS: 64 160k
+      KONG_PROXY_ACCESS_LOG: /dev/stdout combined
+    ports:
+      - "127.0.0.1:58273:8000"
+    volumes:
+      - *wrapper
+      - secrets:/secrets:ro
+      - ./docker/supabase/api/kong.yml:/home/kong/temp.yml:ro
+      - ./docker/supabase/api/kong-entrypoint.sh:/home/kong/kong-entrypoint.sh:ro
+    healthcheck:
+      test: [CMD, kong, health]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  # Optional (`--profile mail`): catches every email the local Supabase sends.
+  # Read them at http://localhost:58274. Without it, sign-up and sign-in still
+  # work; password-reset and invite emails can't be sent.
+  mail:
+    image: public.ecr.aws/supabase/mailpit:v1.22.3
+    profiles: [mail]
+    restart: unless-stopped
+    environment:
+      MP_SMTP_AUTH_ACCEPT_ANY: "1"
+      MP_SMTP_AUTH_ALLOW_INSECURE: "1"
+    ports:
+      - "127.0.0.1:58274:8025"
+
+  # Optional (`--profile mail`): serves supabase/email-templates to the auth
+  # service, inside the stack only.
+  email-templates:
+    image: busybox:1.37.0
+    profiles: [mail]
+    restart: unless-stopped
+    command: [httpd, -f, -p, "80", -h, /templates]
+    volumes:
+      - ./supabase/email-templates:/templates:ro
+
+  # One-off: applies pending migrations, then exits. A failed file stops it with
+  # exit code 1, and the app does not start.
+  migrate:
+    image: ghcr.io/openkuasa/openkuasa:${OPENKUASA_IMAGE_TAG:-latest}
+    command: [/app/tools/docker/with-secrets.sh, node, /app/tools/scripts/migrate-local.mjs]
+    depends_on:
+      db:
+        condition: service_healthy
+      auth:
+        condition: service_healthy
+      storage:
+        condition: service_healthy
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      POSTGRES_HOST: db
+    volumes:
+      - secrets:/secrets:ro
+    restart: "no"
+
+  app:
+    image: ghcr.io/openkuasa/openkuasa:${OPENKUASA_IMAGE_TAG:-latest}
+    restart: unless-stopped
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      kong:
+        condition: service_healthy
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      SUPABASE_INTERNAL_URL: http://kong:8000
+      SUPABASE_PUBLIC_URL: http://localhost:58273
+      PUBLIC_SITE_URL: http://localhost:58272
+      OPENKUASA_DEMO_ENABLED: "1"
+      POSTGRES_HOST: db
+    ports:
+      - "127.0.0.1:58272:3000"
+    volumes:
+      - secrets:/secrets:ro
+
+volumes:
+  secrets:
+  db-data:
+  db-config:
+  storage-data:

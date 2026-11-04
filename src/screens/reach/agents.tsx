@@ -20,6 +20,7 @@ import {
   type AgentRunAsset,
   type AgentSchedule,
 } from '@/lib/agents/types';
+import { toPublicSupabaseUrl } from '@/lib/supabase/public-config';
 
 /** Shown when the org has no saved config yet. Never written on read. */
 function defaultConfig(orgId: string): AgentConfig {
@@ -110,7 +111,7 @@ export default async function AgentsScreen() {
             const { data: signed } = await supabase.storage
               .from('agent-assets')
               .createSignedUrl(a.storage_path as string, 3600);
-            if (signed?.signedUrl) assetUrls[a.id] = signed.signedUrl;
+            if (signed?.signedUrl) assetUrls[a.id] = toPublicSupabaseUrl(signed.signedUrl);
           }),
       );
     }

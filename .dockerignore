@@ -1,0 +1,21 @@
+# Kept out of the image build context (docker/Dockerfile).
+.git
+.github
+.claude
+.superpowers
+.playwright-mcp
+.next
+node_modules
+output
+coverage
+evals/reports
+.env*
+*.tsbuildinfo
+next-env.d.ts
+.DS_Store
+.vercel
+.netlify
+.mcp.json
+docs/superpowers
+# Screenshots at the repo root only.
+/*.png

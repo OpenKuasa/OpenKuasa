@@ -2,11 +2,12 @@
 
 import 'server-only';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
+import { supabaseAnonKey, supabaseServerUrl } from '@/lib/supabase/env';
 
 /** A client of the person whose access token this is (the anon key and their JWT). One per use, so no session is shared. */
 export function userClient(accessToken: string): SupabaseClient {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  const url = supabaseServerUrl();
+  const anon = supabaseAnonKey();
   if (!url || !anon) throw new Error('Supabase is not configured.');
   return createClient(url, anon, {
     global: { headers: { Authorization: 'Bearer ' + accessToken } },

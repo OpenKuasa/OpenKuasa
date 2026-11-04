@@ -1,6 +1,8 @@
 import { createServerClient } from '@supabase/ssr';
 import { cookies } from 'next/headers';
 import { REMEMBER_COOKIE, isPersistent, sessionize } from './remember';
+import { supabaseAnonKey, supabasePublicUrl, supabaseServerUrl } from './env';
+import { authCookieName } from './public-config';
 
 /**
  * Supabase client for use in Server Components, Route Handlers, and Server Actions.
@@ -18,9 +20,10 @@ export async function createClient(options?: { remember?: boolean }) {
     isPersistent(cookieStore.get(REMEMBER_COOKIE)?.value);
 
   return createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    supabaseServerUrl()!,
+    supabaseAnonKey()!,
     {
+      cookieOptions: { name: authCookieName(supabasePublicUrl()!) },
       cookies: {
         getAll() {
           return cookieStore.getAll();

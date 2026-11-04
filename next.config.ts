@@ -2,6 +2,8 @@ import type { NextConfig } from "next";
 import { staticSecurityHeaders } from "./src/lib/security/headers";
 
 const nextConfig: NextConfig = {
+  // The Docker image (docker/Dockerfile) sets NEXT_OUTPUT=standalone; Railway leaves it unset and runs `next start`.
+  output: process.env.NEXT_OUTPUT === "standalone" ? "standalone" : undefined,
   // Development logs print each server function call with its arguments; a form post's arguments are personal data.
   logging: { serverFunctions: false },
   // The guide files are read from disk at run time; make sure they ship with the server build.

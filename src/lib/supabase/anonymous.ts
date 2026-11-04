@@ -1,4 +1,5 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
+import { supabaseAnonKey, supabaseServerUrl } from './env';
 
 /**
  * A client that carries no session at all, whoever is asking. Reading a
@@ -7,8 +8,8 @@ import { createClient, type SupabaseClient } from '@supabase/supabase-js';
  */
 export function createAnonymousClient(): SupabaseClient {
   return createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    supabaseServerUrl()!,
+    supabaseAnonKey()!,
     { auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false } },
   );
 }
