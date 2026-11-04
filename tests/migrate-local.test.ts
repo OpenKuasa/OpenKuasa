@@ -2,7 +2,7 @@ import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
-import { applyPending, connectionString, isLockConflict } from '../scripts/migrate-local.mjs';
+import { applyPending, clientConfig, connectionString, isLockConflict } from '../scripts/migrate-local.mjs';
 
 type Step = { match: RegExp; error?: unknown; once?: boolean };
 
@@ -109,5 +109,29 @@ describe('connectionString', () => {
     expect(
       connectionString({ POSTGRES_PASSWORD: 'x', POSTGRES_HOST: 'h', POSTGRES_PORT: '1', POSTGRES_DB: 'd' }),
     ).toBe('postgres://postgres:x@h:1/d');
+  });
+});
+
+describe('clientConfig', () => {
+  const online = 'postgresql://postgres.abc:pw@aws-0-ap-southeast-1.pooler.supabase.com:5432/postgres';
+
+  test('uses DATABASE_URL for an online Supabase, encrypted', () => {
+    expect(clientConfig({ DATABASE_URL: online, POSTGRES_PASSWORD: 'local' })).toEqual({
+      connectionString: online,
+      ssl: { rejectUnauthorized: false },
+    });
+  });
+
+  test('leaves encryption to the URL when it names an sslmode', () => {
+    const strict = `${online}?sslmode=verify-full`;
+    expect(clientConfig({ DATABASE_URL: strict })).toEqual({ connectionString: strict });
+  });
+
+  test('falls back to the Docker database without DATABASE_URL', () => {
+    expect(clientConfig({ POSTGRES_PASSWORD: 'x' })).toEqual({ connectionString: 'postgres://postgres:x@db:5432/postgres' });
+  });
+
+  test('says what to set when there is neither', () => {
+    expect(() => clientConfig({ DATABASE_URL: ' ' })).toThrow(/Set DATABASE_URL .* or POSTGRES_PASSWORD/);
   });
 });

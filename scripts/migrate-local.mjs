@@ -6,8 +6,9 @@
  *
  *   node scripts/migrate-local.mjs
  *
- * Reads POSTGRES_PASSWORD (required) and POSTGRES_HOST, POSTGRES_PORT,
- * POSTGRES_DB (default db, 5432, postgres) from the environment.
+ * For an online Supabase, reads DATABASE_URL. Otherwise reads
+ * POSTGRES_PASSWORD and POSTGRES_HOST, POSTGRES_PORT, POSTGRES_DB (default
+ * db, 5432, postgres) for the Docker database.
  *
  * It uses the same bookkeeping as db-migrate.mjs: the same tracking table,
  * the same "which files are pending" rules, and each file runs in one
@@ -44,6 +45,19 @@ export function connectionString(env) {
   const port = env.POSTGRES_PORT ?? 5432;
   const database = env.POSTGRES_DB ?? 'postgres';
   return `postgres://postgres:${password}@${host}:${port}/${database}`;
+}
+
+/**
+ * How to reach the database: an online Supabase through DATABASE_URL (its
+ * "Session pooler" connection string), else the Docker database. The online
+ * connection is encrypted; the server's certificate is not checked unless the
+ * URL asks for it (e.g. `?sslmode=verify-full` with Supabase's CA installed).
+ */
+export function clientConfig(env) {
+  const url = env.DATABASE_URL?.trim();
+  if (url) return /[?&]sslmode=/.test(url) ? { connectionString: url } : { connectionString: url, ssl: { rejectUnauthorized: false } };
+  if (env.POSTGRES_PASSWORD) return { connectionString: connectionString(env) };
+  throw new Error('Set DATABASE_URL (online Supabase) or POSTGRES_PASSWORD (Docker Supabase).');
 }
 
 /**
@@ -89,9 +103,9 @@ export async function applyPending({
 }
 
 async function main() {
-  if (!process.env.POSTGRES_PASSWORD) throw new Error('Set POSTGRES_PASSWORD.');
+  const config = clientConfig(process.env);
   const { default: pg } = await import('pg');
-  const client = new pg.Client({ connectionString: connectionString(process.env) });
+  const client = new pg.Client(config);
   await client.connect();
   try {
     const { applied } = await applyPending({ client });

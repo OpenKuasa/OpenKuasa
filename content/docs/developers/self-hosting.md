@@ -24,7 +24,7 @@ docker compose up -d
 
 Open http://localhost:58272. Sign up to get your own workspace, or press "Try the demo" to see the sample company.
 
-Sign-up is confirmed for you locally. Password-reset and other sign-in emails land in the mail viewer at http://localhost:58274.
+Sign-up is confirmed for you locally, so you don't need email to get started. To get password-reset and invite emails, start with `docker compose --profile mail up -d` and read them in the mail viewer at http://localhost:58274.
 
 Every key in `.env` is optional. Add `OPENROUTER_API_KEY` to turn on the AI chat. See [AI models and keys](/docs/developers/ai-models-and-keys).
 
@@ -38,15 +38,39 @@ docker compose down -v                                    # wipe, deletes all lo
 
 ### Troubleshooting
 
-- **Port already in use.** The app uses ports 58272, 58273 and 58274. On macOS these sit in a range the system lends out briefly to other apps, so another app can hold one now and then. Find it with `lsof -i :58273` (swap in the port from the error). Quit that app or restart the Mac, then run `docker compose up -d` again.
+- **Port already in use.** The app uses ports 58272 and 58273 (and 58274 with the mail viewer). On macOS these sit in a range the system lends out briefly to other apps, so another app can hold one now and then. Find it with `lsof -i :58273` (swap in the port from the error). Quit that app or restart the Mac, then run `docker compose up -d` again.
 - **Docker isn't running.** Start Docker Desktop and wait until it says it is running.
 - **"dependency failed to start", or the page never loads.** Run `docker compose logs migrate` (or `docker compose logs init`) to see why. Fix it, then run `docker compose up -d` again. It carries on from where it stopped.
 - **Start over completely.** Run `docker compose down -v`. This deletes all local data. Then run `docker compose up -d`.
 - **Changed `POSTGRES_PASSWORD` after the first run.** The existing database keeps its old password. Set it before the first run, or run `docker compose down -v` to start over.
 
+## Docker app with online Supabase
+
+Use this path to run the app in Docker while your data lives in your own project on supabase.com, with Supabase's backups. You need only Docker on your machine.
+
+### Steps (online Supabase)
+
+1. Create a project on supabase.com.
+2. Copy the example settings: `cp .env.example .env`.
+3. In `.env`, fill in from the Supabase dashboard:
+   - `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY` and `SUPABASE_SERVICE_ROLE_KEY` (Project Settings → API).
+   - `DATABASE_URL`: press **Connect**, choose **Session pooler**, and copy the connection string with your database password in it. Use the pooler, not the direct connection: the direct address needs IPv6, which many networks and Docker setups don't have.
+4. Set up Supabase Auth once, as in [step 4 of the hosted steps](#4-set-up-supabase-auth): site URL `http://localhost:58272` (or your own address), anonymous sign-ins on if you want "Try the demo", and paste the email templates.
+5. Start it:
+
+```bash
+docker compose -f docker-compose.hosted.yml up -d
+```
+
+Open http://localhost:58272. Every start applies new database changes to your project before the app starts. If a setting is missing, `docker compose -f docker-compose.hosted.yml logs init` names it.
+
+The database connection is encrypted. To also check Supabase's certificate, install its CA certificate and add `?sslmode=verify-full` to `DATABASE_URL`.
+
+Update: `git pull && docker compose -f docker-compose.hosted.yml pull && docker compose -f docker-compose.hosted.yml up -d`. Stop: `docker compose -f docker-compose.hosted.yml down`. Your data stays in Supabase either way.
+
 ## Hosted Supabase
 
-Use this path to run OpenKuasa on a server, with your own Supabase project for data and sign-in and a host that runs Node.
+Use this path to run OpenKuasa on a server without Docker, with your own Supabase project for data and sign-in and a host that runs Node.
 
 ### Who can do this
 

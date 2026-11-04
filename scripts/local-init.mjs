@@ -33,6 +33,25 @@ export const GENERATED = [
   'CRON_SECRET',
 ];
 
+/** With an online Supabase, the only secrets to generate are the app's own. */
+export const APP_SECRETS = ['AUTH_COOKIE_SECRET', 'AI_KEYS_ENCRYPTION_SECRET', 'RATE_LIMIT_PEPPER', 'CRON_SECRET'];
+
+/**
+ * What an online-Supabase setup must have, each as the name `.env.example`
+ * uses plus any other name the app also accepts for it.
+ */
+const HOSTED_REQUIRED = [
+  ['NEXT_PUBLIC_SUPABASE_URL', 'SUPABASE_PUBLIC_URL'],
+  ['NEXT_PUBLIC_SUPABASE_ANON_KEY', 'SUPABASE_ANON_KEY'],
+  ['SUPABASE_SERVICE_ROLE_KEY'],
+  ['DATABASE_URL'],
+];
+
+/** The `.env.example` names of the online-Supabase settings still blank. */
+export function missingHostedSettings(env) {
+  return HOSTED_REQUIRED.filter((names) => !names.some((n) => filled(env[n]))).map(([name]) => name);
+}
+
 export const SECRETS_FILE_MODE = 0o640;
 
 const KEY_ROLES = { ANON_KEY: 'anon', SERVICE_ROLE_KEY: 'service_role' };
@@ -81,11 +100,19 @@ const filled = (v) => typeof v === 'string' && v.trim() !== '';
  * For each GENERATED name: the user's non-blank value, else the one already
  * in the file, else a new one. `created` lists the names given a new value.
  */
-export function resolveSecrets({ existing = {}, provided = {} }) {
+export function resolveSecrets({ existing = {}, provided = {}, mode = 'local' }) {
   /** @type {Record<string, string>} */
   const values = {};
   const created = [];
   const pick = (name) => (filled(provided[name]) ? provided[name] : filled(existing[name]) ? existing[name] : undefined);
+
+  if (mode === 'hosted') {
+    for (const name of APP_SECRETS) {
+      values[name] = pick(name) ?? randomBytes(32).toString('hex');
+      if (!filled(provided[name]) && !filled(existing[name])) created.push(name);
+    }
+    return { values, created };
+  }
 
   for (const name of GENERATED) {
     if (name in KEY_ROLES) continue;
@@ -119,8 +146,19 @@ export function resolveSecrets({ existing = {}, provided = {} }) {
 
 function main() {
   const file = process.env.OPENKUASA_SECRETS_FILE || '/secrets/generated.env';
+  const mode = process.env.OPENKUASA_INIT_MODE === 'hosted' ? 'hosted' : 'local';
+  if (mode === 'hosted') {
+    const missing = missingHostedSettings(process.env);
+    if (missing.length > 0) {
+      console.error(
+        `Fill these in .env from your Supabase project, then start again: ${missing.join(', ')}.\n` +
+          'See "Docker app with online Supabase" in the self-hosting guide.',
+      );
+      process.exit(1);
+    }
+  }
   const existing = existsSync(file) ? parseEnv(readFileSync(file, 'utf8')) : {};
-  const { values, created } = resolveSecrets({ existing, provided: process.env });
+  const { values, created } = resolveSecrets({ existing, provided: process.env, mode });
 
   if (created.length > 0 || formatEnv(existing) !== formatEnv(values)) {
     mkdirSync(path.dirname(file), { recursive: true });

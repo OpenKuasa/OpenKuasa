@@ -47,16 +47,26 @@ docker compose up -d
 
 - Open the app at <http://localhost:58272>. Sign up to get your own workspace,
   or press "Try the demo" to see the sample company.
-- Password-reset and other sign-in emails land in the mail viewer at <http://localhost:58274>.
+- Emails are optional. To get password-reset and invite emails, start with
+  `docker compose --profile mail up -d` and read them in the mail viewer at
+  <http://localhost:58274>. Sign-up and sign-in work without it.
 - Every key in `.env` is optional. Add `OPENROUTER_API_KEY` to turn on the AI
   chat.
 - Update: `git pull && docker compose pull && docker compose up -d`
 - Stop: `docker compose down` (keeps your data)
 - Wipe: `docker compose down -v` (deletes all local data)
 
+### Docker app with your data in online Supabase
+
+Prefer your data in your own project on supabase.com? Fill in the "Hosted
+Supabase" settings in `.env` (project URL, anon key, service-role key, and
+`DATABASE_URL`, the project's **Session pooler** connection string), then run
+`docker compose -f docker-compose.hosted.yml up -d`. Steps, including the
+one-time Supabase Auth settings: [Run your own copy](https://openkuasa.com/docs/developers/self-hosting).
+
 ### Troubleshooting
 
-- **Port already in use.** The app uses ports 58272, 58273 and 58274. On macOS these sit in a range the system lends out briefly to other apps, so another app can hold one now and then. Find it with `lsof -i :58273` (swap in the port from the error). Quit that app or restart the Mac, then run `docker compose up -d` again.
+- **Port already in use.** The app uses ports 58272 and 58273 (and 58274 with the mail viewer). On macOS these sit in a range the system lends out briefly to other apps, so another app can hold one now and then. Find it with `lsof -i :58273` (swap in the port from the error). Quit that app or restart the Mac, then run `docker compose up -d` again.
 - **Docker isn't running.** Start Docker Desktop and wait until it says it is running.
 - **"dependency failed to start", or the page never loads.** Run `docker compose logs migrate` (or `docker compose logs init`) to see why. Fix it, then run `docker compose up -d` again. It carries on from where it stopped.
 - **Start over completely.** Run `docker compose down -v`. This deletes all local data. Then run `docker compose up -d`.
