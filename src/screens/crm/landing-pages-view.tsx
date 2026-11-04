@@ -456,7 +456,9 @@ export function LandingPagesView({
                     <TableHead>Lead form</TableHead>
                     <TableHead className="text-right">Views</TableHead>
                     <TableHead className="text-right">Leads</TableHead>
-                    <TableHead className="text-right">Conversion</TableHead>
+                    {/* Left out when the table is narrow, so the pinned Actions do not cover Status;
+                        the Conversion card above shows the same figure. */}
+                    <TableHead className="text-right @max-3xl:hidden">Conversion</TableHead>
                     <TableHead>Status</TableHead>
                     {/* Pinned to the right edge, so the buttons stay in reach when the table is wider than its card. */}
                     {actions ? <TableHead className="sticky right-0 bg-muted text-right shadow-[-8px_0_8px_-8px_rgba(0,0,0,0.2)]">Actions</TableHead> : null}
@@ -483,7 +485,7 @@ export function LandingPagesView({
                         </TableCell>
                         <TableCell className="text-right tabular-nums">{page.views.toLocaleString('en-MY')}</TableCell>
                         <TableCell className="text-right tabular-nums">{page.leads.toLocaleString('en-MY')}</TableCell>
-                        <TableCell className="text-right tabular-nums">
+                        <TableCell className="text-right tabular-nums @max-3xl:hidden">
                           {page.views > 0 ? `${Math.round((page.leads / page.views) * 1000) / 10}%` : '—'}
                         </TableCell>
                         <TableCell>
