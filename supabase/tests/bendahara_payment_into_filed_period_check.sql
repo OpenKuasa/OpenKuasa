@@ -255,6 +255,15 @@ begin
   rcpt := public.bendahara_paid_income(org, bank, '2026-10-23', cat, 50);
   got := public.bendahara_paid_post(org, rcpt);
   if got <> 'ok' then fails := fails || format('14: a receipt for other income answered %s', got); end if;
+  -- The one-shot path the screen's Record button uses: it posts in the same call, and holds no invoice either.
+  begin
+    rcpt := public.finance_record_cash_receipt(org,
+      jsonb_build_object('account_id', bank, 'txn_date', '2026-10-24', 'method', 'cash', 'amount', 40, 'category_id', cat, 'party_name', 'Walk-in'));
+    select status into got from public.finance_transactions where id = rcpt;
+    if got is distinct from 'posted' then fails := fails || format('14: finance_record_cash_receipt left the receipt %s', got); end if;
+  exception when others then
+    fails := fails || format('14: finance_record_cash_receipt answered %s: %s', sqlstate, sqlerrm);
+  end;
 
   -- ---- 15: the document guards from #434 are unchanged ===========================
   got := public.bendahara_paid_try_invoice(org, cust, '2026-10-02', '[{"description":"Late","quantity":1,"unit_price":100,"sst_rate":6,"tax_type":"service"}]');

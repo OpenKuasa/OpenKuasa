@@ -6,11 +6,14 @@
 --
 -- One guard on the update, not one per writer: every money row starts as a
 -- draft, because finance_transaction_insert_guard refuses any other insert
--- status (FIN09, 20261030123000). All three money-in paths write a draft and
--- post it with an update (finance_record_payment_in, finance_save_cash_receipt
--- then finance_post_cash_receipt, finance_record_cash_receipt), so one branch
--- covers all of them. It has to be the update: at insert time the allocations
--- that name the invoices do not exist yet.
+-- status (FIN09, 20261030123000). Both money-in paths that can carry an
+-- invoice write a draft and post it with an update (finance_record_payment_in,
+-- finance_save_cash_receipt then finance_post_cash_receipt), so one branch
+-- covers both. It has to be the update: at insert time the allocations that
+-- name the invoices do not exist yet. finance_record_cash_receipt is other
+-- income with a category and never holds an invoice, so it is outside this
+-- guard by having no allocation, not by being skipped (and a posted payment's
+-- split cannot be changed afterwards, FIN09).
 --
 -- Two rules keep it from refusing what changes nothing:
 --   * Only where service tax is counted on the money received. Under
