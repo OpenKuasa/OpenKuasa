@@ -155,19 +155,14 @@ services:
         condition: service_completed_successfully
       db:
         condition: service_healthy
-    entrypoint:
-      - /bin/sh
-      - /openkuasa/with-secrets.sh
-      - /bin/sh
-      - -c
-      - >-
-        export PGRST_JWT_SECRET="$$JWT_SECRET"
-        PGRST_DB_URI="postgres://authenticator:$$POSTGRES_PASSWORD@db:5432/postgres";
-        exec postgrest
+    # No shell wrapper here: the amd64 PostgREST image has no shell. It reads
+    # its two secrets from files init writes beside generated.env.
     env_file:
       - path: .env
         required: false
     environment:
+      PGRST_DB_URI: "@/secrets/postgrest-db-uri"
+      PGRST_JWT_SECRET: "@/secrets/postgrest-jwt-secret"
       PGRST_DB_SCHEMAS: public,graphql_public
       PGRST_DB_MAX_ROWS: "1000"
       PGRST_DB_EXTRA_SEARCH_PATH: public
@@ -177,7 +172,6 @@ services:
       PGRST_DB_USE_LEGACY_GUCS: "false"
       PGRST_APP_SETTINGS_JWT_EXP: "3600"
     volumes:
-      - *wrapper
       - secrets:/secrets:ro
     healthcheck:
       test: [CMD, postgrest, --ready]
