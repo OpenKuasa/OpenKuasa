@@ -4,8 +4,10 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
+  APP_SECRETS,
   GENERATED,
   formatEnv,
+  missingHostedSettings,
   parseEnv,
   resolveSecrets,
   verifyJwt,
@@ -80,6 +82,67 @@ describe('env file', () => {
   it('round-trips the env file', () => {
     const v = { A: 'x=y==', B: 'a/b+c.d', C: 'plain' };
     expect(parseEnv(formatEnv(v))).toEqual(v);
+  });
+});
+
+describe('online Supabase (hosted mode)', () => {
+  const full = {
+    NEXT_PUBLIC_SUPABASE_URL: 'https://abc.supabase.co',
+    NEXT_PUBLIC_SUPABASE_ANON_KEY: 'anon',
+    SUPABASE_SERVICE_ROLE_KEY: 'service',
+    DATABASE_URL: 'postgresql://postgres.abc:pw@pooler:5432/postgres',
+  };
+
+  it('generates only the app secrets, never Supabase keys', () => {
+    const { values, created } = resolveSecrets({ mode: 'hosted' });
+    expect(Object.keys(values)).toEqual([...APP_SECRETS]);
+    expect(created).toEqual([...APP_SECRETS]);
+    expect(values).not.toHaveProperty('SUPABASE_ANON_KEY');
+    expect(values).not.toHaveProperty('POSTGRES_PASSWORD');
+  });
+
+  it('keeps hosted secrets on a second run', () => {
+    const first = resolveSecrets({ mode: 'hosted' });
+    const second = resolveSecrets({ mode: 'hosted', existing: first.values });
+    expect(second.values).toEqual(first.values);
+    expect(second.created).toEqual([]);
+  });
+
+  it('finds nothing missing when the project is filled in, under either name', () => {
+    expect(missingHostedSettings(full)).toEqual([]);
+    const runtimeNames = {
+      SUPABASE_PUBLIC_URL: full.NEXT_PUBLIC_SUPABASE_URL,
+      SUPABASE_ANON_KEY: full.NEXT_PUBLIC_SUPABASE_ANON_KEY,
+      SUPABASE_SERVICE_ROLE_KEY: 'service',
+      DATABASE_URL: full.DATABASE_URL,
+    };
+    expect(missingHostedSettings(runtimeNames)).toEqual([]);
+  });
+
+  it('names each missing setting, treating blanks as missing', () => {
+    expect(missingHostedSettings({ ...full, DATABASE_URL: ' ', SUPABASE_SERVICE_ROLE_KEY: '' })).toEqual([
+      'SUPABASE_SERVICE_ROLE_KEY',
+      'DATABASE_URL',
+    ]);
+  });
+
+  it('stops the CLI with a plain message, and writes nothing, when settings are missing', () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'li-'));
+    const file = path.join(dir, 'generated.env');
+    const run = spawnSync(process.execPath, [path.resolve(__dirname, '../scripts/local-init.mjs')], {
+      env: {
+        PATH: process.env.PATH ?? '',
+        OPENKUASA_SECRETS_FILE: file,
+        OPENKUASA_INIT_MODE: 'hosted',
+        NEXT_PUBLIC_SUPABASE_URL: full.NEXT_PUBLIC_SUPABASE_URL,
+      } as unknown as NodeJS.ProcessEnv,
+      encoding: 'utf8',
+    });
+    expect(run.status).toBe(1);
+    expect(run.stderr).toMatch(/NEXT_PUBLIC_SUPABASE_ANON_KEY/);
+    expect(run.stderr).toMatch(/DATABASE_URL/);
+    expect(run.stderr).not.toMatch(/abc\.supabase\.co/);
+    expect(() => statSync(file)).toThrow();
   });
 });
 
