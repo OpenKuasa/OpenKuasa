@@ -9,6 +9,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { dataUrlBytes, isFilePart, sniffAttachment } from '@/lib/chat/attachments';
 import { errorCodeOf } from '@/lib/ai/call-log';
 import type { StoredFileRef } from '@/lib/chat/stored-parts';
+import { supabasePublicUrl } from '@/lib/supabase/env';
 
 const BUCKET = 'chat-attachments';
 const SIGNED_FOR_SECONDS = 60 * 60;
@@ -81,7 +82,7 @@ export async function signStoredFiles(
 
 /** The storage path a link from `signStoredFiles` points at, or null for any other URL. */
 export function storedPathOf(url: string, userId: string): string | null {
-  const base = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const base = supabasePublicUrl();
   if (!base) return null;
   const prefix = `${base.replace(/\/$/, '')}/storage/v1/object/sign/${BUCKET}/`;
   if (!url.startsWith(prefix)) return null;

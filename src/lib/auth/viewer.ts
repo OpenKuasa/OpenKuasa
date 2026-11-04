@@ -12,6 +12,7 @@ import {
   hasSupabaseEnv,
   usesSampleData,
 } from './preview-mode';
+import { supabasePublicUrl } from '@/lib/supabase/env';
 
 /** The signed-in person and their workspace, as shown in the app chrome. */
 export type Viewer = {
@@ -93,7 +94,7 @@ export function toViewer(
 
 /** Public URL for a path in the `avatars` storage bucket. */
 export function avatarPublicUrl(path: string | null | undefined): string | null {
-  const base = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const base = supabasePublicUrl();
   if (!path || !base) return null;
   return `${base}/storage/v1/object/public/avatars/${path}`;
 }

@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { cspHeaders, createNonce } from '@/lib/security/headers';
 import { updateSession } from '@/lib/supabase/middleware';
+import { supabasePublicUrl } from '@/lib/supabase/env';
 
 /** Paths an MCP client calls with a bearer credential: no cookie session to refresh or set. */
 const BEARER_PATHS = new Set(['/api/mcp', '/.well-known/oauth-protected-resource']);
@@ -9,7 +10,7 @@ export async function proxy(request: NextRequest) {
   const nonce = createNonce();
   const policy = cspHeaders({
     nonce,
-    supabaseUrl: process.env.NEXT_PUBLIC_SUPABASE_URL,
+    supabaseUrl: supabasePublicUrl(),
     isDev: process.env.NODE_ENV === 'development',
     // Set CSP_REPORT_ONLY=1 on the host to stop enforcing the full policy without a deploy of new code.
     reportOnly: process.env.CSP_REPORT_ONLY === '1',

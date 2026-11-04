@@ -5,6 +5,8 @@ import { ThemeSync } from "@/components/theme/theme-sync";
 import { PwaSetup } from "@/components/pwa/pwa-setup";
 import { THEME_INIT_SCRIPT } from "@/lib/theme";
 import "./globals.css";
+import { publicConfig } from "@/lib/supabase/env";
+import { PUBLIC_CONFIG_ID, serializePublicConfig } from "@/lib/supabase/public-config";
 
 const lexend = Lexend({
   variable: "--font-sans",
@@ -72,6 +74,12 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
           markup there (Netlify adds a comment) then fail the whole page.
         */}
         <script nonce={nonce} dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
+        <script
+          id={PUBLIC_CONFIG_ID}
+          type="application/json"
+          nonce={nonce}
+          dangerouslySetInnerHTML={{ __html: serializePublicConfig(publicConfig()) }}
+        />
         <ThemeSync />
         <PwaSetup />
         {children}

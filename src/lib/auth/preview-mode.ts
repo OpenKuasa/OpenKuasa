@@ -1,7 +1,9 @@
+import { supabaseAnonKey, supabaseServerUrl } from '@/lib/supabase/env';
+
 // Decides whether this server is the real app, an intentional preview, or a
 // misconfigured deployment that must not answer.
 //
-// No imports, and nothing here runs at import or build time: every function
+// Nothing here runs at import or build time: every function
 // reads the environment when it is called, so `next build` works with or
 // without a Supabase project and the decision is made per request.
 
@@ -15,8 +17,7 @@ export type DeploymentMode =
 
 export function hasSupabaseEnv(): boolean {
   return Boolean(
-    process.env.NEXT_PUBLIC_SUPABASE_URL &&
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
+    supabaseServerUrl() && supabaseAnonKey(),
   );
 }
 
