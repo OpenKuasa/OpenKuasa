@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { cspHeaders, createNonce } from '@/lib/security/headers';
+import { trustConfiguredSiteOrigin } from '@/lib/security/site-origin';
 import { updateSession } from '@/lib/supabase/middleware';
 import { supabasePublicUrl } from '@/lib/supabase/env';
 
@@ -20,6 +21,8 @@ export async function proxy(request: NextRequest) {
   // and the root layout reads `x-nonce` for the one inline script we write. Both
   // are set before the session refresh, which builds its response from this request.
   request.headers.set('x-nonce', nonce);
+  // A form sent from the site's own address passes Next's origin check behind any proxy.
+  trustConfiguredSiteOrigin(request.headers);
   request.headers.set(
     'Content-Security-Policy',
     policy['Content-Security-Policy-Report-Only'] ?? policy['Content-Security-Policy'],
