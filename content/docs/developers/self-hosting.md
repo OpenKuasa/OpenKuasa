@@ -44,6 +44,10 @@ docker compose down -v                                    # wipe, deletes all lo
 - **Start over completely.** Run `docker compose down -v`. This deletes all local data. Then run `docker compose up -d`.
 - **Changed `POSTGRES_PASSWORD` after the first run.** The existing database keeps its old password. Set it before the first run, or run `docker compose down -v` to start over.
 
+### On a cloud computer
+
+To try it on a BoxCompute computer in Malaysia instead of your laptop, see [Run it on BoxCompute](/docs/developers/boxcompute).
+
 ## Docker app with online Supabase
 
 Use this path to run the app in Docker while your data lives in your own project on supabase.com, with Supabase's backups. You need only Docker on your machine.
@@ -152,6 +156,7 @@ Some background work runs only when your scheduler calls it. See [Scheduled jobs
 
 ## Related
 
+- [Run it on BoxCompute](/docs/developers/boxcompute)
 - [Environment variables](/docs/developers/environment-variables)
 - [Keep the database up to date](/docs/developers/database-migrations)
 - [Scheduled jobs](/docs/developers/scheduled-jobs)

@@ -244,3 +244,26 @@ services:
       - name: cors
 
 
+
+  ## OpenKuasa addition (not in Supabase's file): every other path goes to the app,
+  ## so one address serves both (see docker-compose.single-port.yml). The more
+  ## specific Supabase routes above still win. Responses are not buffered, so chat
+  ## replies stream as they are written. The app is asked for uncompressed
+  ## responses: BoxCompute's preview link delivers a gzip-compressed static file
+  ## with an empty body (2026-11-04), and its own edge compresses for the browser.
+  - name: app
+    _comment: 'App: /* -> http://app:3000/*'
+    url: http://app:3000
+    routes:
+      - name: app-all
+        strip_path: false
+        preserve_host: true
+        response_buffering: false
+        paths:
+          - /
+    plugins:
+      - name: request-transformer
+        config:
+          remove:
+            headers:
+              - Accept-Encoding
