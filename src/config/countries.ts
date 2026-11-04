@@ -1,5 +1,6 @@
-/** Worldwide country list for location pickers. */
+/** Worldwide country list for location pickers: Malaysia first, as most workspaces are there, then A to Z. */
 export const COUNTRIES = [
+  'Malaysia',
   'Afghanistan',
   'Albania',
   'Algeria',
@@ -102,7 +103,6 @@ export const COUNTRIES = [
   'Luxembourg',
   'Madagascar',
   'Malawi',
-  'Malaysia',
   'Maldives',
   'Mali',
   'Malta',
