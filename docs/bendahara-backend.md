@@ -1943,7 +1943,10 @@ column of `finance_purchase_order_totals`. `rejection_reason` is the approver's 
 field of its own. It can be changed while the order is a draft and, once set, not emptied (`FIN75`); once the order leaves
 draft it is locked (`FIN01`, trigger `finance_purchase_order_reason_lock`, which also holds where the order guard stands aside
 because nobody is signed in). A rejection returns the order to draft with its reason. Nothing is written to the audit log
-for it. The reason is a plain table update on a draft; `finance_save_purchase_order` is unchanged.
+for it. `finance_save_purchase_order` is unchanged: the order screen saves a draft with its reason through
+`finance_save_purchase_order_with_reason(target_org, purchase_order, lines, reason)`, which runs the save and then writes the
+reason (only when it changed) in one transaction, so a refused reason leaves the lines as they were too. A null reason leaves
+the stored one alone.
 
 **What "lower" means.** `private.finance_rfq_comparison` is `rfq-compare.ts` in SQL. A group is the first RFQ and its copies. Only
 an RFQ whose answer was recorded (`quoted_at`) has prices, so a price typed on an RFQ nobody answered is no rival. Closed RFQs

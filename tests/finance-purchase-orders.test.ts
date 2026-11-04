@@ -335,29 +335,28 @@ describe('why this supplier was chosen', () => {
   it('is not in what the assistant may send', () => {
     expect(savePurchaseOrderToolInput.parse({ ...valid, award_reason: 'Delivers next day' })).not.toHaveProperty('award_reason');
   });
-  it('is written to the order after the save, not sent to the save function', async () => {
+  it('is saved with the draft in one call, not inside the order or as a second write', async () => {
     const { ctx, calls } = answerWith(null);
     expect(await savePurchaseOrder(ctx, { ...valid, id: ID, award_reason: ' Delivers next day ' })).toEqual({ ok: true, data: { id: ID } });
-    const [save, update] = writes(calls);
-    expect(save).toMatchObject({ kind: 'rpc', name: 'finance_save_purchase_order' });
+    expect(writes(calls)).toHaveLength(1);
+    const [save] = writes(calls);
+    expect(save).toMatchObject({ kind: 'rpc', name: 'finance_save_purchase_order_with_reason', args: { target_org: 'org-1', reason: 'Delivers next day' } });
     expect(save.args?.purchase_order).not.toHaveProperty('award_reason');
-    expect(update).toMatchObject({ name: 'finance_purchase_orders', op: 'update', values: { award_reason: 'Delivers next day' }, filters: { org_id: 'org-1', id: ID } });
+    // Nothing is read first: the database writes the reason only when it has changed.
+    expect(calls.filter((c) => c.op === 'select' && c.columns === 'award_reason')).toEqual([]);
   });
-  it('is not written again when it has not changed, or when none was sent', async () => {
-    const same = answerWith('Delivers next day');
-    await savePurchaseOrder(same.ctx, { ...valid, id: ID, award_reason: 'Delivers next day' });
-    expect(writes(same.calls).map((c) => c.op)).toEqual(['rpc']);
+  it('uses the plain save when none was sent, or the box is empty and nothing is stored', async () => {
     const unsent = answerWith('Delivers next day');
     await savePurchaseOrder(unsent.ctx, { ...valid, id: ID });
-    expect(writes(unsent.calls).map((c) => c.op)).toEqual(['rpc']);
+    expect(writes(unsent.calls).map((c) => c.name)).toEqual(['finance_save_purchase_order']);
     const none = answerWith(null);
     await savePurchaseOrder(none.ctx, { ...valid, id: ID, award_reason: '' });
-    expect(writes(none.calls).map((c) => c.op)).toEqual(['rpc']);
+    expect(writes(none.calls).map((c) => c.name)).toEqual(['finance_save_purchase_order']);
   });
   it('can be changed, but a reason that is set is not taken away, and nothing is saved when it is refused', async () => {
     const changed = answerWith('Delivers next day');
     await savePurchaseOrder(changed.ctx, { ...valid, id: ID, award_reason: 'Brand asked for' });
-    expect(writes(changed.calls).map((c) => [c.op, c.values])).toEqual([['rpc', undefined], ['update', { award_reason: 'Brand asked for' }]]);
+    expect(writes(changed.calls).map((c) => [c.name, c.args?.reason])).toEqual([['finance_save_purchase_order_with_reason', 'Brand asked for']]);
     const emptied = answerWith('Delivers next day');
     expect(await savePurchaseOrder(emptied.ctx, { ...valid, id: ID, award_reason: '  ' })).toEqual({
       ok: false,
@@ -365,19 +364,11 @@ describe('why this supplier was chosen', () => {
     });
     expect(writes(emptied.calls)).toEqual([]);
   });
-  it('says the same for the database’s own refusal (FIN75), and fails the save when the write is refused', async () => {
-    const racing = fakeFinance((call) => {
-      if (call.kind === 'rpc') return { data: ID, error: null };
-      if (call.op === 'update') return { data: null, error: { code: 'FIN75' } };
-      return { data: call.columns === 'award_reason' ? { award_reason: null } : { currency: 'MYR' }, error: null };
-    });
-    expect(await savePurchaseOrder(racing.ctx, { ...valid, id: ID, award_reason: 'x' })).toEqual({ ok: false, error: PURCHASE_ORDER_MESSAGES.reasonKept });
-    const locked = fakeFinance((call) => {
-      if (call.kind === 'rpc') return { data: ID, error: null };
-      if (call.op === 'update') return { data: null, error: { code: 'FIN01' } };
-      return { data: call.columns === 'award_reason' ? { award_reason: null } : { currency: 'MYR' }, error: null };
-    });
-    expect(await savePurchaseOrder(locked.ctx, { ...valid, id: ID, award_reason: 'x' })).toEqual({ ok: false, error: PURCHASE_ORDER_MESSAGES.locked });
+  it('says the database’s own refusals in words: the reason taken away (FIN75), or the order no longer a draft (FIN01)', async () => {
+    const refusing = (code: string) =>
+      fakeFinance((call) => (call.kind === 'rpc' ? { data: null, error: { code } } : { data: { currency: 'MYR' }, error: null }));
+    expect(await savePurchaseOrder(refusing('FIN75').ctx, { ...valid, id: ID, award_reason: 'x' })).toEqual({ ok: false, error: PURCHASE_ORDER_MESSAGES.reasonKept });
+    expect(await savePurchaseOrder(refusing('FIN01').ctx, { ...valid, id: ID, award_reason: 'x' })).toEqual({ ok: false, error: PURCHASE_ORDER_MESSAGES.locked });
   });
 });
 

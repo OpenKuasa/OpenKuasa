@@ -438,29 +438,22 @@ export async function savePurchaseOrder(
     const problem = stored.data ? wholeUnitsError(stored.data, lines) : null;
     if (problem) return { ok: false, error: problem };
   }
-  // The reason is a column of its own, not the save function's. A reason that is set cannot be emptied: said before
-  // anything is saved, so the refusal leaves the draft as it was.
-  let stored: string | null = null;
-  if (award_reason !== undefined && purchase_order.id) {
+  // A reason that is set cannot be emptied: said before anything is saved, so the refusal leaves the draft as it was.
+  if (award_reason === null && purchase_order.id) {
     const read = await storedAwardReason(ctx, purchase_order.id);
     if (!read.ok) return read;
-    stored = read.data;
-    if (award_reason === null && stored !== null) return { ok: false, error: M.reasonKept };
+    if (read.data !== null) return { ok: false, error: M.reasonKept };
   }
-  const { data, error } = await ctx.client.rpc('finance_save_purchase_order', {
-    target_org: ctx.orgId,
-    purchase_order,
-    lines,
-  });
+  // A reason is saved with the draft in one transaction, so a refused reason leaves the lines as they were too.
+  const { data, error } = award_reason
+    ? await ctx.client.rpc('finance_save_purchase_order_with_reason', {
+        target_org: ctx.orgId,
+        purchase_order,
+        lines,
+        reason: award_reason,
+      })
+    : await ctx.client.rpc('finance_save_purchase_order', { target_org: ctx.orgId, purchase_order, lines });
   if (error || !data) return orderWriteFailed('savePurchaseOrder', error);
-  if (award_reason && award_reason !== stored) {
-    const { error: reasonError } = await ctx.client
-      .from('finance_purchase_orders')
-      .update({ award_reason })
-      .eq('org_id', ctx.orgId)
-      .eq('id', data as string);
-    if (reasonError) return orderWriteFailed('savePurchaseOrder', reasonError);
-  }
   return { ok: true, data: { id: data as string } };
 }
 
