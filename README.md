@@ -56,6 +56,14 @@ docker compose up -d
 - Stop: `docker compose down` (keeps your data)
 - Wipe: `docker compose down -v` (deletes all local data)
 
+### Docker app with your data in online Supabase
+
+Prefer your data in your own project on supabase.com? Fill in the "Hosted
+Supabase" settings in `.env` (project URL, anon key, service-role key, and
+`DATABASE_URL`, the project's **Session pooler** connection string), then run
+`docker compose -f docker-compose.hosted.yml up -d`. Steps, including the
+one-time Supabase Auth settings: [Run your own copy](https://openkuasa.com/docs/developers/self-hosting).
+
 ### Troubleshooting
 
 - **Port already in use.** The app uses ports 58272 and 58273 (and 58274 with the mail viewer). On macOS these sit in a range the system lends out briefly to other apps, so another app can hold one now and then. Find it with `lsof -i :58273` (swap in the port from the error). Quit that app or restart the Mac, then run `docker compose up -d` again.
