@@ -7,8 +7,10 @@
 #   stop     docker compose down            (keeps your data)
 #   wipe     docker compose down -v         (deletes all local data)
 #
-# Ports: app 58272, Supabase API 58273, mail viewer 58274 (every email the
-# local Supabase sends lands there).
+# Ports: app 58272, Supabase API 58273. Emails are optional: start with
+#   docker compose --profile mail up -d
+# to also run the mail viewer on 58274 (every email the local Supabase sends
+# lands there; without it, password-reset and invite emails can't be sent).
 #
 # Settings come from .env and from the secrets `init` generates on the first
 # run (the `secrets` volume). Nothing here reads your shell's variables: the
@@ -271,9 +273,12 @@ services:
       timeout: 5s
       retries: 30
 
-  # Catches every email the local Supabase sends. Read them at http://localhost:58274.
+  # Optional (`--profile mail`): catches every email the local Supabase sends.
+  # Read them at http://localhost:58274. Without it, sign-up and sign-in still
+  # work; password-reset and invite emails can't be sent.
   mail:
     image: public.ecr.aws/supabase/mailpit:v1.22.3
+    profiles: [mail]
     restart: unless-stopped
     environment:
       MP_SMTP_AUTH_ACCEPT_ANY: "1"
@@ -281,9 +286,11 @@ services:
     ports:
       - "127.0.0.1:58274:8025"
 
-  # Serves supabase/email-templates to the auth service, inside the stack only.
+  # Optional (`--profile mail`): serves supabase/email-templates to the auth
+  # service, inside the stack only.
   email-templates:
     image: busybox:1.37.0
+    profiles: [mail]
     restart: unless-stopped
     command: [httpd, -f, -p, "80", -h, /templates]
     volumes:

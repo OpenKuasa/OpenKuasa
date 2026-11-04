@@ -24,7 +24,7 @@ docker compose up -d
 
 Open http://localhost:58272. Sign up to get your own workspace, or press "Try the demo" to see the sample company.
 
-Sign-up is confirmed for you locally. Password-reset and other sign-in emails land in the mail viewer at http://localhost:58274.
+Sign-up is confirmed for you locally, so you don't need email to get started. To get password-reset and invite emails, start with `docker compose --profile mail up -d` and read them in the mail viewer at http://localhost:58274.
 
 Every key in `.env` is optional. Add `OPENROUTER_API_KEY` to turn on the AI chat. See [AI models and keys](/docs/developers/ai-models-and-keys).
 
@@ -38,7 +38,7 @@ docker compose down -v                                    # wipe, deletes all lo
 
 ### Troubleshooting
 
-- **Port already in use.** The app uses ports 58272, 58273 and 58274. On macOS these sit in a range the system lends out briefly to other apps, so another app can hold one now and then. Find it with `lsof -i :58273` (swap in the port from the error). Quit that app or restart the Mac, then run `docker compose up -d` again.
+- **Port already in use.** The app uses ports 58272 and 58273 (and 58274 with the mail viewer). On macOS these sit in a range the system lends out briefly to other apps, so another app can hold one now and then. Find it with `lsof -i :58273` (swap in the port from the error). Quit that app or restart the Mac, then run `docker compose up -d` again.
 - **Docker isn't running.** Start Docker Desktop and wait until it says it is running.
 - **"dependency failed to start", or the page never loads.** Run `docker compose logs migrate` (or `docker compose logs init`) to see why. Fix it, then run `docker compose up -d` again. It carries on from where it stopped.
 - **Start over completely.** Run `docker compose down -v`. This deletes all local data. Then run `docker compose up -d`.
