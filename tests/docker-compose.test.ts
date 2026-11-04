@@ -127,6 +127,46 @@ describe('docker-compose.hosted.yml (online Supabase)', () => {
   });
 });
 
+describe('docker-compose.single-port.yml (one address for app and Supabase)', () => {
+  const compose = () => read('docker-compose.single-port.yml');
+
+  it('reads only OPENKUASA_PUBLIC_URL, and refuses to start without it', () => {
+    const text = compose().replace(/^\s*#.*$/gm, '').replace(/\$\$/g, '');
+    const refs = [...text.matchAll(/\$(\{[^}]*\}|[A-Za-z_][A-Za-z0-9_]*)/g)].map((m) => m[0]);
+    expect(refs.length).toBeGreaterThan(0);
+    for (const ref of refs) expect(ref).toMatch(/^\$\{OPENKUASA_PUBLIC_URL(:\?[^}]*)?\}$/);
+    expect(serviceBlock(compose(), 'app')).toMatch(/\$\{OPENKUASA_PUBLIC_URL:\?/);
+    expect(serviceBlock(compose(), 'auth')).toMatch(/\$\{OPENKUASA_PUBLIC_URL:\?/);
+  });
+
+  it('points every address the app and sign-in use at that one address', () => {
+    const app = serviceBlock(compose(), 'app');
+    for (const name of ['SUPABASE_PUBLIC_URL', 'PUBLIC_SITE_URL']) expect(app).toMatch(new RegExp(`${name}: \\$\\{OPENKUASA_PUBLIC_URL`));
+    const auth = serviceBlock(compose(), 'auth');
+    for (const name of ['API_EXTERNAL_URL', 'GOTRUE_SITE_URL', 'GOTRUE_URI_ALLOW_LIST']) {
+      expect(auth).toMatch(new RegExp(`${name}: \\$\\{OPENKUASA_PUBLIC_URL`));
+    }
+  });
+
+  it('opens no ports of its own', () => {
+    expect(compose()).not.toMatch(/^\s+ports:/m);
+  });
+});
+
+describe('Kong (docker/supabase/api/kong.yml)', () => {
+  it('sends every path Supabase does not answer to the app, unbuffered, as the last route', () => {
+    const kong = read('docker/supabase/api/kong.yml');
+    const names = [...kong.matchAll(/^ {2}- name: (\S+)$/gm)].map((m) => m[1]);
+    expect(names.at(-1)).toBe('app');
+    const app = kong.slice(kong.indexOf('  - name: app\n'));
+    expect(app).toContain('url: http://app:3000');
+    expect(app).toContain('preserve_host: true');
+    expect(app).toContain('response_buffering: false');
+    expect(app).toMatch(/paths:\s*\n\s+- \/\n/);
+    expect(app).not.toContain('key-auth');
+  });
+});
+
 describe('.env.example', () => {
   it('lists every generated setting in .env.example', () => {
     const text = read('.env.example');

@@ -1,0 +1,25 @@
+# OpenKuasa on one address: the app and its local Supabase behind a single port.
+#
+# For a host that gives you one link for one port (BoxCompute's preview link, a
+# tunnel, one domain on a proxy). Kong on port 58273 already serves /auth, /rest
+# and /storage, and sends every other path to the app.
+#
+#   1. Put the address people will open in .env, with no slash at the end:
+#        OPENKUASA_PUBLIC_URL=https://your-link.example
+#   2. Start with both files:
+#        docker compose -f docker-compose.yml -f docker-compose.single-port.yml up -d
+#   3. Open that address (it reaches port 58273 on this machine).
+#
+# When the address changes, edit .env and run step 2 again. Everyone signs in again.
+
+services:
+  auth:
+    environment:
+      API_EXTERNAL_URL: ${OPENKUASA_PUBLIC_URL:?Set OPENKUASA_PUBLIC_URL in .env to the address people open}
+      GOTRUE_SITE_URL: ${OPENKUASA_PUBLIC_URL}
+      GOTRUE_URI_ALLOW_LIST: ${OPENKUASA_PUBLIC_URL},${OPENKUASA_PUBLIC_URL}/**
+
+  app:
+    environment:
+      SUPABASE_PUBLIC_URL: ${OPENKUASA_PUBLIC_URL:?Set OPENKUASA_PUBLIC_URL in .env to the address people open}
+      PUBLIC_SITE_URL: ${OPENKUASA_PUBLIC_URL}
