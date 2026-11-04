@@ -153,6 +153,34 @@ describe('docker-compose.single-port.yml (one address for app and Supabase)', ()
   });
 });
 
+describe('docker-compose.hosted-single-port.yml (online Supabase on one address)', () => {
+  const compose = () => read('docker-compose.hosted-single-port.yml');
+  const door = () => read('docker/door/default.conf');
+
+  it('reads only OPENKUASA_PUBLIC_URL, and refuses to start without it', () => {
+    const text = compose().replace(/^\s*#.*$/gm, '').replace(/\$\$/g, '');
+    const refs = [...text.matchAll(/\$(\{[^}]*\}|[A-Za-z_][A-Za-z0-9_]*)/g)].map((m) => m[0]);
+    expect(refs.length).toBeGreaterThan(0);
+    for (const ref of refs) expect(ref).toMatch(/^\$\{OPENKUASA_PUBLIC_URL(:\?[^}]*)?\}$/);
+    expect(serviceBlock(compose(), 'app')).toMatch(/PUBLIC_SITE_URL: \$\{OPENKUASA_PUBLIC_URL:\?/);
+  });
+
+  it('puts a pinned front door on 127.0.0.1:58273, and nothing else', () => {
+    const block = serviceBlock(compose(), 'door');
+    expect(block).toMatch(/image: nginx:\d+\.\d+\.\d+-alpine/);
+    const ports = [...compose().matchAll(/^\s+- "(\d[^"]*:\d+)"$/gm)].map((m) => m[1]);
+    expect(ports).toEqual(['127.0.0.1:58273:8080']);
+  });
+
+  it('asks the app for uncompressed, unbuffered responses and keeps the browser host', () => {
+    // BoxCompute's preview link empties gzip-compressed static files.
+    expect(door()).toContain('proxy_set_header Accept-Encoding "";');
+    expect(door()).toContain('proxy_buffering off;');
+    expect(door()).toContain('proxy_set_header Host $http_host;');
+    expect(door()).toMatch(/client_max_body_size \d+m;/);
+  });
+});
+
 describe('Kong (docker/supabase/api/kong.yml)', () => {
   it('sends every path Supabase does not answer to the app, unbuffered, as the last route', () => {
     const kong = read('docker/supabase/api/kong.yml');
