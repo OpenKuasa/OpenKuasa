@@ -71,8 +71,14 @@ export type SstPaidInvoice = {
   rows: SstLineRow[];
 };
 
-/** Which basis the workspace files service tax on, and the invoices a payment-basis return follows. */
-export type SstReturnOptions = { basis?: SstBasis; paid?: SstPaidInvoice[] };
+/**
+ * Money received in the period with no invoice behind it: a receipt that names an income category and settles
+ * nothing (FIN15), so no line carries a rate and the return has nowhere to put it. Ringgit.
+ */
+export type SstNoInvoiceMoney = { count: number; amount_myr: number };
+
+/** Which basis the workspace files service tax on, the invoices a payment-basis return follows, and the money it cannot count. */
+export type SstReturnOptions = { basis?: SstBasis; paid?: SstPaidInvoice[]; noInvoice?: SstNoInvoiceMoney };
 
 export type SstFormLine = { item: string; label: string; value: number | null; tax: number; typed?: boolean };
 
@@ -89,6 +95,8 @@ export type SstReturn = {
   item14: number;
   offForm: { count: number; value: number; tax: number };
   untyped: { count: number; value: number };
+  /** Money received in the period that settles no invoice, so it is on no item of the form. */
+  noInvoice: { count: number; amount: number };
 };
 
 /** The form's rate items per return: a line of the type at any other rate is off the form. */
@@ -335,6 +343,7 @@ export function buildSstReturn(
     item14: fromSen(item14Sen),
     offForm: { count: offForm.count, value: fromSen(offForm.value), tax: fromSen(offForm.tax) },
     untyped: { count: untyped.count, value: fromSen(untyped.value) },
+    noInvoice: { count: options.noInvoice?.count ?? 0, amount: fromSen(toSen(options.noInvoice?.amount_myr ?? 0)) },
   };
 }
 

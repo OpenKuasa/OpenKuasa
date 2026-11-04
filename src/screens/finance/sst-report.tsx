@@ -38,6 +38,7 @@ import {
   type SstFormLine,
   type SstLineRow,
   type SstPaidInvoice,
+  type SstNoInvoiceMoney,
   type SstReturn,
   type SstTypedFigures,
   NO_TYPED_FIGURES,
@@ -46,7 +47,7 @@ import {
   recentSstPeriods,
   sstCards,
 } from '@/lib/finance/sst-return';
-import { listSstFiled, listSstFigures, readSstPaidInvoices, readSstRows } from '@/lib/finance/sst-return-data';
+import { listSstFiled, listSstFigures, readSstNoInvoiceMoney, readSstPaidInvoices, readSstRows } from '@/lib/finance/sst-return-data';
 import { displayDate } from '@/lib/finance/view-helpers';
 import { todayInMalaysia } from '@/lib/people/dates';
 import { createClient } from '@/lib/supabase/server';
@@ -124,6 +125,14 @@ function notesOf(ret: SstReturn): string[] {
   if (ret.item14 < 0) {
     notes.push(
       "Not on the form: item 14 is below zero because this period's deductions are more than its tax. Check with Customs (JKDM) how to claim it before you file.",
+    );
+  }
+  // Money in that settles no invoice carries no rate, so it is on no item of a service return. Named, not
+  // guessed into a line: much of it may not be for a taxable service at all.
+  if (ret.type === 'service' && ret.noInvoice.count > 0) {
+    const across = ret.noInvoice.count > 1 ? `, across ${ret.noInvoice.count} receipts` : '';
+    notes.push(
+      `Not counted: ${rm(ret.noInvoice.amount)} received with no invoice${across}. If any of it is payment for a taxable service, put it against an invoice so its tax is counted.`,
     );
   }
   return notes;
@@ -289,6 +298,8 @@ type Loaded = {
   figures: (type: SstReturn['type']) => Promise<Record<string, SstTypedFigures>>;
   /** The invoices a payment-basis service return follows: the money received and the credit notes issued. */
   paid: (span: { start: string; end: string }) => Promise<SstPaidInvoice[]>;
+  /** Money received in the period that settles no invoice, which the return cannot count. */
+  noInvoice: (span: { start: string; end: string }) => Promise<SstNoInvoiceMoney>;
 };
 
 /**
@@ -309,6 +320,7 @@ async function load(): Promise<Loaded> {
       filed: async () => ({}),
       figures: async () => ({}),
       paid: async () => [],
+      noInvoice: async () => ({ count: 0, amount_myr: 0 }),
     };
   }
   const viewer = await getViewer();
@@ -334,6 +346,7 @@ async function load(): Promise<Loaded> {
     filed: (type) => listSstFiled(ctx, type),
     figures: (type) => listSstFigures(ctx, type),
     paid: (span) => readSstPaidInvoices(ctx, span),
+    noInvoice: (span) => readSstNoInvoiceMoney(ctx, span),
   };
 }
 
@@ -377,16 +390,20 @@ export default async function SstReportScreen({
   // The figures are read once too, and each period is built with its own (none is zeros).
   // Payment basis counts money received, so its service return reads the receipts as well (and only then).
   const onPayments = view.type === 'service' && settings.service_tax_basis === 'payment';
-  const [{ lines: rows, credits }, filed, figures, paid] = await Promise.all([
+  const onService = view.type === 'service';
+  const [{ lines: rows, credits }, filed, figures, paid, noInvoice] = await Promise.all([
     data.rows(span),
     data.filed(view.type),
     data.figures(view.type),
     onPayments ? data.paid(span) : Promise.resolve([]),
+    // Money that settles no invoice is named on the shown period alone: it is not a figure any entry is built from.
+    onService ? data.noInvoice(view.period) : Promise.resolve({ count: 0, amount_myr: 0 }),
   ]);
   const build = (period: SstPeriod) =>
     buildSstReturn(view.type, period, rows, credits, figures[period.start], {
       basis: onPayments ? 'payment' : 'invoice',
       paid,
+      noInvoice: period.start === view.period.start ? noInvoice : undefined,
     });
 
   const ret = build(view.period);
