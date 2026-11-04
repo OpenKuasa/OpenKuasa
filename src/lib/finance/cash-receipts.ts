@@ -40,6 +40,7 @@ import {
   TOO_LARGE,
   pgCode,
   writeFailed,
+  filedReceiptRefusal,
 } from './result';
 
 export const CASH_RECEIPT_MESSAGES = {
@@ -223,7 +224,7 @@ function receiptWriteFailed(
   error: unknown,
   refusals: Record<string, string> = REFUSALS,
 ): { ok: false; error: string } {
-  const refusal = refusals[pgCode(error) ?? ''];
+  const refusal = refusals[pgCode(error) ?? ''] ?? filedReceiptRefusal(error);
   return refusal ? { ok: false, error: refusal } : writeFailed(fnName, error);
 }
 

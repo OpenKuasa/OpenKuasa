@@ -88,7 +88,7 @@ begin
   -- finance_period_lock: 20261125140000 (accounting settings, the books lock).
   select string_agg(tgname, ',' order by tgname) into t from pg_trigger
    where not tgisinternal and tgrelid = 'public.finance_transactions'::regclass and tgenabled = 'O';
-  if t is distinct from 'finance_period_lock,finance_transaction_guard,finance_transaction_insert_guard,finance_transaction_sign_off,finance_transaction_still,'
+  if t is distinct from 'finance_period_lock,finance_transaction_guard,finance_transaction_insert_guard,finance_transaction_post_filed_guard,finance_transaction_sign_off,finance_transaction_still,'
        || 'finance_transaction_to_currency,finance_transaction_to_ringgit,finance_transaction_unmatch,finance_transactions_audit,finance_transfer_id_guard,finance_transfer_pair_delete,finance_transfer_pair_insert,'
        || 'finance_transfer_pair_update,finance_use_account_insert,finance_use_account_update,finance_void_stamp' then
     fails := fails || format('triggers on finance_transactions are: %s', t);
