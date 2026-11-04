@@ -1,0 +1,5 @@
+* text=auto
+*.sh text eol=lf
+*.sql text eol=lf
+docker/** text eol=lf
+supabase/email-templates/* text eol=lf
