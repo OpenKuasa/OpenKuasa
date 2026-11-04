@@ -1,0 +1,31 @@
+# OpenKuasa with an online Supabase, on one address: a small front door on port
+# 58273 in front of the app.
+#
+# For a host that gives you one link for one port (BoxCompute's preview link, a
+# tunnel). The browser talks to your Supabase project directly, so only the app
+# needs the link.
+#
+#   1. Fill in .env as for docker-compose.hosted.yml, plus the address people
+#      will open, with no slash at the end:
+#        OPENKUASA_PUBLIC_URL=https://your-link.example
+#   2. Start with both files:
+#        docker compose -f docker-compose.hosted.yml -f docker-compose.hosted-single-port.yml up -d
+#   3. Open that address (it reaches port 58273 on this machine).
+#
+# When the address changes, edit .env and run step 2 again.
+
+services:
+  app:
+    environment:
+      PUBLIC_SITE_URL: ${OPENKUASA_PUBLIC_URL:?Set OPENKUASA_PUBLIC_URL in .env to the address people open}
+
+  door:
+    image: nginx:1.27.5-alpine
+    restart: unless-stopped
+    depends_on:
+      app:
+        condition: service_started
+    ports:
+      - "127.0.0.1:58273:8080"
+    volumes:
+      - ./docker/door/default.conf:/etc/nginx/conf.d/default.conf:ro
