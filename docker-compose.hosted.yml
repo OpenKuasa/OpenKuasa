@@ -1,0 +1,65 @@
+# OpenKuasa in Docker, with your data in an online Supabase project.
+#
+#   cp .env.example .env     then fill in the "Hosted Supabase" settings:
+#                            NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY,
+#                            SUPABASE_SERVICE_ROLE_KEY and DATABASE_URL
+#   docker compose -f docker-compose.hosted.yml up -d     then open http://localhost:58272
+#
+#   update   git pull && docker compose -f docker-compose.hosted.yml pull && docker compose -f docker-compose.hosted.yml up -d
+#   stop     docker compose -f docker-compose.hosted.yml down
+#
+# Every start applies new database changes to the online project before the
+# app starts. DATABASE_URL is the project's "Session pooler" connection string
+# (Supabase dashboard -> Connect). The app's own secrets are generated once
+# into the `secrets` volume; the Supabase keys always come from .env.
+#
+# Nothing here reads your shell's variables: the only `${...}` is the image tag.
+
+name: openkuasa-hosted
+
+services:
+  # One-off: checks .env has the Supabase settings, and generates the app's own
+  # secrets once. Stops with a plain message naming anything missing.
+  init:
+    image: ghcr.io/openkuasa/openkuasa:${OPENKUASA_IMAGE_TAG:-latest}
+    command: [node, /app/tools/scripts/local-init.mjs]
+    restart: "no"
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      OPENKUASA_INIT_MODE: hosted
+    volumes:
+      - secrets:/secrets
+
+  # One-off: applies pending migrations to the online database, then exits. A
+  # failed file stops it with exit code 1, and the app does not start.
+  migrate:
+    image: ghcr.io/openkuasa/openkuasa:${OPENKUASA_IMAGE_TAG:-latest}
+    command: [/app/tools/docker/with-secrets.sh, node, /app/tools/scripts/migrate-local.mjs]
+    restart: "no"
+    env_file:
+      - path: .env
+        required: false
+    volumes:
+      - secrets:/secrets:ro
+    depends_on:
+      init:
+        condition: service_completed_successfully
+
+  app:
+    image: ghcr.io/openkuasa/openkuasa:${OPENKUASA_IMAGE_TAG:-latest}
+    restart: unless-stopped
+    env_file:
+      - path: .env
+        required: false
+    volumes:
+      - secrets:/secrets:ro
+    ports:
+      - "127.0.0.1:58272:3000"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+volumes:
+  secrets:

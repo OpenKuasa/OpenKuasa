@@ -84,6 +84,37 @@ describe('docker-compose.yml', () => {
   });
 });
 
+describe('docker-compose.hosted.yml (online Supabase)', () => {
+  const compose = () => read('docker-compose.hosted.yml');
+  const services = () => [...compose().matchAll(/^ {2}([a-z-]+):$/gm)].map((m) => m[1]);
+
+  it('runs only the app and its two setup steps, no local Supabase', () => {
+    expect(services()).toEqual(['init', 'migrate', 'app', 'secrets']);
+  });
+
+  it('never substitutes settings from the shell', () => {
+    const text = compose().replace(/^\s*#.*$/gm, '').replace(/\$\$/g, '');
+    for (const m of text.matchAll(/\$(\{[^}]*\}|[A-Za-z_][A-Za-z0-9_]*)/g)) {
+      expect(m[0]).toMatch(/^\$\{OPENKUASA_IMAGE_TAG(:-[^}]*)?\}$/);
+    }
+  });
+
+  it('publishes only the app, on 127.0.0.1', () => {
+    const ports = [...compose().matchAll(/^\s+- "(\d[^"]*:\d+)"$/gm)].map((m) => m[1]);
+    expect(ports).toEqual(['127.0.0.1:58272:3000']);
+  });
+
+  it('checks the settings first, and starts the app only after migrations succeed', () => {
+    expect(serviceBlock(compose(), 'init')).toMatch(/OPENKUASA_INIT_MODE: hosted/);
+    expect(serviceBlock(compose(), 'migrate')).toMatch(/init:\s*\n\s+condition: service_completed_successfully/);
+    expect(serviceBlock(compose(), 'app')).toMatch(/migrate:\s*\n\s+condition: service_completed_successfully/);
+  });
+
+  it('runs migrations with the generated settings loaded', () => {
+    expect(serviceBlock(compose(), 'migrate')).toContain('/app/tools/docker/with-secrets.sh');
+  });
+});
+
 describe('.env.example', () => {
   it('lists every generated setting in .env.example', () => {
     const text = read('.env.example');
