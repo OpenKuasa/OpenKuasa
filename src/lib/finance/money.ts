@@ -29,6 +29,7 @@ import {
   TOO_LARGE,
   pgCode,
   writeFailed,
+  filedReceiptRefusal,
 } from './result';
 
 export const PAYMENT_METHODS = ['bank_transfer', 'fpx', 'duitnow', 'card', 'ewallet', 'cash', 'cheque'] as const;
@@ -292,7 +293,7 @@ function moneyWriteFailed(
   error: unknown,
   refusals: Record<string, string> = REFUSALS,
 ): { ok: false; error: string } {
-  const refusal = refusals[pgCode(error) ?? ''];
+  const refusal = refusals[pgCode(error) ?? ''] ?? filedReceiptRefusal(error);
   return refusal ? { ok: false, error: refusal } : writeFailed(fnName, error);
 }
 

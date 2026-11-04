@@ -125,6 +125,18 @@ export function settingsRefusal(error: unknown): string | null {
 }
 
 /**
+ * FIN77 (posting) and FIN78 (voiding), 20261202100000: money in dated inside a service return marked filed, on a
+ * workspace that counts service tax on the money received. The database words the refusal itself, naming the period
+ * and the ways out (#222), so its own sentence is passed through. Null for any other error.
+ */
+export function filedReceiptRefusal(error: unknown): string | null {
+  const code = pgCode(error);
+  if (code !== 'FIN77' && code !== 'FIN78') return null;
+  const message = (error as { message?: unknown } | null)?.message;
+  return typeof message === 'string' && message ? message : null;
+}
+
+/**
  * Logs the database error for triage; the person only ever sees the general message. A settings refusal
  * (FIN63–FIN67) is not a failure: the person is told why, in its own sentence, and nothing is logged.
  */
