@@ -4,8 +4,6 @@ on:
   push:
     branches: [main]
     paths-ignore: ['content/**', '**/*.md', 'docs/**']
-  pull_request:
-    paths-ignore: ['content/**', '**/*.md', 'docs/**']
   workflow_dispatch:
 
 concurrency:
@@ -24,8 +22,8 @@ jobs:
     name: Build and push
     runs-on: ubuntu-latest
     timeout-minutes: 60
-    # Fork PRs get a read-only token and cannot push, so skip them.
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    # Images come only from main: a merge, or a manual run on main.
+    if: github.ref == 'refs/heads/main'
     steps:
       - uses: actions/checkout@v4
 
@@ -44,9 +42,8 @@ jobs:
         with:
           images: ${{ env.IMAGE }}
           tags: |
-            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
-            type=sha,prefix=sha-,format=short,enable=${{ github.ref == 'refs/heads/main' }}
-            type=ref,event=pr,prefix=pr-
+            type=raw,value=latest
+            type=sha,prefix=sha-,format=short
 
       - uses: docker/build-push-action@v6
         with:
