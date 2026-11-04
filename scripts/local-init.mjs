@@ -14,8 +14,9 @@
  * self-hosted Supabase expects. A key that does not verify against the final
  * JWT_SECRET (the user brought their own secret) is signed again.
  *
- * docker/with-secrets.sh loads the file into the other containers. Values are
- * never printed.
+ * docker/with-secrets.sh loads the file into the other containers. PostgREST,
+ * whose amd64 image has no shell, reads two files written beside it instead
+ * (see postgrestFiles). Values are never printed.
  */
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
@@ -144,6 +145,27 @@ export function resolveSecrets({ existing = {}, provided = {}, mode = 'local' })
   return { values: ordered, created: GENERATED.filter((n) => created.includes(n)) };
 }
 
+/**
+ * The two settings PostgREST reads from files (`PGRST_DB_URI=@…`,
+ * `PGRST_JWT_SECRET=@…`). Its amd64 image has no shell, so it cannot start
+ * through docker/with-secrets.sh like the other containers.
+ */
+export function postgrestFiles(values) {
+  return {
+    'postgrest-db-uri': `postgres://authenticator:${encodeURIComponent(values.POSTGRES_PASSWORD)}@db:5432/postgres`,
+    'postgrest-jwt-secret': values.JWT_SECRET,
+  };
+}
+
+/** Writes `text` to `file` (mode 0640, replaced in one step) unless it already holds exactly that. */
+function writeSecretFile(file, text) {
+  if (existsSync(file) && readFileSync(file, 'utf8') === text) return;
+  const tmp = `${file}.${process.pid}.tmp`;
+  writeFileSync(tmp, text, { mode: SECRETS_FILE_MODE });
+  chmodSync(tmp, SECRETS_FILE_MODE);
+  renameSync(tmp, file);
+}
+
 function main() {
   const file = process.env.OPENKUASA_SECRETS_FILE || '/secrets/generated.env';
   const mode = process.env.OPENKUASA_INIT_MODE === 'hosted' ? 'hosted' : 'local';
@@ -160,15 +182,15 @@ function main() {
   const existing = existsSync(file) ? parseEnv(readFileSync(file, 'utf8')) : {};
   const { values, created } = resolveSecrets({ existing, provided: process.env, mode });
 
-  if (created.length > 0 || formatEnv(existing) !== formatEnv(values)) {
-    mkdirSync(path.dirname(file), { recursive: true });
-    const tmp = `${file}.${process.pid}.tmp`;
-    // 0640, not 0600: the file is read by containers running as other users
-    // (Kong is uid 1001 and joins this file's group, 1000, via group_add).
-    // Nobody outside the stack mounts the volume.
-    writeFileSync(tmp, formatEnv(values), { mode: SECRETS_FILE_MODE });
-    chmodSync(tmp, SECRETS_FILE_MODE);
-    renameSync(tmp, file);
+  // 0640, not 0600: the files are read by containers running as other users
+  // (Kong is uid 1001 and joins this file's group, 1000, via group_add).
+  // Nobody outside the stack mounts the volume.
+  mkdirSync(path.dirname(file), { recursive: true });
+  if (created.length > 0 || formatEnv(existing) !== formatEnv(values)) writeSecretFile(file, formatEnv(values));
+  if (mode === 'local') {
+    for (const [name, text] of Object.entries(postgrestFiles(values))) {
+      writeSecretFile(path.join(path.dirname(file), name), text);
+    }
   }
   console.log(created.length > 0 ? `Generated ${created.length} new settings` : 'Settings already in place');
 }
