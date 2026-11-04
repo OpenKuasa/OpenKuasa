@@ -22,6 +22,7 @@ import { decryptApiKey, encryptApiKey } from '@/lib/ai/key-crypto';
 import { isOAuthClientToken } from '@/lib/auth/oauth-token';
 import { logFailure as sharedLogFailure, userClient } from '@/lib/mcp/shared';
 import { serviceClient } from '@/lib/supabase/service';
+import { supabaseAnonKey, supabaseServerUrl } from '@/lib/supabase/env';
 
 const TABLE = 'mcp_api_keys';
 const PURPOSE = 'mcp-refresh-token' as const;
@@ -78,8 +79,8 @@ const ROW_COLUMNS = 'id, org_id, user_id, session_secret, revoked_at, last_used_
 
 /** A client of no one, for the auth calls that open or refresh a key's session. */
 function anonClient(): SupabaseClient {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  const url = supabaseServerUrl();
+  const anon = supabaseAnonKey();
   if (!url || !anon) throw new Error('Supabase is not configured.');
   return createClient(url, anon, { auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false } });
 }

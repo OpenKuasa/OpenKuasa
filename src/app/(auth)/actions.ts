@@ -15,6 +15,7 @@ import { endOtherSessions } from '@/lib/auth/sessions';
 import { createWorkspaceError, workspaceNameSchema } from '@/lib/auth/workspace-name';
 import { demoLimited, passwordResetLimited, signInLimited, signUpLimited } from '@/lib/security/limits';
 import { signInReturnPath } from '@/lib/security/safe-path';
+import { demoEnabled } from '@/lib/supabase/env';
 
 // Persist the "remember me" choice so token refreshes (in the proxy) keep the
 // same cookie lifetime. A session cookie itself clears on browser close.
@@ -159,7 +160,7 @@ export async function signUpAction(
 }
 
 export async function demoSignInAction(): Promise<AuthState> {
-  if (process.env.NEXT_PUBLIC_DEMO_ENABLED !== '1') {
+  if (!demoEnabled()) {
     return { error: 'Demo is not available.' };
   }
   const limited = await demoLimited();

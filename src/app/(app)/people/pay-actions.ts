@@ -26,6 +26,7 @@ import { isReceiptPath, releaseReceipt, removeReceipt } from '@/lib/people/recei
 import { createSupabasePeopleData } from '@/lib/people/supabase';
 import { getPeopleViewer } from '@/lib/people/viewer';
 import { createClient } from '@/lib/supabase/server';
+import { toPublicSupabaseUrl } from '@/lib/supabase/public-config';
 
 const DEMO: CapResult<never> = {
   ok: false,
@@ -179,7 +180,7 @@ export async function claimReceiptUrlAction(input: unknown): Promise<CapResult<{
   if (!path) return NOT_FOUND;
   try {
     const { data, error } = await client.storage.from(RECEIPT_BUCKET).createSignedUrl(path, RECEIPT_LINK_SECONDS);
-    if (!error && data?.signedUrl) return { ok: true, data: { url: data.signedUrl } };
+    if (!error && data?.signedUrl) return { ok: true, data: { url: toPublicSupabaseUrl(data.signedUrl) } };
   } catch {
     // Reported the same way as a refused link.
   }

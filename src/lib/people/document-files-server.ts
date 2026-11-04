@@ -5,6 +5,7 @@ import { serviceClient } from '@/lib/supabase/service';
 import { type CapResult, refuse } from './capabilities';
 import { DOCUMENT_BUCKET, DOCUMENT_PATH, isDocumentPathShape } from './document-files';
 import { DOCUMENT_REFUSALS, FILE_UNAVAILABLE } from './documents-refusals';
+import { toPublicSupabaseUrl } from '@/lib/supabase/public-config';
 
 /** How long a link to a document's file works. */
 const LINK_SECONDS = 60;
@@ -43,7 +44,7 @@ export async function documentLink(
   }
   try {
     const { data, error } = await ctx.client.storage.from(DOCUMENT_BUCKET).createSignedUrl(path, LINK_SECONDS);
-    if (!error && data?.signedUrl) return { ok: true, data: { url: data.signedUrl } };
+    if (!error && data?.signedUrl) return { ok: true, data: { url: toPublicSupabaseUrl(data.signedUrl) } };
   } catch {
     // Reported the same way as a refused link.
   }

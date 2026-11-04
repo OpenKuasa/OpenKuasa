@@ -8,6 +8,7 @@ import 'server-only';
 import { randomUUID } from 'node:crypto';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { CV_MAX_BYTES } from './application-fields';
+import { toPublicSupabaseUrl } from '@/lib/supabase/public-config';
 
 export const CV_BUCKET = 'hire-cvs';
 /** How long a signed link to a CV stays good. */
@@ -107,7 +108,7 @@ export async function signedCvUrl(client: SupabaseClient, path: string): Promise
     const { data, error } = await client.storage.from(CV_BUCKET).createSignedUrl(path, CV_LINK_SECONDS, {
       download: 'cv.pdf',
     });
-    if (!error && data?.signedUrl) return data.signedUrl;
+    if (!error && data?.signedUrl) return toPublicSupabaseUrl(data.signedUrl);
     if (error) console.error('[cv-store] sign failed:', failureCode(error));
   } catch (error) {
     console.error('[cv-store] sign failed:', failureCode(error));

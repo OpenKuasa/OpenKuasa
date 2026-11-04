@@ -5,6 +5,7 @@ import { DemoButton } from '@/components/auth/demo-button';
 import { GoogleNotEnabledButton } from '@/components/auth/google-not-enabled-button';
 import { LoginForm } from '@/components/auth/login-form';
 import { signInReturnPath } from '@/lib/security/safe-path';
+import { demoEnabled } from '@/lib/supabase/env';
 
 export const metadata: Metadata = {
   title: 'Sign in · OpenKuasa',
@@ -70,7 +71,7 @@ export default async function LoginPage({
 
             <LoginForm next={returnTo} />
 
-            {process.env.NEXT_PUBLIC_DEMO_ENABLED === '1' ? (
+            {demoEnabled() ? (
               <DemoButton />
             ) : null}
 
