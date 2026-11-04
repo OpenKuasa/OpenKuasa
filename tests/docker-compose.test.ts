@@ -164,6 +164,8 @@ describe('Kong (docker/supabase/api/kong.yml)', () => {
     expect(app).toContain('response_buffering: false');
     expect(app).toMatch(/paths:\s*\n\s+- \/\n/);
     expect(app).not.toContain('key-auth');
+    // Uncompressed from the app: BoxCompute's preview link empties gzip static files.
+    expect(app).toMatch(/remove:\s*\n\s+headers:\s*\n\s+- Accept-Encoding/);
   });
 });
 
