@@ -38,7 +38,7 @@ import {
   pgCode,
   settingsRefusal,
 } from './result';
-import { toPublicSupabaseUrl } from '@/lib/supabase/env';
+import { toPublicSupabaseUrl } from '@/lib/supabase/public-config';
 
 export const RECEIPT_INBOX_MESSAGES = {
   gone: 'That receipt no longer exists.',

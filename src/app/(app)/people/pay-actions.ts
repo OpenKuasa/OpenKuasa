@@ -26,7 +26,7 @@ import { isReceiptPath, releaseReceipt, removeReceipt } from '@/lib/people/recei
 import { createSupabasePeopleData } from '@/lib/people/supabase';
 import { getPeopleViewer } from '@/lib/people/viewer';
 import { createClient } from '@/lib/supabase/server';
-import { toPublicSupabaseUrl } from '@/lib/supabase/env';
+import { toPublicSupabaseUrl } from '@/lib/supabase/public-config';
 
 const DEMO: CapResult<never> = {
   ok: false,

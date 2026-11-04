@@ -20,7 +20,7 @@ import {
   type AgentRunAsset,
   type AgentSchedule,
 } from '@/lib/agents/types';
-import { toPublicSupabaseUrl } from '@/lib/supabase/env';
+import { toPublicSupabaseUrl } from '@/lib/supabase/public-config';
 
 /** Shown when the org has no saved config yet. Never written on read. */
 function defaultConfig(orgId: string): AgentConfig {

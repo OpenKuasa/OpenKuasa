@@ -8,7 +8,7 @@ import 'server-only';
 import { randomUUID } from 'node:crypto';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { CV_MAX_BYTES } from './application-fields';
-import { toPublicSupabaseUrl } from '@/lib/supabase/env';
+import { toPublicSupabaseUrl } from '@/lib/supabase/public-config';
 
 export const CV_BUCKET = 'hire-cvs';
 /** How long a signed link to a CV stays good. */

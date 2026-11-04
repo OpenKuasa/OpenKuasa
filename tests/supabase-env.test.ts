@@ -4,10 +4,9 @@ import {
   supabaseAnonKey,
   supabasePublicUrl,
   supabaseServerUrl,
-  toPublicSupabaseUrl,
 } from '@/lib/supabase/env';
 import { storedPathOf } from '@/lib/chat/attachment-store';
-import { authCookieName, serializePublicConfig } from '@/lib/supabase/public-config';
+import { authCookieName, serializePublicConfig, toPublicSupabaseUrl } from '@/lib/supabase/public-config';
 
 const NAMES = [
   'SUPABASE_INTERNAL_URL',

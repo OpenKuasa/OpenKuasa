@@ -37,3 +37,21 @@ export function readPublicConfig(): PublicConfig {
 export function authCookieName(publicUrl: string): string {
   return `sb-${new URL(publicUrl).hostname.split('.')[0]}-auth-token`;
 }
+
+/**
+ * A link the server's Supabase client made (signed or public) points at the address the server uses.
+ * A browser cannot open that when it differs from the public one, so swap the prefix. Unchanged when
+ * the two are equal, either is unset (always so in the browser, which has no server-only names), or
+ * the link starts with something else. Holds no secrets: it only reads the URL settings.
+ */
+export function toPublicSupabaseUrl(url: string): string {
+  const server = (
+    process.env.SUPABASE_INTERNAL_URL ||
+    process.env.SUPABASE_PUBLIC_URL ||
+    process.env.NEXT_PUBLIC_SUPABASE_URL
+  )?.replace(/\/+$/, '');
+  const pub = (process.env.SUPABASE_PUBLIC_URL || process.env.NEXT_PUBLIC_SUPABASE_URL)?.replace(/\/+$/, '');
+  if (!server || !pub || server === pub) return url;
+  if (url !== server && !url.startsWith(`${server}/`)) return url;
+  return pub + url.slice(server.length);
+}

@@ -5,7 +5,7 @@ import { serviceClient } from '@/lib/supabase/service';
 import { type CapResult, refuse } from './capabilities';
 import { DOCUMENT_BUCKET, DOCUMENT_PATH, isDocumentPathShape } from './document-files';
 import { DOCUMENT_REFUSALS, FILE_UNAVAILABLE } from './documents-refusals';
-import { toPublicSupabaseUrl } from '@/lib/supabase/env';
+import { toPublicSupabaseUrl } from '@/lib/supabase/public-config';
 
 /** How long a link to a document's file works. */
 const LINK_SECONDS = 60;

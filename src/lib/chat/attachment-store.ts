@@ -9,7 +9,8 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { dataUrlBytes, isFilePart, sniffAttachment } from '@/lib/chat/attachments';
 import { errorCodeOf } from '@/lib/ai/call-log';
 import type { StoredFileRef } from '@/lib/chat/stored-parts';
-import { supabasePublicUrl, supabaseServerUrl, toPublicSupabaseUrl } from '@/lib/supabase/env';
+import { supabasePublicUrl, supabaseServerUrl } from '@/lib/supabase/env';
+import { toPublicSupabaseUrl } from '@/lib/supabase/public-config';
 
 const BUCKET = 'chat-attachments';
 const SIGNED_FOR_SECONDS = 60 * 60;
