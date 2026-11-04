@@ -23,6 +23,10 @@ const nextConfig: NextConfig = {
     // recharts are already optimized by Next's defaults.
     optimizePackageImports: ["radix-ui", "zod", "ai", "@ai-sdk/react", "@animateicons/react"],
   },
+  // Contact Support moved out of the signed-in account area, so anyone can reach it.
+  async redirects() {
+    return [{ source: "/account/support", destination: "/support", permanent: true }];
+  },
   // The fixed security headers, on every path. The full Content-Security-Policy carries a per-request nonce,
   // so src/proxy.ts sets it.
   async headers() {

@@ -62,6 +62,8 @@ export const CHATBOT_PERSON_PER_CLIENT: Rule = { bucket: 'chatbot_person_client'
 
 /** Weather lookups for the greeting by one signed-in user (keyed by user id, not address). */
 export const WEATHER_PER_USER: Rule = { bucket: 'weather', limit: 30, windowSeconds: 10 * MINUTE };
+/** Support-page questions from one signed-in person on the platform key (keyed by user id): its own allowance, apart from the free chat questions. */
+export const SUPPORT_QUESTION_PER_USER: Rule = { bucket: 'support_question', limit: 10, windowSeconds: 7 * DAY };
 /** Push subscriptions saved by one signed-in user (keyed by user id): a browser re-saves on each visit at most. */
 export const PUSH_SUBSCRIBE_PER_USER: Rule = { bucket: 'push_subscribe', limit: 20, windowSeconds: HOUR };
 
@@ -172,6 +174,21 @@ export async function formViewCounts(formId: string): Promise<boolean> {
 export async function chatbotLimited(rule: Rule): Promise<'ok' | 'limited' | 'unavailable'> {
   const client = clientKey(await requestClientAddress());
   const verdict = await consumeRateLimits([perClient(rule, client)]);
+  if (!verdict.allowed) return 'limited';
+  return verdict.enforced ? 'ok' : 'unavailable';
+}
+
+/**
+ * Before a support-page question is answered on the platform key. Fails closed like the
+ * chatbot: each answer is paid for, so a counter that cannot be asked refuses ('unavailable').
+ */
+export async function supportQuestionLimited(userId: string): Promise<'ok' | 'limited' | 'unavailable'> {
+  const verdict = await consumeRateLimits([{
+    bucket: SUPPORT_QUESTION_PER_USER.bucket,
+    value: userId,
+    limit: SUPPORT_QUESTION_PER_USER.limit,
+    windowSeconds: SUPPORT_QUESTION_PER_USER.windowSeconds,
+  }]);
   if (!verdict.allowed) return 'limited';
   return verdict.enforced ? 'ok' : 'unavailable';
 }
