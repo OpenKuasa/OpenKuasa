@@ -28,7 +28,8 @@ export type ChatLockCode =
   | 'demo'
   | 'key_required'
   | 'key_unavailable'
-  | 'attachment_limit';
+  | 'attachment_limit'
+  | 'support_limit';
 
 const locked = (
   status: number,
@@ -73,6 +74,12 @@ export async function resolveChatAccess(
      * the caller nothing.
      */
     beforeFree?: () => { status: number; code: ChatLockCode; error: string } | null;
+    /**
+     * Takes the place of the weekly free question for a turn on the platform key, for a
+     * surface with an allowance of its own (the support page). The workspace-key and demo
+     * rules above it still apply.
+     */
+    onFree?: () => Promise<ChatAccess>;
   },
 ): Promise<ChatAccess> {
   if (!user) return locked(401, 'sign_in', 'Please sign in to chat.');
@@ -113,6 +120,7 @@ export async function resolveChatAccess(
 
   const tooHeavy = options?.beforeFree?.();
   if (tooHeavy) return { kind: 'locked', ...tooHeavy };
+  if (options?.onFree) return options.onFree();
 
   const { data: remaining, error: quotaErr } = await supabase.rpc(
     'consume_free_question',
