@@ -3,16 +3,17 @@ import { type SupabaseClient } from '@supabase/supabase-js';
 import { hasSupabaseEnv, supabaseEnvSkipReason } from './setup/supabase';
 import { createOrg, liveClient, signInOwner } from './helpers/live-workspaces';
 import { createContact } from '@/lib/finance/contacts';
-import { submitPurchaseOrder } from '@/lib/finance/purchase-orders';
-import { compareQuotes, quotesInSeveralCurrencies } from '@/lib/finance/rfq-compare';
-import { RFQ_MESSAGES, convertRfq, getRfq, getRfqGroup, quoteRfq, saveRfq, sendRfq } from '@/lib/finance/rfqs';
+import { PURCHASE_ORDER_MESSAGES, getPurchaseOrder, savePurchaseOrder, submitPurchaseOrder } from '@/lib/finance/purchase-orders';
+import { cellNeedsReason, compareQuotes, quotesInSeveralCurrencies } from '@/lib/finance/rfq-compare';
+import { RFQ_MESSAGES, awardRfqLines, convertRfq, getRfq, getRfqGroup, quoteRfq, saveRfq, sendRfq } from '@/lib/finance/rfqs';
 
 // Splitting an RFQ comparison between suppliers (20261202090000_bendahara_rfq_split.sql) against the hosted
 // database, through the app's own data layer with a real client. Every refusal and every role is proved by
 // supabase/tests/bendahara_rfq_split_check.sql; this file adds what only the API shows (named arguments, the
 // uuid[] answer, the screen's sentence for a refusal, the reason read back through the view) and holds the
 // database's comparison to the screen's: for every line of a few quotes, the database asks for a reason exactly
-// when compareQuotes (src/lib/finance/rfq-compare.ts) shows a lower price for it, or cannot compare it.
+// when the screen says it needs one (cellNeedsReason in src/lib/finance/rfq-compare.ts): another supplier's
+// comparable price is lower, or it cannot be compared and another supplier quoted the row.
 
 const testWithSupabase = hasSupabaseEnv ? test : test.skip;
 if (!hasSupabaseEnv) console.warn(supabaseEnvSkipReason);
@@ -168,7 +169,7 @@ testWithSupabase('Make purchase order asks for a reason when another supplier qu
   expect(cheap.error, cheap.error?.message).toBeNull();
 });
 
-testWithSupabase('the database asks for a reason exactly where compareQuotes shows a lower price, or cannot compare', async () => {
+testWithSupabase('the database asks for a reason exactly where the screen says one is needed', async () => {
   const o = await workspace('Split C Sdn Bhd');
   const [s1, s2, s3, s4] = o.suppliers;
 
@@ -215,11 +216,8 @@ testWithSupabase('the database asks for a reason exactly where compareQuotes sho
           .map((row) => ({ row, cell: row.cells[i] }))
           .find((c) => c.cell && c.cell.unit_price === line.unit_price && c.cell.quantity === line.quantity && c.cell.sst_rate === line.sst_rate);
         expect(found, `${rfq.rfq_no} line ${index + 1}`).toBeDefined();
-        const { row, cell } = found!;
-        // No exchange rate in a mixed group: shown, never compared.
-        const unrated = mixed && rfq.currency !== 'MYR' && rfq.fx_rate === null;
-        const rivalMarked = row.cells.some((c, j) => j !== i && c?.lowest);
-        const expected = unrated || (!cell!.lowest && rivalMarked);
+        // The screen's own answer (what Make N purchase orders says under a box), held to the database's below.
+        const expected = cellNeedsReason(found!.row, i, mixed) !== null;
 
         const made = await award(o, [{ rfq_id: rfq.id, line_ids: [line.id] }]);
         if (expected) {
@@ -247,4 +245,53 @@ testWithSupabase('the database asks for a reason exactly where compareQuotes sho
   expect(outcomes[`${x1.id}:0`]).toBe(false);
   expect(outcomes[`${x2.id}:0`]).toBe(true);
   expect(outcomes[`${x3.id}:0`]).toBe(true);
+});
+
+testWithSupabase('the app’s split makes the orders, and the reason on a draft is edited, not emptied, and locked once submitted', async () => {
+  const o = await workspace('Split D Sdn Bhd');
+  const [s1, s2] = o.suppliers;
+  const rows: Line[] = [
+    { description: 'Bolts', quantity: 10, uom: 'pcs', price: 3 },
+    { description: 'Valve', quantity: 2, price: 50 },
+  ];
+  const low = await quoted(o, s1, rows);
+  const high = await quoted(o, s2, rows.map((l) => ({ ...l, price: l.price + 1 })), { source: low.id });
+
+  // The sentences the screen shows for a refusal.
+  expect(await awardRfqLines(o, { awards: [{ rfq_id: high.id, line_ids: [high.lines[0]] }] })).toEqual({ ok: false, error: RFQ_MESSAGES.needsReason });
+  expect(await awardRfqLines(o, { awards: [{ rfq_id: low.id, line_ids: [high.lines[0]] }] })).toEqual({ ok: false, error: RFQ_MESSAGES.badAward });
+
+  const made = await awardRfqLines(o, {
+    awards: [
+      { rfq_id: low.id, line_ids: [low.lines[0]] },
+      { rfq_id: high.id, line_ids: [high.lines[1]], reason: ' Delivers next day ' },
+    ],
+  });
+  expect(made.ok, JSON.stringify(made)).toBe(true);
+  const ids = made.ok ? made.data.purchase_order_ids : [];
+  expect(ids).toHaveLength(2);
+  expect(await awardRfqLines(o, { awards: [{ rfq_id: high.id, line_ids: [high.lines[0]], reason: 'again' }] })).toEqual({ ok: false, error: RFQ_MESSAGES.hasOrder });
+
+  // The reason is read with the order, and the draft's form saves it back.
+  const order = await getPurchaseOrder(o, ids[1]);
+  expect(order).toMatchObject({ rfq_id: high.id, award_reason: 'Delivers next day' });
+  expect((await getPurchaseOrder(o, ids[0]))?.award_reason).toBeNull();
+  const save = (reason: string | null | undefined) =>
+    savePurchaseOrder(o, {
+      id: ids[1],
+      supplier_id: order!.supplier_id,
+      po_date: order!.po_date,
+      lines: order!.lines.map((l) => ({ description: l.description, quantity: l.quantity, uom: l.uom, pack_size: l.pack_size, unit_price: l.unit_price, sst_rate: l.sst_rate })),
+      award_reason: reason,
+    });
+  expect(await save('Brand asked for')).toEqual({ ok: true, data: { id: ids[1] } });
+  expect((await getPurchaseOrder(o, ids[1]))?.award_reason).toBe('Brand asked for');
+  expect(await save(undefined)).toEqual({ ok: true, data: { id: ids[1] } });
+  expect((await getPurchaseOrder(o, ids[1]))?.award_reason).toBe('Brand asked for');
+  expect(await save('')).toEqual({ ok: false, error: PURCHASE_ORDER_MESSAGES.reasonKept });
+  expect((await getPurchaseOrder(o, ids[1]))?.award_reason).toBe('Brand asked for');
+
+  const submitted = await submitPurchaseOrder(o, { id: ids[1] });
+  expect(submitted.ok, JSON.stringify(submitted)).toBe(true);
+  expect(await save('Changed my mind')).toEqual({ ok: false, error: PURCHASE_ORDER_MESSAGES.locked });
 });

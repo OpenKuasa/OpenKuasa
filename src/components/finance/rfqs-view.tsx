@@ -8,7 +8,7 @@ import { downloadCsv } from '@/components/finance/download-csv';
 import { RfqCompareCard } from '@/components/finance/rfq-compare-card';
 import { RfqFormCard, type RfqFormActions } from '@/components/finance/rfq-form-card';
 import { type QuoteRfq, RfqPricesCard } from '@/components/finance/rfq-prices-card';
-import { RfqReasonInput } from '@/components/finance/rfq-reason-input';
+import { RfqReasonInput, WHOLE_RFQ_REASON_HINT } from '@/components/finance/rfq-reason-input';
 import { RowMenu, type RowMenuItem } from '@/components/finance/row-menu';
 import { SavedNoteCard } from '@/components/finance/saved-note-card';
 import { useFinanceAction } from '@/components/finance/use-finance-action';
@@ -50,6 +50,8 @@ export type RfqActions = RfqFormActions & {
   close: (input: unknown) => Promise<FinResult<{ id: string }>>;
   /** Makes a draft purchase order from a quoted RFQ. */
   convert: (input: unknown) => Promise<FinResult<unknown>>;
+  /** Splits a request's quotes between suppliers: a draft purchase order for each supplier chosen. */
+  award: (input: unknown) => Promise<FinResult<unknown>>;
   remove: (input: unknown) => Promise<FinResult<{ id: string }>>;
   /** Reads one draft with its lines, for the Edit form. */
   get: (input: unknown) => Promise<FinResult<RfqDetail>>;
@@ -94,6 +96,8 @@ type Open =
   | { kind: 'compare'; rfq: RfqListRow; group: RfqDetail[] | null }
   /** A draft purchase order has just been made from this RFQ. */
   | { kind: 'converted'; rfq: RfqListRow }
+  /** Draft purchase orders have just been made from a split of the quotes. */
+  | { kind: 'awarded'; count: number }
   | { kind: Question; rfq: RfqListRow }
   | null;
 
@@ -131,7 +135,7 @@ export function RfqsView({
   const shown = showAll ? matching : matching.slice(0, LATEST_ROWS);
   const columns = writer ? 9 : 8;
   const asking =
-    open && open.kind !== 'new' && open.kind !== 'edit' && open.kind !== 'prices' && open.kind !== 'copy' && open.kind !== 'compare' && open.kind !== 'converted' ? open : null;
+    open && open.kind !== 'new' && open.kind !== 'edit' && open.kind !== 'prices' && open.kind !== 'copy' && open.kind !== 'compare' && open.kind !== 'converted' && open.kind !== 'awarded' ? open : null;
   // A form holds what was typed, so nothing else opens over it: it is closed with its own Cancel first.
   const formOpen = open?.kind === 'new' || open?.kind === 'edit' || open?.kind === 'prices' || open?.kind === 'copy';
   // A row that is gone after a refresh takes its question with it; the message still has to be seen.
@@ -271,7 +275,7 @@ export function RfqsView({
             Make a draft purchase order from {number} to {who} ({money(rfq.total, rfq.currency)})? It gets the same supplier and
             lines, at the prices quoted{rfq.currency !== BASE_CURRENCY ? `, in ${rfq.currency} at Bank Negara Malaysia's selling rate for today when it has one` : ''},
             and stays a draft on Purchase Orders until it is submitted for approval.
-            <RfqReasonInput value={reason} onChange={setReason} disabled={confirm.pending} />
+            <RfqReasonInput value={reason} onChange={setReason} disabled={confirm.pending} hint={WHOLE_RFQ_REASON_HINT} />
           </ConfirmRow>
         );
       case 'close':
@@ -380,12 +384,14 @@ export function RfqsView({
           key={rfq.id}
           rfqs={open.group}
           convert={actions.convert}
+          award={actions.award}
           // After a refused order: the same read that opened the card. If it is refused too, the card keeps what it had.
           reload={async () => {
             const again = await actions.getComparison({ id: rfq.id });
             if (again.ok) setOpen((cur) => (cur?.kind === 'compare' && cur.rfq.id === rfq.id ? { ...cur, group: again.data } : cur));
           }}
           onConverted={(rfq) => ask({ kind: 'converted', rfq })}
+          onAwarded={(count) => ask({ kind: 'awarded', count })}
           onClose={close}
         />
       ) : (
@@ -409,6 +415,20 @@ export function RfqsView({
           onClose={close}
         >
           It has the RFQ’s supplier and lines, at the prices quoted. It is a draft: check it, then submit it for approval, on
+        </SavedNoteCard>
+      );
+    }
+    if (open.kind === 'awarded') {
+      return (
+        <SavedNoteCard
+          title={open.count === 1 ? 'Draft purchase order made' : `${open.count} draft purchase orders made`}
+          subtitle="From the quotes you chose"
+          href="/finance/purchase-orders"
+          linkLabel="Purchase Orders"
+          onClose={close}
+        >
+          Each has its supplier’s chosen lines, at the prices quoted. They are drafts: check them, then submit each for approval,
+          on
         </SavedNoteCard>
       );
     }

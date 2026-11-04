@@ -1,4 +1,4 @@
--- Bendahara RFQ split check (#236, 20261202090000_bendahara_rfq_split.sql). Run
+-- Bendahara RFQ split check (#236, 20261202090000_bendahara_rfq_split.sql; case 12 needs 20261202090300 too). Run
 -- it after that migration, in the same transaction for a dry run, or by itself
 -- once applied. It leaves nothing behind either way: the block always ends with
 -- RAISE, so every row and the helper functions below are rolled back. Read the
@@ -460,6 +460,43 @@ begin
   foreach t in array array['public.finance_award_rfq_lines(uuid, jsonb)', 'public.finance_convert_rfq(uuid, uuid, text)'] loop
     if has_function_privilege('anon', t, 'execute') then fails := fails || format('11: anon can call %s', t); end if;
   end loop;
+
+  -- ==== 12: a draft saved with its reason (20261202090300) =======================================
+  po := public.finance_save_purchase_order_with_reason(org, jsonb_build_object('supplier_id', s1, 'po_date', current_date),
+    '[{"description":"A","quantity":1,"unit_price":100,"sst_rate":0}]', 'new reason');
+  select award_reason into t from public.finance_purchase_orders where id = po;
+  if t is distinct from 'new reason' then fails := fails || format('12: a new draft''s reason is %L', t); end if;
+  -- A refused reason undoes the save: the second line is not there afterwards.
+  fails := fails || public.bendahara_split_try('12: a blank reason with new lines', '23514',
+    format('select public.finance_save_purchase_order_with_reason(%L, %L, %L, %L)', org,
+      jsonb_build_object('id', po, 'supplier_id', s1, 'po_date', current_date),
+      '[{"description":"A","quantity":1,"unit_price":100,"sst_rate":0},{"description":"B","quantity":1,"unit_price":50,"sst_rate":0}]', '   '));
+  select count(*) into n from public.finance_purchase_order_lines where purchase_order_id = po;
+  if n <> 1 then fails := fails || format('12: a refused reason left %s lines saved', n); end if;
+  -- No reason sent: the lines are saved and the stored reason stays.
+  perform public.finance_save_purchase_order_with_reason(org, jsonb_build_object('id', po, 'supplier_id', s1, 'po_date', current_date),
+    '[{"description":"A","quantity":1,"unit_price":100,"sst_rate":0},{"description":"B","quantity":1,"unit_price":50,"sst_rate":0}]', null);
+  select count(*) into n from public.finance_purchase_order_lines where purchase_order_id = po;
+  select award_reason into t from public.finance_purchase_orders where id = po;
+  if n <> 2 or t is distinct from 'new reason' then fails := fails || format('12: a save with no reason left %s lines and %L', n, t); end if;
+  perform public.finance_save_purchase_order_with_reason(org, jsonb_build_object('id', po, 'supplier_id', s1, 'po_date', current_date),
+    '[{"description":"A","quantity":1,"unit_price":100,"sst_rate":0}]', 'changed reason');
+  select award_reason into t from public.finance_purchase_orders where id = po;
+  if t is distinct from 'changed reason' then fails := fails || format('12: a changed reason is %L', t); end if;
+  perform set_config('request.jwt.claims', viewer_claims, true);
+  fails := fails || public.bendahara_split_try('12: a viewer saves with a reason', 'error',
+    format('select public.finance_save_purchase_order_with_reason(%L, %L, %L, %L)', org,
+      jsonb_build_object('id', po, 'supplier_id', s1, 'po_date', current_date), '[{"description":"A","quantity":1,"unit_price":1,"sst_rate":0}]', 'viewer'));
+  perform set_config('request.jwt.claims', owner_claims, true);
+  perform public.finance_submit_purchase_order(org, po);
+  fails := fails || public.bendahara_split_try('12: a submitted order saved with a reason', 'error',
+    format('select public.finance_save_purchase_order_with_reason(%L, %L, %L, %L)', org,
+      jsonb_build_object('id', po, 'supplier_id', s1, 'po_date', current_date), '[{"description":"A","quantity":1,"unit_price":100,"sst_rate":0}]', 'late'));
+  select award_reason into t from public.finance_purchase_orders where id = po;
+  if t is distinct from 'changed reason' then fails := fails || format('12: a submitted order''s reason became %L', t); end if;
+  if has_function_privilege('anon', 'public.finance_save_purchase_order_with_reason(uuid, jsonb, jsonb, text)', 'execute') then
+    fails := fails || '12: anon can call finance_save_purchase_order_with_reason'::text;
+  end if;
 
   exception when others then
     -- Only an error that stopped the block reaches here: a case failure above is recorded and the rest still run.

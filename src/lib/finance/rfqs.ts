@@ -66,6 +66,9 @@ export const RFQ_MESSAGES = {
   missing: 'The supplier or a product on this RFQ no longer exists.',
   // FIN75: another supplier's quote for the same request is lower, or this one has no exchange rate to compare by.
   needsReason: 'Another supplier quoted this for less, or it has no exchange rate to compare. Say why this supplier was chosen.',
+  // FIN76: the choices do not make orders as they stand (a line is not on its RFQ, one line goes to two suppliers, ...).
+  // The screen only sends what it has read, so this is met when the quotes changed under the person or by a direct call.
+  badAward: "These choices can't be ordered as they are. Read the quotes again and choose again.",
   // FIN22, or the database's one-order-per-RFQ key
   hasOrder: 'This RFQ already has a purchase order. Cancel that order first to make another.',
   // Compare quotes, when the group came apart since the page was loaded.
@@ -159,6 +162,23 @@ export const rfqIdInput = z.object({ id: z.string({ error: M.gone }).uuid(M.gone
 /** Make purchase order: the RFQ, and why this supplier was chosen, which the database asks for when it is not the lowest quote. */
 export const convertRfqInput = rfqIdInput.extend({ reason: optionalText.optional() });
 
+/**
+ * Split between suppliers: for each chosen RFQ, the lines of it to order, and why this supplier was chosen, which the
+ * database asks for when a line does not go to the lowest quote (FIN75). One draft order is made for each.
+ */
+export const awardRfqLinesInput = z.object({
+  awards: z
+    .array(
+      z.object({
+        rfq_id: z.string({ error: M.badAward }).uuid(M.badAward),
+        line_ids: z.array(z.string({ error: M.badAward }).uuid(M.badAward), { error: M.badAward }).min(1, M.badAward),
+        reason: optionalText.optional(),
+      }),
+      { error: M.badAward },
+    )
+    .min(1, M.badAward),
+});
+
 /** The supplier's answer: a price for each line they priced, and their own reference if they gave one. */
 export const quoteRfqInput = rfqIdInput.extend({
   supplier_ref: optionalText.default(null),
@@ -182,6 +202,7 @@ const REFUSALS: Record<string, string> = {
   FIN19: M.unpriced,
   FIN39: M.notBnmRate,
   FIN75: M.needsReason,
+  FIN76: M.badAward,
   [PG_UNIQUE]: M.numberTaken,
   [PG_FOREIGN_KEY]: M.missing,
   [PG_FORBIDDEN]: NOT_ALLOWED,
@@ -524,4 +545,27 @@ export async function convertRfq(
     return rfqWriteFailed('convertRfq', error);
   }
   return { ok: true, data: { id, purchase_order_id: data as string } };
+}
+
+/**
+ * Splits a request's quotes between suppliers: one draft purchase order for each award, from that RFQ and holding
+ * only the lines chosen, at the quoted quantity and price. All or none: a refusal anywhere (FIN75 for a missing
+ * reason, FIN76 for choices that do not hold together) leaves no order behind.
+ */
+export async function awardRfqLines(
+  ctx: FinanceWriteContext,
+  input: z.input<typeof awardRfqLinesInput>,
+): Promise<FinResult<{ purchase_order_ids: string[] }>> {
+  const { awards } = awardRfqLinesInput.parse(input);
+  const { data, error } = await ctx.client.rpc('finance_award_rfq_lines', {
+    target_org: ctx.orgId,
+    // A reason is left out when blank, as Make purchase order's is.
+    awards: awards.map(({ reason, ...award }) => (reason ? { ...award, reason } : award)),
+  });
+  if (error || !Array.isArray(data)) {
+    const code = pgCode(error);
+    if (code === 'FIN22' || code === PG_UNIQUE) return { ok: false, error: M.hasOrder };
+    return rfqWriteFailed('awardRfqLines', error);
+  }
+  return { ok: true, data: { purchase_order_ids: data as string[] } };
 }

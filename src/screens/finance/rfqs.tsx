@@ -1,4 +1,5 @@
 import {
+  awardRfqLinesAction,
   closeRfqAction,
   convertRfqAction,
   deleteRfqAction,
@@ -31,6 +32,7 @@ const ACTIONS: RfqActions = {
   quote: quoteRfqAction,
   close: closeRfqAction,
   convert: convertRfqAction,
+  award: awardRfqLinesAction,
   remove: deleteRfqAction,
   get: getRfqAction,
   getSent: getSentRfqAction,

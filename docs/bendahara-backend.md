@@ -53,7 +53,7 @@ the data layer, with unit tests; the client components only draw them.
 | `receipt-reader.ts` | Server only: which model reads receipts (`receiptModelId`, from the environment, no id in code), whether the workspace has a key (`workspaceKeyState`), the receipt as the reading needs it (`getReceiptForReading`), the whole stored file through the caller's link (`receiptBytes`, `sendableAs`), the one call to the model (`readReceiptWithModel`: no tool, no retry, 45 seconds), and the write of what came back (`setReceiptExtraction`) |
 | `rfqs.ts` | RFQs (requests for quotation). Described here only for the link a copied RFQ keeps: `saveRfqInput` takes `source_rfq_id`, the RFQ a new draft was copied from, which must be an id, and `saveRfq` sends it to `finance_save_rfq`; a list row carries `source_rfq_id` (the first RFQ of its group, or null) and `quoted_at` (when the supplier's answer was recorded; until then the list and its export show no total, as prices the buyer typed are not a quote); `getRfqGroup` reads the RFQs of one RFQ's group that have gone to their supplier, with their lines, in the order they were made. `saveRfq` words `FIN11` on a new copy with a sentence of its own (`RFQ_MESSAGES.copiedFromGone`) |
 | `rfq-form.ts` | The RFQ form. A form opened by Copy to another supplier (`rfqFormCopiedFrom`) remembers the RFQ it was copied from, and `rfqPayload` sends it with the new draft. When that save is refused because the RFQ it was copied from is gone, `rfqFormAfterRefusal` drops the link, so saving again saves the RFQ on its own; the shared card applies it through `DocumentFormKind.afterRefusal`, which no other form has |
-| `rfq-compare.ts` | Compare quotes, pure. A group is the first RFQ and every RFQ that names it (`rfqGroupId`); an RFQ can be compared once it and at least one other of its group have gone to their supplier (`comparableRfqIds`), and `rfqActions(row, comparable)` in `purchase-views.ts` then offers Compare quotes in every status but draft. `compareQuotes` lays the group out as a row for each item and a cell for each RFQ: lines are matched by product, or else by description, in the same unit and pack size; only an RFQ whose answer was recorded (`quoted_at`) has prices; the lowest price is for one unit with SST added, compared to four decimals, marked on every supplier tied at it and only when at least two priced the line; a cell worded differently from its row keeps its own description. Also the question the card asks before making an order (`orderableRfq`) and what deleting a draft costs the RFQs copied from it (`rfqCopyCount`, `rfqDeleteWarning`) |
+| `rfq-compare.ts` | Compare quotes, pure. A group is the first RFQ and every RFQ that names it (`rfqGroupId`); an RFQ can be compared once it and at least one other of its group have gone to their supplier (`comparableRfqIds`), and `rfqActions(row, comparable)` in `purchase-views.ts` then offers Compare quotes in every status but draft. `compareQuotes` lays the group out as a row for each item and a cell for each RFQ: lines are matched by product, or else by description, in the same unit and pack size; only an RFQ whose answer was recorded (`quoted_at`) has prices; the lowest price is for one unit with SST added, compared to four decimals, marked on every supplier tied at it and only when at least two priced the line; a cell worded differently from its row keeps its own description. Splitting between suppliers: where choosing starts (`startingChoice`), moving a choice (`toggleChoice`), what needs a reason (`cellNeedsReason`, `splitReasonHint`), the orders and figures (`splitPlan`) and what is sent (`splitAwards`). Also the question the card asks before making an order (`orderableRfq`) and what deleting a draft costs the RFQs copied from it (`rfqCopyCount`, `rfqDeleteWarning`) |
 | `purchase-order-print.ts` | A printed purchase order, pure (`purchaseOrderPrint`): what each part says, for an approved or closed order read by `getPrintablePurchaseOrder`. "Prepared by" is whoever submitted the order (else whoever raised it, with no time) and "Approved by" its approver; each prints the person's full name (else the part of their email before the @), their job title (else their role), and the time in Malaysia. Someone who has left the workspace (no role in it, even if another shared workspace still shows their profile) prints with a blank name and designation, and only the time stays. "Deliver to" is the order's address, else the workspace's. The print view (`purchase-order-print-dialog.tsx`) uses Lekiu's letterhead and print styles |
 | `csv.ts` | CSV text for Export: RFC 4180, a UTF-8 byte-order mark, and a guard against spreadsheet formulas |
 | `categories.ts` | Expense and income categories, for the Categories card on Expenses: `listCategories` (both kinds, archived ones included, each with its mark when the books lean on it), `createCategoryInput` and `createCategory`, `renameCategoryInput` and `renameCategory`, `setCategoryActiveInput` and `setCategoryActive` (archive and restore; the two marked categories are not archived), and `CATEGORY_MESSAGES`. Nothing deletes a category. The forms' own pickers (`listExpenseCategories`, `listIncomeCategories`: active ones of one kind) stay where they were |
@@ -1933,7 +1933,7 @@ audit trail now send a supplier credit note to this screen.
 
 ## Splitting an RFQ comparison between suppliers
 
-`20261202090000_bendahara_rfq_split` (issue #236, the database half; the screen comes next). A comparison can be
+`20261202090000_bendahara_rfq_split` (issue #236, the database half; the screen is described below). A comparison can be
 awarded whole, with Make purchase order from one supplier's column, or line by line, with each line going to
 one supplier and one draft order made for each supplier chosen. Either way, an order that does not go to the lowest
 quote needs a **reason**, and the database holds the rule, so Tuah and any other caller meet it as well as the screen.
@@ -1943,7 +1943,10 @@ column of `finance_purchase_order_totals`. `rejection_reason` is the approver's 
 field of its own. It can be changed while the order is a draft and, once set, not emptied (`FIN75`); once the order leaves
 draft it is locked (`FIN01`, trigger `finance_purchase_order_reason_lock`, which also holds where the order guard stands aside
 because nobody is signed in). A rejection returns the order to draft with its reason. Nothing is written to the audit log
-for it. The reason is a plain table update on a draft; `finance_save_purchase_order` is unchanged.
+for it. `finance_save_purchase_order` is unchanged: the order screen saves a draft with its reason through
+`finance_save_purchase_order_with_reason(target_org, purchase_order, lines, reason)`, which runs the save and then writes the
+reason (only when it changed) in one transaction, so a refused reason leaves the lines as they were too. A null reason leaves
+the stored one alone.
 
 **What "lower" means.** `private.finance_rfq_comparison` is `rfq-compare.ts` in SQL. A group is the first RFQ and its copies. Only
 an RFQ whose answer was recorded (`quoted_at`) has prices, so a price typed on an RFQ nobody answered is no rival. Closed RFQs
@@ -1979,17 +1982,47 @@ cannot be compared; with one currency the prices are compared as they are.
 
 - A direct insert into `finance_purchase_orders` can still attach an order to an RFQ with no reason: the rule is held by the two
   functions, as the sign-off checks are.
-- The matching exists twice, in `rfq-compare.ts` and in SQL. `tests/bendahara-rfq-split.test.ts` holds them together by
-  asking the database about every line of a few quotes and comparing its answer with `compareQuotes`.
-  `supabase/tests/bendahara_rfq_split_check.sql` is the database's own check.
-- The reason is not shown to the approver yet: that, choosing a supplier for each line, the split total and the minimum-order
-  note are the screen's. Until then Make purchase order has a reason box in Compare quotes and in the RFQ's row menu, and an order needs one
-  only when the database says so.
+- The matching exists twice, in `rfq-compare.ts` (`cellNeedsReason`, which the split question uses to say which items need a
+  reason) and in SQL. The screen never blocks on it: the database is the rule, and a refusal shows its sentence.
+  `tests/bendahara-rfq-split.test.ts` holds them together by asking the database about every line of a few quotes and
+  comparing its answer with `cellNeedsReason`. `supabase/tests/bendahara_rfq_split_check.sql` is the database's own check.
+- The whole-RFQ rule is not worked out on the screen at all; Make purchase order says only when a reason is needed in general
+  ("Needed when another supplier quoted less, or there's no exchange rate to compare.").
 - Lower case beyond ASCII follows the database's locale in SQL and the browser's in the comparison.
 - One row given to two suppliers is refused within one call. Calls made one after another are not compared, because an order does not record which RFQ line it came from.
-- The reason can't be edited from a screen yet: the database allows it on a draft, and the screen comes with the next PR.
 - Deploy window: between the migration and the matching app, the old app has no reason box, so a Make purchase order that needs a
   reason is refused (`FIN75`) and the old app shows its general message.
+
+**The screen** (Compare quotes on RFQs, for the people who may make an order). **Split between suppliers** sits beside Close
+and turns split mode on or off.
+
+- *Choosing.* Each quoted cell of a column that can be ordered gets a **Choose** / **Chosen** toggle (`aria-pressed`, named for the
+  item and the supplier). Choosing another supplier moves the line there; pressing Chosen clears it. A cell nobody quoted, and a
+  column whose RFQ already has an order, get no button. A line is chosen whole, at the quoted quantity. A row starts on the one
+  supplier marked lowest on it, or on the only supplier who quoted it, when that RFQ can be ordered; a tie, a lowest supplier
+  who already has an order, and a row nobody quoted start on nobody (`startingChoice`). With any order already made from the
+  request nothing starts chosen and a note asks the person to check what it holds, because separate splits can order a row twice.
+- *Split total.* A **Split** column shows each chosen line's amount, the Total row shows the split total beside the suppliers'
+  totals, lines not chosen are counted under it so a short total isn't read as a saving, and a **Chosen** row shows each supplier's line count and amount in its own currency. With quotes in one currency
+  the split is in it. With several, the split is approximate ringgit at each RFQ's own indicative rate, a line whose RFQ has
+  no rate is left out and the total says "plus N lines with no exchange rate". The figures are whole sen (`splitPlan`); the
+  order itself is converted at its own date's rate by the database.
+- *Making the orders.* **Review N purchase orders** asks first: one draft order per supplier chosen, with its RFQ, lines, total
+  and its own "Why this supplier?" box, a line under the box naming the items that need a reason ("Needs a reason: Paper has
+  a lower quote", or "has no exchange rate to compare"), and "Gets 2 of the 4 lines it quoted. Check any minimum order or delivery charge."
+  when a supplier gets fewer lines than it quoted. Lines nobody quoted and lines quoted but not chosen are counted. The RFQs
+  stay as they are and closing them is the person's. The call is `awardRfqLinesAction` (`awardRfqLines` in `rfqs.ts`),
+  refreshing RFQs and Purchase Orders. A missing reason is not blocked on the screen: the database refuses (`FIN75`), the
+  sentence shows, the group is read again and what was typed stays in the boxes. `FIN76` says the choices can't be ordered as
+  they are; `FIN22` that an RFQ has an order. `awardRfqLinesInput` catches awards that are not well formed (a bad id, `line_ids`
+  that is not a list) with the same sentence, before the call; the function itself answers those with a general error. Tuah has
+  no tool for this: it does not split.
+- *The reason afterwards.* Approve, Reject and an order opened from a link show "Why this supplier: ..." under the totals.
+  It is not on the printed purchase order, which goes to the supplier. A draft made from an RFQ has a "Why this supplier" box
+  in its form; `savePurchaseOrder` writes it to the order after the save function succeeds (that function does not take it),
+  refuses to empty one that is set before it saves anything, and Save and submit goes through the same path. The assistant's
+  `savePurchaseOrderToolInput` does not carry the field.
+- Make purchase order, on a column or in the row menu, now asks "Why this supplier?" (no longer "optional") with that general line under the box.
 
 ## SST settings and tax type
 
@@ -2427,8 +2460,8 @@ quotation, a credit note or a refund by the file that made the call.
 | `FIN57` | A supplier credit note cannot be voided while its credit is used on another bill: take it off that bill first |
 | `FIN58` | Credit can only be applied to a bill from the same supplier as the credit note |
 | `FIN59` | A bill with a draft or issued supplier credit note against it, or with credit applied to it, cannot be voided |
-| `FIN75` | A purchase order made from an RFQ needs a reason when another supplier quoted the same items for less, or the quote has no exchange rate to compare by; a draft's reason is not emptied. `rfqs.ts`: "Another supplier quoted this for less, or it has no exchange rate to compare. Say why this supplier was chosen." |
-| `FIN76` | An award of RFQ lines is not valid: nothing to order, an RFQ named twice, RFQs of different requests, a line that is not on its RFQ, or one line given to two suppliers. No screen reaches it yet |
+| `FIN75` | A purchase order made from an RFQ needs a reason when another supplier quoted the same items for less, or the quote has no exchange rate to compare by; a draft's reason is not emptied. `rfqs.ts`: "Another supplier quoted this for less, or it has no exchange rate to compare. Say why this supplier was chosen." `purchase-orders.ts`: "Say why this supplier was chosen. A reason that is set can be changed, but not taken away." |
+| `FIN76` | An award of RFQ lines is not valid: nothing to order, an RFQ named twice, RFQs of different requests, a line that is not on its RFQ, or one line given to two suppliers. `rfqs.ts`: "These choices can't be ordered as they are. Read the quotes again and choose again." |
 
 `FIN23`, `FIN24` and `FIN25` are not the Receipts Inbox's alone. The ledger
 migrations (`20261108091500` to `20261108094500`) raise `FIN23` to `FIN27` with

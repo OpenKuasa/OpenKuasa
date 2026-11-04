@@ -49,6 +49,10 @@ export type PurchaseOrderForm = {
   /** Once the person sets the terms by hand, choosing another supplier no longer changes them. */
   termsEdited: boolean;
   delivery_address: string;
+  /** The RFQ this draft was made from; null for an order raised here. Only an order from an RFQ has a reason to give. */
+  rfq_id: string | null;
+  /** Why this supplier was chosen, as typed. */
+  award_reason: string;
   notes: string;
   lines: LineDraft[];
   /** The currency and rate. Ringgit for a new form until the person or the supplier's default says otherwise. */
@@ -64,6 +68,8 @@ export function newPurchaseOrderForm(today: string, lineKey: string): PurchaseOr
     payment_terms_days: '',
     termsEdited: false,
     delivery_address: '',
+    rfq_id: null,
+    award_reason: '',
     notes: '',
     lines: [emptyLine(lineKey)],
     fx: ringgitFields(),
@@ -80,6 +86,8 @@ export function purchaseOrderFormFromDetail(order: PurchaseOrderDetail): Purchas
     payment_terms_days: order.payment_terms_days === null ? '' : String(order.payment_terms_days),
     termsEdited: true,
     delivery_address: order.delivery_address ?? '',
+    rfq_id: order.rfq_id,
+    award_reason: order.award_reason ?? '',
     notes: order.notes ?? '',
     lines: order.lines.map(lineDraft),
     fx: savedFields(order),
@@ -135,6 +143,8 @@ export function purchaseOrderPayload(form: PurchaseOrderForm) {
     expected_date: form.expected_date,
     payment_terms_days: typedTerms(form.payment_terms_days),
     delivery_address: form.delivery_address,
+    // Sent only for an order made from an RFQ. An empty box is sent as empty, so the database's refusal to take a reason away shows.
+    ...(form.rfq_id ? { award_reason: form.award_reason } : {}),
     notes: form.notes,
     lines: form.lines.map(linePayload),
     ...currencyPayload(form.fx),
@@ -195,6 +205,13 @@ export const PURCHASE_ORDER_FORM_KIND: DocumentFormKind<PurchaseOrderForm> = {
       inputMode: 'text',
       get: (form) => form.delivery_address,
       set: (form, value) => ({ ...form, delivery_address: value }),
+    },
+    {
+      label: 'Why this supplier',
+      maxLength: 200,
+      show: (form) => form.rfq_id !== null,
+      get: (form) => form.award_reason,
+      set: (form, value) => ({ ...form, award_reason: value }),
     },
   ],
   words: PURCHASE_ORDER_FORM_WORDS,

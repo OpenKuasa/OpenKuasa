@@ -20,6 +20,7 @@ const order = (o: Partial<PrintablePurchaseOrder> = {}): PrintablePurchaseOrder 
   rejection_reason: null,
   payment_terms_days: null,
   delivery_address: null,
+  award_reason: null,
   total: 1723.7,
   delivery: 'pending',
   received_total: 0,
@@ -88,6 +89,12 @@ describe('a printed purchase order', () => {
       { label: 'Our RFQ', value: 'RFQ-0003' },
     ]);
     expect(purchaseOrderPrint(order(), head).details).toEqual([]);
+  });
+
+  it('does not print why the supplier was chosen: that is for the people deciding, not for the supplier', () => {
+    const p = purchaseOrderPrint(order({ rfq_id: '55555555-5555-4555-8555-555555555555', rfq_no: 'RFQ-0003', award_reason: 'Cheaper elsewhere, but delivers next day' }), head);
+    expect(JSON.stringify(p)).not.toContain('Cheaper elsewhere');
+    expect(JSON.stringify(p)).not.toContain('Why this supplier');
   });
 
   it('calls terms of 0 days cash on delivery', () => {

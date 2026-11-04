@@ -209,6 +209,8 @@ import {
   RFQ_MESSAGES,
   type RfqDetail,
   type SaveAndSendRfqResult,
+  awardRfqLines,
+  awardRfqLinesInput,
   closeRfq,
   convertRfq,
   convertRfqInput,
@@ -828,6 +830,11 @@ export async function getRfqComparisonAction(input: unknown): Promise<FinResult<
 /** Makes a draft purchase order from a quoted RFQ, and refreshes Purchase Orders as well. */
 export async function convertRfqAction(input: unknown) {
   return run(CONVERT_RFQ_PATHS, convertRfqInput, input, convertRfq);
+}
+
+/** Splits a request's quotes between suppliers, one draft purchase order each, and refreshes Purchase Orders as well. */
+export async function awardRfqLinesAction(input: unknown) {
+  return run(CONVERT_RFQ_PATHS, awardRfqLinesInput, input, awardRfqLines);
 }
 
 /* ---- purchase orders --------------------------------------------------- */

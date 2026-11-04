@@ -44,6 +44,7 @@ vi.mock('@/lib/finance/rfqs', async (orig) => {
     sendRfq: recorder('sendRfq', { id: '33333333-3333-4333-8333-333333333333', rfq_no: 'RFQ-0007' }),
     quoteRfq: recorder('quoteRfq', { id: '33333333-3333-4333-8333-333333333333' }),
     convertRfq: recorder('convertRfq', { id: '33333333-3333-4333-8333-333333333333', purchase_order_id: '88888888-8888-4888-8888-888888888888' }),
+    awardRfqLines: recorder('awardRfqLines', { purchase_order_ids: ['88888888-8888-4888-8888-888888888888'] }),
     closeRfq: recorder('closeRfq', { id: '33333333-3333-4333-8333-333333333333' }),
     deleteRfq: recorder('deleteRfq', { id: '33333333-3333-4333-8333-333333333333' }),
     getRfq: async (ctx: { orgId: string }, id: string) => {
@@ -218,6 +219,47 @@ describe('convertRfqAction', () => {
   it('refreshes both screens after a refusal too, so an RFQ that already has an order shows it', async () => {
     ctl.answers.convertRfq = { ok: false, error: 'This RFQ already has a purchase order. Cancel that order first to make another.' };
     expect(await actions.convertRfqAction({ id: RFQ })).toEqual(ctl.answers.convertRfq);
+    expect(ctl.revalidated).toEqual(['/finance/rfqs', '/finance/purchase-orders']);
+  });
+});
+
+describe('awardRfqLinesAction', () => {
+  const awards = { awards: [{ rfq_id: RFQ, line_ids: [LINE], reason: ' Delivers next day ' }, { rfq_id: SUPPLIER, line_ids: [LINE] }] };
+  it('splits in the viewer’s workspace and refreshes RFQs and Purchase Orders', async () => {
+    expect(await actions.awardRfqLinesAction(awards)).toEqual({
+      ok: true, data: { purchase_order_ids: ['88888888-8888-4888-8888-888888888888'] },
+    });
+    expect(ctl.calls).toEqual([
+      {
+        fn: 'awardRfqLines',
+        orgId: 'org1',
+        input: { awards: [{ rfq_id: RFQ, line_ids: [LINE], reason: 'Delivers next day' }, { rfq_id: SUPPLIER, line_ids: [LINE] }] },
+      },
+    ]);
+    expect(ctl.revalidated).toEqual(['/finance/rfqs', '/finance/purchase-orders']);
+  });
+  it('refuses a viewer and the demo workspace before parsing', async () => {
+    for (const viewer of [
+      { userId: 'u1', orgId: 'org1', role: 'viewer', isDemo: false },
+      { userId: 'u1', orgId: 'org1', role: 'owner', isDemo: true },
+    ]) {
+      ctl.viewer = viewer;
+      expect(await actions.awardRfqLinesAction(awards)).toEqual(FORBIDDEN);
+      expect(await actions.awardRfqLinesAction(null)).toEqual(FORBIDDEN);
+    }
+    expect(ctl.calls).toEqual([]);
+  });
+  it('refuses nothing to order, an award with no lines, and ids that are not ids, with a sentence, before the database', async () => {
+    const badAward = "These choices can't be ordered as they are. Read the quotes again and choose again.";
+    expect(await actions.awardRfqLinesAction({ awards: [] })).toEqual({ ok: false, error: badAward });
+    expect(await actions.awardRfqLinesAction({ awards: [{ rfq_id: RFQ, line_ids: [] }] })).toEqual({ ok: false, error: badAward });
+    expect(await actions.awardRfqLinesAction({ awards: [{ rfq_id: 'nope', line_ids: [LINE] }] })).toEqual({ ok: false, error: badAward });
+    expect(await actions.awardRfqLinesAction({ awards: [{ rfq_id: RFQ, line_ids: ['nope'] }] })).toEqual({ ok: false, error: badAward });
+    expect(ctl.calls).toEqual([]);
+  });
+  it('refreshes both screens after a refusal too', async () => {
+    ctl.answers.awardRfqLines = { ok: false, error: 'Another supplier quoted this for less.' };
+    expect(await actions.awardRfqLinesAction(awards)).toEqual(ctl.answers.awardRfqLines);
     expect(ctl.revalidated).toEqual(['/finance/rfqs', '/finance/purchase-orders']);
   });
 });

@@ -566,6 +566,7 @@ const po = (r: Partial<PurchaseOrderListRow>): PurchaseOrderListRow => {
     rejection_reason: null,
     payment_terms_days: 30,
     delivery_address: null,
+    award_reason: null,
     total: 100,
     delivery: 'pending',
     received_total: 0,

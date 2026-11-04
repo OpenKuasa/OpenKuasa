@@ -54,6 +54,12 @@ export function PurchaseOrderLines({ order }: { order: PurchaseOrderDetail }) {
           </>
         ) : null}
       </dl>
+      {order.award_reason ? (
+        <p>
+          <span className="text-muted-foreground">Why this supplier: </span>
+          <span className="break-words">{order.award_reason}</span>
+        </p>
+      ) : null}
     </div>
   );
 }
