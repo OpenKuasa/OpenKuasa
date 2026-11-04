@@ -5,7 +5,9 @@
 # POSIX sh only: this file is also mounted into Supabase containers.
 file="${OPENKUASA_SECRETS_FILE:-/secrets/generated.env}"
 
-if [ -r "$file" ]; then
+if [ -e "$file" ] && [ ! -r "$file" ]; then
+  echo "with-secrets: cannot read $file; starting without generated settings" >&2
+elif [ -r "$file" ]; then
   while IFS= read -r line || [ -n "$line" ]; do
     case "$line" in
       ''|'#'*) continue ;;

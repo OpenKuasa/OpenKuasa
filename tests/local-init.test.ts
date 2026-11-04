@@ -1,4 +1,4 @@
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -95,5 +95,27 @@ describe('with-secrets.sh', () => {
       { env: { PATH: process.env.PATH ?? '', OPENKUASA_SECRETS_FILE: file, B: 'typed', C: '' } as unknown as NodeJS.ProcessEnv, encoding: 'utf8' },
     );
     expect(out).toBe('one=two/+.|typed|file|$(echo pwned)');
+  });
+
+  it.skipIf(process.getuid?.() === 0)('warns when the settings file exists but cannot be read', () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'ws-'));
+    const file = path.join(dir, 'generated.env');
+    writeFileSync(file, 'A=secretvalue\n', { mode: 0o000 });
+    const res = spawnSync('sh', [script, 'sh', '-c', 'printf "ran:%s" "${A:-unset}"'], {
+      env: { PATH: process.env.PATH ?? '', OPENKUASA_SECRETS_FILE: file } as unknown as NodeJS.ProcessEnv,
+      encoding: 'utf8',
+    });
+    expect(res.stderr).toContain(file);
+    expect(res.stderr).not.toContain('secretvalue');
+    expect(res.stdout).toBe('ran:unset');
+  });
+
+  it('stays silent when the settings file does not exist', () => {
+    const res = spawnSync('sh', [script, 'true'], {
+      env: { PATH: process.env.PATH ?? '', OPENKUASA_SECRETS_FILE: '/nonexistent/x.env' } as unknown as NodeJS.ProcessEnv,
+      encoding: 'utf8',
+    });
+    expect(res.status).toBe(0);
+    expect(res.stderr).toBe('');
   });
 });
