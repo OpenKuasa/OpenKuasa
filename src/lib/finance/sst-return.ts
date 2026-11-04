@@ -158,7 +158,8 @@ export function buildSstReturn(
   const offForm = { count: 0, value: 0, tax: 0 };
   const untyped = { count: 0, value: 0 };
   let creditNotesSen = 0;
-  const paymentBasis = (options.basis ?? 'invoice') === 'payment';
+  // The basis is a service tax setting: sales tax is always counted when the invoice is issued.
+  const paymentBasis = type === 'service' && options.basis === 'payment';
 
   for (const l of lines) {
     // A voided invoice counts nowhere (see the top of this file).
@@ -274,6 +275,25 @@ export function buildSstReturn(
             g.labelId = p.id;
           }
         }
+      }
+
+      // Lines that land on no item still need their "Not on the form" note: each counts once, at the part of
+      // its value (and tax) paid in this period, as invoice basis counts it once in the period it is issued.
+      for (const r of rows) {
+        if (r.sst_rate === 0) continue;
+        const effective = r.tax_type ?? taxTypeForRate(r.sst_rate);
+        const onForm = effective === type && items.some((i) => i.rate === r.sst_rate);
+        if (onForm || (effective !== null && effective !== type)) continue;
+        const valueDelta = Math.round(toSen(r.amount_myr) * shareAfter) - Math.round(toSen(r.amount_myr) * shareBefore);
+        if (valueDelta <= 0) continue;
+        if (effective === null) {
+          untyped.count += 1;
+          untyped.value += valueDelta;
+          continue;
+        }
+        offForm.count += 1;
+        offForm.value += valueDelta;
+        offForm.tax += Math.round(toSen(r.sst_amount_myr) * shareAfter) - Math.round(toSen(r.sst_amount_myr) * shareBefore);
       }
     }
   }

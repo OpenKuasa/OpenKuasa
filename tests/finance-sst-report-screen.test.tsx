@@ -188,6 +188,24 @@ describe('the SST Report return (#222 stage 2)', () => {
     expect(text).toContain('1 Jul – 31 Aug 2026');
   });
 
+  it('keeps the sales return of a payment-basis workspace on the invoice date', async () => {
+    state.settings = async () => ({ ...SAVED, service_tax_basis: 'payment' });
+    state.rows = async () => ({
+      lines: [line({ sst_rate: 10, tax_type: 'sales', amount_myr: 1000, sst_amount_myr: 100, description: 'Goods' })],
+      credits: [],
+    });
+    let paidReads = 0;
+    state.paid = async () => {
+      paidReads += 1;
+      return [];
+    };
+    const text = await render({ tax: 'sales' });
+    // Payment basis is a service tax setting: the sales return still counts the invoice when it is issued.
+    expect(text).toContain('Total tax (item 12) RM 100.00');
+    expect(text).toContain('payable RM 100.00');
+    expect(paidReads).toBe(0);
+  });
+
   it('says a line the form has no item for may be the rate or a sales Part C good', async () => {
     state.settings = async () => SAVED;
     state.rows = async () => ({ lines: [line({ id: 'a', sst_rate: 7 }), line({ id: 'b', sst_rate: 7 })], credits: [] });

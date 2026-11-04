@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildSstReturn, type SstLineRow, type SstPaidInvoice } from '@/lib/finance/sst-return';
+import { buildSstReturn, type SstCreditRow, type SstLineRow, type SstPaidInvoice } from '@/lib/finance/sst-return';
 
 /*
  * Service tax on payment basis (#222 stage 3): the return counts the money received, not the invoice date.
@@ -104,6 +104,48 @@ describe('buildSstReturn on payment basis', () => {
 
     expect(sep.item12).toBe(60);
     expect(nov.item12).toBe(0);
+  });
+
+  it('never puts a sales return on payment basis', () => {
+    const sales = line({ sst_rate: 10, tax_type: 'sales', amount_myr: 1000, sst_amount_myr: 100, invoice_date: '2026-09-10' });
+    const credit: SstCreditRow = {
+      id: 'c1',
+      credit_date: '2026-09-20',
+      status: 'issued',
+      voided_on: null,
+      amount_myr: 550,
+      invoice_total_myr: 1100,
+      invoice_sst_myr: { service: 0, sales: 100 },
+    };
+    const onInvoices = buildSstReturn('sales', SEP_OCT, [sales], [credit], undefined, { basis: 'invoice' });
+    const onPayments = buildSstReturn('sales', SEP_OCT, [sales], [credit], undefined, { basis: 'payment', paid: [] });
+
+    expect(onInvoices.item12).toBe(100);
+    expect(onPayments).toEqual(onInvoices);
+  });
+
+  it('notes a paid line at a rate the form has no item for, and a line with no tax type', () => {
+    const inv = paidInvoice({
+      total_myr: 2700,
+      sst_myr: { service: 200, sales: 0 },
+      receipts: [{ id: 'r1', paid_on: '2026-09-10', amount_myr: 1350 }],
+      rows: [
+        line({ id: 'l1', sst_rate: 10, amount_myr: 1000, sst_amount_myr: 100 }),
+        line({ id: 'l2', sst_rate: 7, tax_type: null, amount_myr: 500, sst_amount_myr: 35 }),
+        line({ id: 'l3', sst_rate: 6, amount_myr: 1000, sst_amount_myr: 60 }),
+        line({ id: 'l4', sst_rate: 10, tax_type: 'sales', amount_myr: 100, sst_amount_myr: 10 }),
+      ],
+    });
+    const sep = buildSstReturn('service', SEP_OCT, [], [], undefined, { basis: 'payment', paid: [inv] });
+    const nov = buildSstReturn('service', NOV_DEC, [], [], undefined, { basis: 'payment', paid: [inv] });
+
+    // Half paid in Sep–Oct: each line is noted at half its value, and the sales line is not this return's.
+    expect(sep.offForm).toEqual({ count: 1, value: 500, tax: 50 });
+    expect(sep.untyped).toEqual({ count: 1, value: 250 });
+    expect(sep.item12).toBe(30);
+    // Nothing more arrives, so a later period notes nothing again.
+    expect(nov.offForm.count).toBe(0);
+    expect(nov.untyped.count).toBe(0);
   });
 
   it('leaves the invoice basis alone when it is not asked for', () => {

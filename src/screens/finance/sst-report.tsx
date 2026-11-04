@@ -61,7 +61,7 @@ import { SAMPLE_TODAY } from './sales-sample';
 
 /**
  * Without a database: the layout from an empty data set on these settings, all figures RM 0.00. Invoice basis,
- * so the service tax return shows its items rather than the payment-basis "not ready yet" card.
+ * so the sample needs no receipts.
  */
 const SAMPLE_SETTINGS: SstSettings = {
   period_start_month: 9,
@@ -385,7 +385,7 @@ export default async function SstReportScreen({
   ]);
   const build = (period: SstPeriod) =>
     buildSstReturn(view.type, period, rows, credits, figures[period.start], {
-      basis: settings.service_tax_basis,
+      basis: onPayments ? 'payment' : 'invoice',
       paid,
     });
 
