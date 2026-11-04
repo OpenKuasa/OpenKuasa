@@ -13,7 +13,7 @@ import { z } from 'zod';
 import { addDays, malaysiaDate } from '@/lib/people/dates';
 import { type FinanceWriteContext, PG_FORBIDDEN, PG_UNIQUE, pgCode, writeFailed } from './result';
 import { type SstTaxType, sstPeriodFor, taxTypeForRate } from './sst';
-import type { SstCreditRow, SstLineRow, SstReturnType, SstTypedFigures } from './sst-return';
+import type { SstCreditRow, SstLineRow, SstPaidInvoice, SstReturnType, SstTypedFigures } from './sst-return';
 
 export const SST_RETURN_PAGE_SIZE = 1000;
 /** Invoice ids per `in (...)` filter, to keep the URL short. */
@@ -370,4 +370,157 @@ export async function saveSstFigures(
     return writeFailed('saveSstFigures', error);
   }
   return { ok: true };
+}
+
+/* ------------------------------------------------- a payment-basis return (stage 3) */
+
+/** `list` split into runs of at most `size`, for a PostgREST `in (...)` filter. */
+function chunks<T>(list: T[], size: number): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < list.length; i += size) out.push(list.slice(i, i + size));
+  return out;
+}
+
+const oldestFirst = (a: { [k: string]: unknown }, b: { [k: string]: unknown }, key: string, by: string) => {
+  const x = a[key] as string;
+  const y = b[key] as string;
+  if (x !== y) return x < y ? -1 : 1;
+  const xi = a[by] as string;
+  const yi = b[by] as string;
+  return xi === yi ? 0 : xi < yi ? -1 : 1;
+};
+
+/**
+ * The invoices a payment-basis service tax return follows: those with money received in the span, and those a
+ * credit note was issued on in it, each with every receipt and every issued credit note dated up to the span's
+ * end. A period's figure is the change across it, so the money counted before it has to be here too, which is
+ * why the receipts start at the invoice's first one. Throws when a read fails.
+ */
+export async function readSstPaidInvoices(
+  ctx: FinanceWriteContext,
+  span: { start: string; end: string },
+): Promise<SstPaidInvoice[]> {
+  const received = await allPages(() =>
+    ctx.client
+      .from('finance_transactions')
+      .select('id')
+      .eq('org_id', ctx.orgId)
+      .eq('direction', 'in')
+      .eq('status', 'posted')
+      .gte('txn_date', span.start)
+      .lte('txn_date', span.end)
+      .order('id', { ascending: true }),
+  );
+  const credited = await allPages(() =>
+    ctx.client
+      .from('finance_credit_notes')
+      .select('id,invoice_id')
+      .eq('org_id', ctx.orgId)
+      .eq('status', 'issued')
+      .gte('credit_date', span.start)
+      .lte('credit_date', span.end)
+      .order('id', { ascending: true }),
+  );
+  const ids = new Set(credited.map((c) => c.invoice_id as string));
+  for (const chunk of chunks(received.map((t) => t.id as string), ID_CHUNK)) {
+    const rows = await allPages(() =>
+      ctx.client
+        .from('finance_allocations')
+        .select('id,invoice_id')
+        .eq('org_id', ctx.orgId)
+        .in('transaction_id', chunk)
+        .order('id', { ascending: true }),
+    );
+    for (const r of rows) if (r.invoice_id !== null) ids.add(r.invoice_id as string);
+  }
+  const invoices = [...ids];
+  if (invoices.length === 0) return [];
+
+  // Every allocation on those invoices, with the transaction it came from: its date decides the period.
+  const allocations: { invoice_id: string; transaction_id: string; amount_myr: number }[] = [];
+  const transactionIds = new Set<string>();
+  const lines = new Map<string, SstLineRow[]>();
+  const notes = new Map<string, { credit_date: string; amount_myr: number; id: string }[]>();
+  for (const chunk of chunks(invoices, ID_CHUNK)) {
+    const rows = await allPages(() =>
+      ctx.client
+        .from('finance_allocations')
+        .select('id,invoice_id,transaction_id,amount,amount_myr,carried_myr')
+        .eq('org_id', ctx.orgId)
+        .in('invoice_id', chunk)
+        .order('id', { ascending: true }),
+    );
+    for (const r of rows) {
+      allocations.push({
+        invoice_id: r.invoice_id as string,
+        transaction_id: r.transaction_id as string,
+        amount_myr: num(r.carried_myr ?? r.amount_myr ?? r.amount),
+      });
+      transactionIds.add(r.transaction_id as string);
+    }
+    const lineRows = await allPages(() => ctx.client.from('finance_invoice_lines').select(LINE_COLUMNS).eq('org_id', ctx.orgId).in('invoice_id', chunk).order('id', { ascending: true }));
+    for (const r of lineRows) {
+      const row = toSstLineRow(r);
+      lines.set(row.invoice_id, [...(lines.get(row.invoice_id) ?? []), row]);
+    }
+    const noteRows = await allPages(() =>
+      ctx.client
+        .from('finance_credit_notes')
+        .select('id,invoice_id,credit_date,amount,amount_myr')
+        .eq('org_id', ctx.orgId)
+        .eq('status', 'issued')
+        .in('invoice_id', chunk)
+        .lte('credit_date', span.end)
+        .order('id', { ascending: true }),
+    );
+    for (const r of noteRows) {
+      const id = r.invoice_id as string;
+      notes.set(id, [...(notes.get(id) ?? []), { id: r.id as string, credit_date: r.credit_date as string, amount_myr: num(r.amount_myr ?? r.amount) }]);
+    }
+  }
+
+  const dated = new Map<string, { txn_date: string; direction: string; status: string }>();
+  for (const chunk of chunks([...transactionIds], ID_CHUNK)) {
+    const rows = await allPages(() =>
+      ctx.client
+        .from('finance_transactions')
+        .select('id,txn_date,direction,status')
+        .eq('org_id', ctx.orgId)
+        .in('id', chunk)
+        .order('id', { ascending: true }),
+    );
+    for (const r of rows) dated.set(r.id as string, { txn_date: r.txn_date as string, direction: r.direction as string, status: r.status as string });
+  }
+
+  const receipts = new Map<string, { id: string; paid_on: string; amount_myr: number }[]>();
+  for (const a of allocations) {
+    const t = dated.get(a.transaction_id);
+    // Money in only: a refund or a contra is not counted, and the screen names it for a credit note instead.
+    if (!t || t.direction !== 'in' || t.status !== 'posted' || t.txn_date > span.end) continue;
+    receipts.set(a.invoice_id, [...(receipts.get(a.invoice_id) ?? []), { id: a.transaction_id, paid_on: t.txn_date, amount_myr: a.amount_myr }]);
+  }
+
+  const out: SstPaidInvoice[] = [];
+  for (const id of invoices) {
+    const rows = lines.get(id) ?? [];
+    if (rows.length === 0) continue;
+    let totalSen = 0;
+    const sst = { service: 0, sales: 0 };
+    for (const r of rows) {
+      const tax = toSen(r.sst_amount_myr);
+      totalSen += toSen(r.amount_myr) + tax;
+      const type = r.tax_type ?? taxTypeForRate(r.sst_rate);
+      if (type === 'service' || type === 'sales') sst[type] += tax;
+    }
+    out.push({
+      invoice_id: id,
+      invoice_date: rows.reduce((d, r) => (r.invoice_date < d ? r.invoice_date : d), rows[0].invoice_date),
+      total_myr: fromSen(totalSen),
+      sst_myr: { service: fromSen(sst.service), sales: fromSen(sst.sales) },
+      receipts: (receipts.get(id) ?? []).sort((a, b) => oldestFirst(a, b, 'paid_on', 'id')),
+      credits: (notes.get(id) ?? []).sort((a, b) => oldestFirst(a, b, 'credit_date', 'id')),
+      rows,
+    });
+  }
+  return out;
 }
