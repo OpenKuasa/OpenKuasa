@@ -5,7 +5,7 @@ import type { FinanceContact } from '@/lib/finance/contacts';
 import { RfqCompareCard } from '@/components/finance/rfq-compare-card';
 import { RfqFormCard } from '@/components/finance/rfq-form-card';
 import { RfqPricesCard } from '@/components/finance/rfq-prices-card';
-import { RfqReasonInput } from '@/components/finance/rfq-reason-input';
+import { RfqReasonInput, WHOLE_RFQ_REASON_HINT } from '@/components/finance/rfq-reason-input';
 import { type RfqActions, RfqsView } from '@/components/finance/rfqs-view';
 import { rfqActions } from '@/lib/finance/purchase-views';
 import { priceDrafts, quoteFormError, quotePayload, submitPrices } from '@/lib/finance/rfq-form';
@@ -82,6 +82,7 @@ const actions: RfqActions = {
   quote: done({ id: 'x' }),
   close: done({ id: 'x' }),
   convert: done({ id: 'x' }),
+  award: done({ purchase_order_ids: ['x'] }),
   remove: done({ id: 'x' }),
   get: vi.fn(async () => ({ ok: false as const, error: 'unused' })),
   getSent: vi.fn(async () => ({ ok: false as const, error: 'unused' })),
@@ -313,7 +314,7 @@ describe('Compare quotes', () => {
     }),
   ];
   const html = renderToStaticMarkup(
-    <RfqCompareCard rfqs={group} convert={actions.convert} onConverted={() => {}} onClose={() => {}} />,
+    <RfqCompareCard rfqs={group} convert={actions.convert} onConverted={() => {}} onAwarded={() => {}} onClose={() => {}} />,
   );
 
   it('shows a column for each supplier and a row for each item', () => {
@@ -366,7 +367,7 @@ describe('Compare quotes', () => {
             lines: [{ ...paper, id: 'b1', description: 'A4 paper', unit_price: 7.77 }],
           }),
         ]}
-        onConverted={() => {}}
+        onConverted={() => {}} onAwarded={() => {}}
         onClose={() => {}}
       />,
     );
@@ -382,7 +383,7 @@ describe('Compare quotes', () => {
           rfq('1', 'Kopi Hulu Supplies', { lines: [{ ...paper, id: 'a1', description: 'A4 paper 80gsm', unit_price: 12 }] }),
           rfq('2', 'Biji Segar', { lines: [{ ...paper, id: 'b1', description: 'A4 paper 70gsm (substitute)', unit_price: 9 }] }),
         ]}
-        onConverted={() => {}}
+        onConverted={() => {}} onAwarded={() => {}}
         onClose={() => {}}
       />,
     );
@@ -398,5 +399,51 @@ describe('the reason beside Make purchase order', () => {
     expect(html).toContain('aria-label="Why this supplier was chosen"');
     expect(html).toContain('maxLength="200"');
     expect(html).toContain('value="Delivers next day"');
+  });
+  it('asks "Why this supplier?" without calling it optional, and names the box when several are shown', () => {
+    const html = renderToStaticMarkup(<RfqReasonInput value="" onChange={() => {}} label="Why Biji Segar was chosen" />);
+    expect(html).toContain('placeholder="Why this supplier?"');
+    expect(html).toContain('aria-label="Why Biji Segar was chosen"');
+    expect(html).not.toContain('optional');
+  });
+  it('shows the line under the box when there is one, and links it to the box', () => {
+    const html = renderToStaticMarkup(<RfqReasonInput value="" onChange={() => {}} hint={WHOLE_RFQ_REASON_HINT} />);
+    expect(text(html).replace('&#x27;', "'")).toBe("Needed when another supplier quoted less, or there's no exchange rate to compare.");
+    expect(html.match(/aria-describedby="([^"]+)"/)?.[1]).toBe(html.match(/<span id="([^"]+)"/)?.[1]);
+    expect(renderToStaticMarkup(<RfqReasonInput value="" onChange={() => {}} />)).not.toContain('aria-describedby');
+  });
+});
+
+describe('Split between suppliers on Compare quotes', () => {
+  const rfq = (id: string, supplier_name: string, over: Partial<RfqDetail>): RfqDetail => ({
+    ...row({ id, rfq_no: `RFQ-${id}`, supplier_name, status: 'quoted' }),
+    subtotal: 0,
+    sst_total: 0,
+    notes: null,
+    quoted_at: '2026-10-02T09:00:00Z',
+    lines: [],
+    ...over,
+  });
+  const line = { id: 'l', product_id: null, description: 'Paper', quantity: 10, uom: null, pack_size: null, unit_price: 12, sst_rate: 0 };
+  const group = (second: Partial<RfqDetail> = {}) => [
+    rfq('1', 'Kopi Hulu Supplies', { lines: [{ ...line, id: 'a1' }] }),
+    rfq('2', 'Biji Segar', { lines: [{ ...line, id: 'b1', unit_price: 9 }], ...second }),
+  ];
+  const render = (rfqs: RfqDetail[], withAward = true) =>
+    text(renderToStaticMarkup(<RfqCompareCard rfqs={rfqs} award={withAward ? actions.award : undefined} onConverted={() => {}} onAwarded={() => {}} onClose={() => {}} />));
+
+  it('is offered beside Close to a person who may make orders, and starts off, with nothing to choose', () => {
+    const html = render(group());
+    expect(html).toContain('Split between suppliers Close');
+    expect(html).not.toContain('Choose');
+    expect(html).not.toContain('Chosen');
+  });
+  it('is not offered without the action, or when every quoted RFQ has an order already', () => {
+    expect(render(group(), false)).not.toContain('Split between suppliers');
+    const ordered = [
+      rfq('1', 'Kopi Hulu Supplies', { purchase_order_id: 'po-1', purchase_order_no: 'PO-1', lines: [{ ...line, id: 'a1' }] }),
+      rfq('2', 'Biji Segar', { purchase_order_id: 'po-2', purchase_order_no: 'PO-2', lines: [{ ...line, id: 'b1' }] }),
+    ];
+    expect(render(ordered)).not.toContain('Split between suppliers');
   });
 });

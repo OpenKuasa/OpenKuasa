@@ -278,6 +278,10 @@ export type DocumentFormKind<F extends DocumentFormState> = {
     inputMode?: 'numeric' | 'text';
     /** A short line under the box, read with it. */
     hint?: string;
+    /** Text boxes hold up to 500 characters unless this says fewer. */
+    maxLength?: number;
+    /** Drawn only while this is true of the form; absent, always. */
+    show?: (form: F) => boolean;
     get: (form: F) => string;
     set: (form: F, value: string) => F;
   }[];

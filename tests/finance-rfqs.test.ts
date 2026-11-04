@@ -2,6 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   RFQ_MESSAGES,
   RFQ_PAGE_SIZE,
+  awardRfqLines,
+  awardRfqLinesInput,
   closeRfq,
   convertRfq,
   deleteRfq,
@@ -321,6 +323,58 @@ describe('convertRfq', () => {
     }
     const { ctx } = fakeFinance({ data: null, error: { code: 'XX000' } });
     expect(await convertRfq(ctx, { id: ID })).toEqual({ ok: false, error: 'That change could not be saved. Please try again.' });
+    expect(logged).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('awardRfqLines', () => {
+  const PO = '88888888-8888-4888-8888-888888888888';
+  const OTHER = '99999999-9999-4999-8999-999999999999';
+  it('splits through the database function, in the caller’s workspace, and answers with the orders in the order given', async () => {
+    const { ctx, calls } = fakeFinance({ data: [PO, OTHER], error: null });
+    const awards = [{ rfq_id: ID, line_ids: [LINE] }, { rfq_id: SUPPLIER, line_ids: [LINE] }];
+    expect(await awardRfqLines(ctx, { awards })).toEqual({ ok: true, data: { purchase_order_ids: [PO, OTHER] } });
+    expect(calls[0]).toMatchObject({ kind: 'rpc', name: 'finance_award_rfq_lines' });
+    expect(calls[0].args).toEqual({ target_org: 'org-1', awards });
+  });
+  it('sends each reason trimmed, and leaves it out when blank', async () => {
+    const { ctx, calls } = fakeFinance({ data: [PO], error: null });
+    await awardRfqLines(ctx, { awards: [{ rfq_id: ID, line_ids: [LINE], reason: '  Delivers next day ' }] });
+    expect(calls[0].args).toEqual({ target_org: 'org-1', awards: [{ rfq_id: ID, line_ids: [LINE], reason: 'Delivers next day' }] });
+    for (const reason of ['', '   ', null, undefined]) {
+      await awardRfqLines(ctx, { awards: [{ rfq_id: ID, line_ids: [LINE], reason }] });
+      expect(calls[calls.length - 1].args, String(reason)).toEqual({ target_org: 'org-1', awards: [{ rfq_id: ID, line_ids: [LINE] }] });
+    }
+  });
+  it('refuses nothing to order, an award with no line, a bad id and a long reason before calling the database', async () => {
+    const { ctx, calls } = fakeFinance({ data: [PO], error: null });
+    const message = (awards: unknown) => awardRfqLinesInput.safeParse({ awards }).error?.issues[0]?.message;
+    expect(message([])).toBe(RFQ_MESSAGES.badAward);
+    expect(message([{ rfq_id: ID, line_ids: [] }])).toBe(RFQ_MESSAGES.badAward);
+    expect(message([{ rfq_id: 'nope', line_ids: [LINE] }])).toBe(RFQ_MESSAGES.badAward);
+    expect(message([{ rfq_id: ID, line_ids: [LINE], reason: 'x'.repeat(201) }])).toBe('That is too long. Keep it to 200 characters or fewer.');
+    await expect(awardRfqLines(ctx, { awards: [] })).rejects.toThrow();
+    expect(calls).toEqual([]);
+  });
+  it('says a reason is needed for FIN75, and that the choices do not hold for FIN76', async () => {
+    const input = { awards: [{ rfq_id: ID, line_ids: [LINE] }] };
+    expect(await awardRfqLines(fakeFinance({ data: null, error: { code: 'FIN75' } }).ctx, input)).toEqual({ ok: false, error: RFQ_MESSAGES.needsReason });
+    expect(await awardRfqLines(fakeFinance({ data: null, error: { code: 'FIN76' } }).ctx, input)).toEqual({
+      ok: false,
+      error: "These choices can't be ordered as they are. Read the quotes again and choose again.",
+    });
+  });
+  it('says the RFQ already has an order for FIN22 and for a unique-key clash, and uses the RFQ sentences for the rest', async () => {
+    const input = { awards: [{ rfq_id: ID, line_ids: [LINE] }] };
+    for (const code of ['FIN22', '23505']) {
+      expect(await awardRfqLines(fakeFinance({ data: null, error: { code } }).ctx, input), code).toEqual({ ok: false, error: RFQ_MESSAGES.hasOrder });
+    }
+    expect(await awardRfqLines(fakeFinance({ data: null, error: { code: 'FIN01' } }).ctx, input)).toEqual({ ok: false, error: RFQ_MESSAGES.locked });
+    expect(await awardRfqLines(fakeFinance({ data: null, error: { code: 'FIN11' } }).ctx, input)).toEqual({ ok: false, error: RFQ_MESSAGES.gone });
+    expect(await awardRfqLines(fakeFinance({ data: null, error: { code: 'XX000' } }).ctx, input)).toEqual({
+      ok: false,
+      error: 'That change could not be saved. Please try again.',
+    });
     expect(logged).toHaveBeenCalledTimes(1);
   });
 });

@@ -1,6 +1,20 @@
 import { describe, expect, it } from 'vitest';
-import { comparableRfqIds, compareQuotes, orderableRfq, rfqCopyCount, rfqDeleteWarning, rfqGroupId } from '@/lib/finance/rfq-compare';
+import {
+  cellNeedsReason,
+  comparableRfqIds,
+  compareQuotes,
+  orderableRfq,
+  rfqCopyCount,
+  rfqDeleteWarning,
+  rfqGroupId,
+  splitPlan,
+  splitAwards,
+  splitReasonHint,
+  startingChoice,
+  toggleChoice,
+} from '@/lib/finance/rfq-compare';
 import type { RfqDetail, RfqLine, RfqListRow } from '@/lib/finance/rfqs';
+import type { SplitOrder } from '@/lib/finance/rfq-compare';
 
 const row = (id: string, over: Partial<RfqListRow> = {}): RfqListRow => ({
   id,
@@ -216,5 +230,158 @@ describe('compareQuotes', () => {
     const [paper] = compareQuotes([rfq('a', [line('Paper', 12.345, { quantity: 3, sst_rate: 6 })])]);
     // 3 x 12.345 = 37.035 -> 37.04; SST 2.2221 -> 2.22.
     expect(paper.cells[0]?.total).toBe(39.26);
+  });
+});
+
+describe('line ids', () => {
+  it('are threaded to each cell, so a choice is an RFQ and one of its lines', () => {
+    const a = rfq('a', [line('Paper', 12), line('Toner', 80)]);
+    const b = rfq('b', [line('Toner', 70)]);
+    const [paper, toner] = compareQuotes([a, b]);
+    expect(paper.cells.map((c) => c?.line_id ?? null)).toEqual([a.lines[0].id, null]);
+    expect(toner.cells.map((c) => c?.line_id)).toEqual([a.lines[1].id, b.lines[0].id]);
+  });
+});
+
+describe('where choosing starts', () => {
+  const start = (rfqs: RfqDetail[]) => {
+    const rows = compareQuotes(rfqs);
+    return rows.map((r) => rfqs.findIndex((x) => x.id === startingChoice(rows, rfqs)[r.key]));
+  };
+
+  it('is the one supplier marked lowest on a row', () => {
+    expect(start([rfq('a', [line('Paper', 12), line('Toner', 70)]), rfq('b', [line('Paper', 11), line('Toner', 80)])])).toEqual([1, 0]);
+  });
+  it('is nobody on a tie, as every tied cell is marked', () => {
+    expect(start([rfq('a', [line('Paper', 12)]), rfq('b', [line('Paper', 12)]), rfq('c', [line('Paper', 13)])])).toEqual([-1]);
+  });
+  it('is nobody when the lowest supplier already has an order', () => {
+    expect(start([rfq('a', [line('Paper', 12)]), rfq('b', [line('Paper', 11)], { purchase_order_id: 'po-1' })])).toEqual([-1]);
+  });
+  it('is the only supplier who quoted a row, when that RFQ can be ordered', () => {
+    expect(start([rfq('a', [line('Paper', 12), line('Toner', 80)]), rfq('b', [line('Paper', 11)])])).toEqual([1, 0]);
+  });
+  it('is nobody on a row nobody quoted, or where two quoted but only one could be compared', () => {
+    expect(start([rfq('a', [line('Paper', 12)]), rfq('b', [line('Stapler', null)], { status: 'sent', quoted_at: null })])).toEqual([0, -1]);
+    const usd = { currency: 'USD', fx_rate: null, fx_rate_text: null };
+    expect(start([rfq('a', [line('Paper', 12)]), rfq('b', [line('Paper', 3)], usd)])).toEqual([-1]);
+  });
+});
+
+describe('choosing a line', () => {
+  it('moves a row to the supplier chosen last, and clears it when chosen again', () => {
+    const one = toggleChoice({ r1: 'a' }, 'r1', 'b');
+    expect(one).toEqual({ r1: 'b' });
+    expect(toggleChoice(one, 'r1', 'b')).toEqual({});
+    expect(toggleChoice({ r1: 'a' }, 'r2', 'a')).toEqual({ r1: 'a', r2: 'a' });
+  });
+});
+
+describe('what a reason is needed for', () => {
+  const usd = (over: Partial<RfqDetail> = {}) => ({ currency: 'USD', fx_rate: 4, fx_rate_text: '4.0000000000', ...over });
+  const needs = (rfqs: RfqDetail[]) => {
+    const [row] = compareQuotes(rfqs);
+    const mixed = new Set(rfqs.map((r) => r.currency)).size > 1;
+    return rfqs.map((_, i) => cellNeedsReason(row, i, mixed));
+  };
+
+  it('is a strictly lower price from another supplier, SST included', () => {
+    expect(needs([rfq('a', [line('Paper', 12)]), rfq('b', [line('Paper', 11)]), rfq('c', [line('Paper', 13)])])).toEqual(['lower', null, 'lower']);
+    expect(needs([rfq('a', [line('Paper', 10, { sst_rate: 10 })]), rfq('b', [line('Paper', 10.5)])])).toEqual(['lower', null]);
+  });
+  it('is nothing on a tie, or a row only one supplier quoted', () => {
+    expect(needs([rfq('a', [line('Paper', 12)]), rfq('b', [line('Paper', 12)])])).toEqual([null, null]);
+    expect(needs([rfq('a', [line('Paper', 12)]), rfq('b', [line('Stapler', 1)])])).toEqual([null, null]);
+  });
+  it('is nothing for a supplier that did not answer, or whose price is the buyer’s own', () => {
+    expect(needs([rfq('a', [line('Paper', 12)]), rfq('b', [line('Paper', 5)], { status: 'sent', quoted_at: null })])).toEqual([null, null]);
+  });
+  it('is no exchange rate to compare by, in quotes of several currencies, when another supplier quoted the row', () => {
+    const noRate = usd({ fx_rate: null, fx_rate_text: null });
+    expect(needs([rfq('a', [line('Paper', 12)]), rfq('b', [line('Paper', 1)], noRate)])).toEqual([null, 'no_rate']);
+    // With nobody to compare it with it needs none; a foreign quote with a rate is compared like any other.
+    expect(needs([rfq('a', [line('Stapler', 12)]), rfq('b', [line('Paper', 1)], noRate)])).toEqual([null, null]);
+    expect(needs([rfq('a', [line('Paper', 12)]), rfq('b', [line('Paper', 2)], usd())])).toEqual(['lower', null]);
+  });
+});
+
+describe('splitPlan', () => {
+  const choice = (rfqs: RfqDetail[], picks: Record<string, string>) => {
+    const rows = compareQuotes(rfqs);
+    return splitPlan(rfqs, rows, Object.fromEntries(rows.flatMap((r) => (picks[r.description] ? [[r.key, picks[r.description]]] : []))));
+  };
+
+  it('adds up the lines chosen in the one currency, one order per supplier, and counts what is left out', () => {
+    const rfqs = [
+      rfq('a', [line('Paper', 12, { quantity: 10 }), line('Toner', 80, { quantity: 1 }), line('Pens', 2, { quantity: 5 })]),
+      rfq('b', [line('Paper', 11, { quantity: 10 }), line('Toner', 80, { quantity: 1 })]),
+      rfq('c', [line('Stapler', null)], { status: 'sent', quoted_at: null }),
+    ];
+    const plan = choice(rfqs, { Paper: 'b', Pens: 'a' });
+    expect(plan.mixed).toBe(false);
+    expect(plan.currency).toBe('MYR');
+    expect(plan.orders.map((o) => [o.rfq.id, o.lines.length, o.quoted, o.sen])).toEqual([['a', 1, 3, 1000], ['b', 1, 2, 11000]]);
+    expect(plan.totalSen).toBe(12000);
+    expect(Object.values(plan.rowSen)).toEqual([11000, 1000]);
+    // Toner was quoted twice and not chosen; Stapler was quoted by nobody; Paper at b is the lowest, Pens has no rival.
+    expect([plan.notChosen, plan.noQuote, plan.unrated]).toEqual([1, 1, 0]);
+    expect(plan.orders.map((o) => [o.lower, o.noRate])).toEqual([[[], []], [[], []]]);
+  });
+  it('lists the items that need a reason, by order', () => {
+    const rfqs = [rfq('a', [line('Paper', 12), line('Toner', 80)]), rfq('b', [line('Paper', 11), line('Toner', 90)])];
+    const plan = choice(rfqs, { Paper: 'a', Toner: 'a' });
+    expect(plan.orders).toHaveLength(1);
+    expect(plan.orders[0].lower).toEqual(['Paper']);
+  });
+  it('ignores a choice for an RFQ that can no longer be ordered, or whose line is gone', () => {
+    const rfqs = [rfq('a', [line('Paper', 12)]), rfq('b', [line('Paper', 11)], { purchase_order_id: 'po-1' })];
+    const plan = choice(rfqs, { Paper: 'b' });
+    expect(plan.orders).toEqual([]);
+    expect(plan.notChosen).toBe(1);
+    expect(splitPlan(rfqs, compareQuotes(rfqs), { nope: 'a' }).orders).toEqual([]);
+  });
+  it('puts quotes of several currencies into ringgit at each RFQ’s rate, leaves out a line with no rate, and says how many', () => {
+    const rfqs = [
+      rfq('a', [line('Pump', 100, { quantity: 1 }), line('Fan', 3, { quantity: 5 })]),
+      rfq('b', [line('Pump', 20, { quantity: 1 }), line('Fan', 0.8, { quantity: 5 })], { currency: 'USD', fx_rate: 4, fx_rate_text: '4.0000000000' }),
+      rfq('c', [line('Pump', 10, { quantity: 1 }), line('Fan', 1, { quantity: 5 })], { currency: 'USD', fx_rate: null, fx_rate_text: null }),
+    ];
+    const plan = choice(rfqs, { Pump: 'b', Fan: 'c' });
+    expect(plan.mixed).toBe(true);
+    expect(plan.currency).toBe('MYR');
+    // Pump at b: USD 20.00 x 4 = RM 80.00. Fan at c is USD 5.00, which cannot be put into ringgit.
+    expect(Object.entries(plan.rowSen).map(([, sen]) => sen)).toEqual([8000, null]);
+    expect(plan.totalSen).toBe(8000);
+    expect(plan.unrated).toBe(1);
+    // Each order is in its own currency.
+    expect(plan.orders.map((o) => [o.rfq.id, o.sen, o.lower, o.noRate])).toEqual([['b', 2000, [], []], ['c', 500, [], ['Fan']]]);
+  });
+  it('rounds each line’s ringgit to the sen', () => {
+    const rfqs = [
+      rfq('a', [line('Pump', 1)]),
+      rfq('b', [line('Pump', 3.3, { quantity: 1 })], { currency: 'USD', fx_rate: 4.1234, fx_rate_text: '4.1234000000' }),
+    ];
+    // USD 3.30 x 4.1234 = RM 13.607 -> 13.61.
+    expect(choice(rfqs, { Pump: 'b' }).totalSen).toBe(1361);
+  });
+});
+
+describe('what a split sends and says', () => {
+  it('starts nothing chosen once any RFQ of the request has an order', () => {
+    const ordered: RfqDetail = { ...rfq('a', [line('Paper', 1)]), purchase_order_id: 'po-1' };
+    const open = rfq('b', [line('Paper', 2)]);
+    expect(startingChoice(compareQuotes([open, ordered]), [open, ordered])).toEqual({});
+  });
+  it('sends each order with its lines and the reason typed for it', () => {
+    const rfq = { id: 'r1' } as RfqDetail;
+    const lines = [{ cell: { line_id: 'l1' } }, { cell: { line_id: 'l2' } }] as SplitOrder['lines'];
+    expect(splitAwards({ orders: [{ rfq, lines } as SplitOrder] }, { r1: 'Faster' })).toEqual([{ rfq_id: 'r1', line_ids: ['l1', 'l2'], reason: 'Faster' }]);
+  });
+  it('names the items that need a reason, and is null when none do', () => {
+    expect(splitReasonHint({ lower: [], noRate: [] })).toBeNull();
+    expect(splitReasonHint({ lower: ['Paper'], noRate: [] })).toBe('Needs a reason: Paper has a lower quote.');
+    expect(splitReasonHint({ lower: ['Paper', 'Toner'], noRate: ['Saw'] })).toBe(
+      'Needs a reason: Paper, Toner have a lower quote. Saw has no exchange rate to compare.',
+    );
   });
 });

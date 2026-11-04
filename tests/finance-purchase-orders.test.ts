@@ -16,6 +16,7 @@ import {
   receivePurchaseOrderInput,
   savePurchaseOrder,
   savePurchaseOrderInput,
+  savePurchaseOrderToolInput,
   submitPurchaseOrder,
   withdrawPurchaseOrder,
 } from '@/lib/finance/purchase-orders';
@@ -135,7 +136,7 @@ describe('purchase order reads', () => {
   const row = (n: number, extra: Record<string, unknown> = {}) => ({
     id: `po-${n}`, po_no: `PO-${n}`, supplier_id: 's1', supplier_name: 'Syarikat Kertas', rfq_id: null, rfq_no: null,
     po_date: '2026-10-01', expected_date: '2026-10-20', status: 'approved', created_by: 'u1', submitted_by: 'u1',
-    rejection_reason: null, payment_terms_days: 30, delivery_address: null,
+    rejection_reason: null, payment_terms_days: 30, delivery_address: null, award_reason: null,
     total: '132.50', delivery: 'partial', received_total: '50.00', billed_total: '40.00', over_billed: false, billed_over_received: false,
     currency: 'MYR', fx_rate: '1.0000000000', fx_rate_text: '1.0000000000', fx_rate_source: null, fx_rate_date: null, total_myr: '132.50',
     ...extra,
@@ -155,7 +156,7 @@ describe('purchase order reads', () => {
       order: ['po_date desc', 'id asc'],
       range: [0, PURCHASE_ORDER_PAGE_SIZE - 1],
     });
-    for (const column of ['po_no', 'rfq_no', 'created_by', 'submitted_by', 'payment_terms_days', 'delivery_address', 'received_total', 'billed_over_received']) {
+    for (const column of ['po_no', 'rfq_no', 'created_by', 'submitted_by', 'payment_terms_days', 'delivery_address', 'award_reason', 'received_total', 'billed_over_received']) {
       expect(calls[0].columns, column).toContain(column);
     }
   });
@@ -313,6 +314,70 @@ describe('purchase order writes', () => {
     expect(await savePurchaseOrder(ctx, valid)).toEqual({ ok: false, error: 'That change could not be saved. Please try again.' });
     expect(await closePurchaseOrder(ctx, { id: ID })).toEqual({ ok: false, error: 'That change could not be saved. Please try again.' });
     expect(logged).toHaveBeenCalled();
+  });
+});
+
+describe('why this supplier was chosen', () => {
+  const answerWith = (stored: string | null) =>
+    fakeFinance((call) => {
+      if (call.kind === 'rpc') return { data: ID, error: null };
+      if (call.op === 'select') return { data: call.columns === 'award_reason' ? { award_reason: stored } : { currency: 'MYR' }, error: null };
+      return { data: null, error: null };
+    });
+  const writes = (calls: ReturnType<typeof fakeFinance>['calls']) => calls.filter((c) => c.op === 'rpc' || c.op === 'update');
+
+  it('is trimmed, at most 200 characters, absent when not sent, and null for an empty box', () => {
+    expect(savePurchaseOrderInput.parse({ ...valid, award_reason: '  Delivers next day ' }).award_reason).toBe('Delivers next day');
+    expect(savePurchaseOrderInput.parse({ ...valid, award_reason: '   ' }).award_reason).toBeNull();
+    expect(savePurchaseOrderInput.parse(valid).award_reason).toBeUndefined();
+    expect(first({ ...valid, award_reason: 'x'.repeat(201) })).toBe('That is too long. Keep it to 200 characters or fewer.');
+  });
+  it('is not in what the assistant may send', () => {
+    expect(savePurchaseOrderToolInput.parse({ ...valid, award_reason: 'Delivers next day' })).not.toHaveProperty('award_reason');
+  });
+  it('is written to the order after the save, not sent to the save function', async () => {
+    const { ctx, calls } = answerWith(null);
+    expect(await savePurchaseOrder(ctx, { ...valid, id: ID, award_reason: ' Delivers next day ' })).toEqual({ ok: true, data: { id: ID } });
+    const [save, update] = writes(calls);
+    expect(save).toMatchObject({ kind: 'rpc', name: 'finance_save_purchase_order' });
+    expect(save.args?.purchase_order).not.toHaveProperty('award_reason');
+    expect(update).toMatchObject({ name: 'finance_purchase_orders', op: 'update', values: { award_reason: 'Delivers next day' }, filters: { org_id: 'org-1', id: ID } });
+  });
+  it('is not written again when it has not changed, or when none was sent', async () => {
+    const same = answerWith('Delivers next day');
+    await savePurchaseOrder(same.ctx, { ...valid, id: ID, award_reason: 'Delivers next day' });
+    expect(writes(same.calls).map((c) => c.op)).toEqual(['rpc']);
+    const unsent = answerWith('Delivers next day');
+    await savePurchaseOrder(unsent.ctx, { ...valid, id: ID });
+    expect(writes(unsent.calls).map((c) => c.op)).toEqual(['rpc']);
+    const none = answerWith(null);
+    await savePurchaseOrder(none.ctx, { ...valid, id: ID, award_reason: '' });
+    expect(writes(none.calls).map((c) => c.op)).toEqual(['rpc']);
+  });
+  it('can be changed, but a reason that is set is not taken away, and nothing is saved when it is refused', async () => {
+    const changed = answerWith('Delivers next day');
+    await savePurchaseOrder(changed.ctx, { ...valid, id: ID, award_reason: 'Brand asked for' });
+    expect(writes(changed.calls).map((c) => [c.op, c.values])).toEqual([['rpc', undefined], ['update', { award_reason: 'Brand asked for' }]]);
+    const emptied = answerWith('Delivers next day');
+    expect(await savePurchaseOrder(emptied.ctx, { ...valid, id: ID, award_reason: '  ' })).toEqual({
+      ok: false,
+      error: PURCHASE_ORDER_MESSAGES.reasonKept,
+    });
+    expect(writes(emptied.calls)).toEqual([]);
+  });
+  it('says the same for the database’s own refusal (FIN75), and fails the save when the write is refused', async () => {
+    const racing = fakeFinance((call) => {
+      if (call.kind === 'rpc') return { data: ID, error: null };
+      if (call.op === 'update') return { data: null, error: { code: 'FIN75' } };
+      return { data: call.columns === 'award_reason' ? { award_reason: null } : { currency: 'MYR' }, error: null };
+    });
+    expect(await savePurchaseOrder(racing.ctx, { ...valid, id: ID, award_reason: 'x' })).toEqual({ ok: false, error: PURCHASE_ORDER_MESSAGES.reasonKept });
+    const locked = fakeFinance((call) => {
+      if (call.kind === 'rpc') return { data: ID, error: null };
+      if (call.op === 'update') return { data: null, error: { code: 'FIN01' } };
+      return { data: call.columns === 'award_reason' ? { award_reason: null } : { currency: 'MYR' }, error: null };
+    });
+    expect(await savePurchaseOrder(locked.ctx, { ...valid, id: ID, award_reason: 'x' })).toEqual({ ok: false, error: PURCHASE_ORDER_MESSAGES.locked });
   });
 });
 

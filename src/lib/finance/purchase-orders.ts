@@ -54,6 +54,8 @@ export const PURCHASE_ORDER_MESSAGES = {
   dates: 'The expected delivery date cannot be before the order date.',
   terms: 'Enter payment terms from 0 to 365 days, or leave them empty.',
   address: 'Keep the delivery address to 500 characters or fewer.',
+  // FIN75 on a draft's reason: once set it can be changed, not emptied. (A reason is asked for when an order is made from an RFQ.)
+  reasonKept: 'Say why this supplier was chosen. A reason that is set can be changed, but not taken away.',
   lines: LINE_MESSAGES.lines,
   tooManyLines: `A purchase order can have at most ${PURCHASE_ORDER_LINES_MAX} lines.`,
   description: LINE_MESSAGES.description,
@@ -128,6 +130,11 @@ const savePurchaseOrderBase = z
     expected_date: expectedDate.default(null),
     payment_terms_days: paymentTerms.default(null),
     delivery_address: deliveryAddress.default(null),
+    /**
+     * Why this supplier was chosen, on an order made from an RFQ. Absent leaves it as it is; a reason changes it; null
+     * (an empty box) is refused where one is set. Only the form sends it, so the assistant's input below omits it.
+     */
+    award_reason: optionalText.optional(),
     notes: optionalText.default(null),
     lines: z.array(documentLine, { error: M.lines }).min(1, M.lines).max(PURCHASE_ORDER_LINES_MAX, M.tooManyLines),
     // The four below travel together and are all optional, with no default, as a quotation's: a caller that sends
@@ -164,7 +171,7 @@ export const savePurchaseOrderInput = savePurchaseOrderBase
  * so those keys are not in the schema the model sees and a call that carries them has them stripped.
  */
 export const savePurchaseOrderToolInput = savePurchaseOrderBase
-  .omit({ currency: true, fx_rate: true, fx_rate_source: true, fx_rate_date: true })
+  .omit({ currency: true, fx_rate: true, fx_rate_source: true, fx_rate_date: true, award_reason: true })
   .refine(expectedNotBefore, { message: M.dates, path: ['expected_date'] });
 
 export const purchaseOrderIdInput = z.object({ id: orderId });
@@ -209,6 +216,7 @@ const REFUSALS: Record<string, string> = {
   FIN21: M.billFailed,
   FIN38: M.rateBeforeSubmitting,
   FIN39: M.notBnmRate,
+  FIN75: M.reasonKept,
   [PG_UNIQUE]: M.numberTaken,
   [PG_FOREIGN_KEY]: M.missing,
   [PG_FORBIDDEN]: NOT_ALLOWED,
@@ -254,6 +262,8 @@ export type PurchaseOrderListRow = {
   rejection_reason: string | null;
   payment_terms_days: number | null;
   delivery_address: string | null;
+  /** Why this supplier was chosen, when the order was made from an RFQ and a reason was given. */
+  award_reason: string | null;
   total: number;
   delivery: PurchaseOrderDelivery;
   /** What has arrived, at the order's prices and SST. */
@@ -295,7 +305,7 @@ export type PurchaseOrderDetail = PurchaseOrderListRow & {
 export type SaveAndSubmitPurchaseOrderResult = FinResult<{ id: string; po_no: string }> & { draftId?: string };
 
 const LIST_COLUMNS =
-  'id,po_no,supplier_id,supplier_name,rfq_id,rfq_no,po_date,expected_date,status,created_by,submitted_by,rejection_reason,payment_terms_days,delivery_address,total,delivery,received_total,billed_total,over_billed,billed_over_received,' +
+  'id,po_no,supplier_id,supplier_name,rfq_id,rfq_no,po_date,expected_date,status,created_by,submitted_by,rejection_reason,payment_terms_days,delivery_address,award_reason,total,delivery,received_total,billed_total,over_billed,billed_over_received,' +
   // The rate twice: as a number to show, and as exact text (PostgREST's cast) to work money from.
   'currency,fx_rate,fx_rate_text:fx_rate::text,fx_rate_source,fx_rate_date,total_myr';
 
@@ -307,6 +317,7 @@ function toListRow(row: Record<string, unknown>): PurchaseOrderListRow {
     ...(row as unknown as PurchaseOrderListRow),
     // A null is not 0 days: Number(null) would say so.
     payment_terms_days: row.payment_terms_days === null || row.payment_terms_days === undefined ? null : Number(row.payment_terms_days),
+    award_reason: (row.award_reason as string | null | undefined) ?? null,
     total: Number(row.total),
     received_total: Number(row.received_total),
     billed_total: Number(row.billed_total),
@@ -419,7 +430,7 @@ export async function savePurchaseOrder(
   ctx: FinanceWriteContext,
   input: z.input<typeof savePurchaseOrderInput>,
 ): Promise<FinResult<{ id: string }>> {
-  const { lines, ...purchase_order } = savePurchaseOrderInput.parse(input);
+  const { lines, award_reason, ...purchase_order } = savePurchaseOrderInput.parse(input);
   // No currency sent for an existing draft: it keeps its own, so the whole-units rule is its own too.
   if (purchase_order.id && purchase_order.currency === undefined) {
     const stored = await storedCurrency(ctx, purchase_order.id);
@@ -427,13 +438,42 @@ export async function savePurchaseOrder(
     const problem = stored.data ? wholeUnitsError(stored.data, lines) : null;
     if (problem) return { ok: false, error: problem };
   }
+  // The reason is a column of its own, not the save function's. A reason that is set cannot be emptied: said before
+  // anything is saved, so the refusal leaves the draft as it was.
+  let stored: string | null = null;
+  if (award_reason !== undefined && purchase_order.id) {
+    const read = await storedAwardReason(ctx, purchase_order.id);
+    if (!read.ok) return read;
+    stored = read.data;
+    if (award_reason === null && stored !== null) return { ok: false, error: M.reasonKept };
+  }
   const { data, error } = await ctx.client.rpc('finance_save_purchase_order', {
     target_org: ctx.orgId,
     purchase_order,
     lines,
   });
   if (error || !data) return orderWriteFailed('savePurchaseOrder', error);
+  if (award_reason && award_reason !== stored) {
+    const { error: reasonError } = await ctx.client
+      .from('finance_purchase_orders')
+      .update({ award_reason })
+      .eq('org_id', ctx.orgId)
+      .eq('id', data as string);
+    if (reasonError) return orderWriteFailed('savePurchaseOrder', reasonError);
+  }
   return { ok: true, data: { id: data as string } };
+}
+
+/** The reason an order was made for this supplier; null when it has none or is not there (the save then says so). */
+async function storedAwardReason(ctx: FinanceWriteContext, id: string): Promise<FinResult<string | null>> {
+  const { data, error } = await ctx.client
+    .from('finance_purchase_orders')
+    .select('award_reason')
+    .eq('org_id', ctx.orgId)
+    .eq('id', id)
+    .maybeSingle();
+  if (error) return orderWriteFailed('savePurchaseOrder', error);
+  return { ok: true, data: (data as { award_reason?: string | null } | null)?.award_reason ?? null };
 }
 
 /** The currency an order is stored in; null when it is not there (the save then says so). */

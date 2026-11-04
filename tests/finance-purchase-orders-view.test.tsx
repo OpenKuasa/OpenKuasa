@@ -68,6 +68,7 @@ const row = (over: Partial<PurchaseOrderListRow> = {}): PurchaseOrderListRow => 
   rejection_reason: null,
   payment_terms_days: 30,
   delivery_address: null,
+  award_reason: null,
   total: 1000,
   delivery: 'pending',
   received_total: 0,
@@ -257,6 +258,38 @@ describe('the approve card', () => {
     expect(t).toContain('at RM 12.3456');
     expect(t).not.toContain('Subtotal');
     expect(t).toContain('Total RM 12.35');
+  });
+});
+
+describe('why this supplier was chosen', () => {
+  const reasoned: PurchaseOrderDetail = { ...pending, rfq_id: 'rfq-1', rfq_no: 'RFQ-0003', award_reason: 'Delivers next day' };
+
+  it('is shown on the Approve card, the Reject card and the order a link asked for, under the totals', () => {
+    const views = [
+      renderToStaticMarkup(<PurchaseOrderApproveCard order={reasoned} decide={actions.decide} onClose={() => {}} />),
+      renderToStaticMarkup(<PurchaseOrderRejectCard order={reasoned} decide={actions.decide} onClose={() => {}} />),
+      renderToStaticMarkup(<PurchaseOrdersView rows={[row()]} openedOrder={reasoned} writer={writerFor(admin)} />),
+    ];
+    for (const html of views) {
+      const t = text(html);
+      expect(t).toContain('Why this supplier: Delivers next day');
+      expect(t.indexOf('Total RM 924.00')).toBeLessThan(t.indexOf('Why this supplier'));
+    }
+  });
+  it('is left out when the order has none', () => {
+    expect(text(renderToStaticMarkup(<PurchaseOrderApproveCard order={pending} decide={actions.decide} onClose={() => {}} />))).not.toContain('Why this supplier');
+  });
+  it('has a box on the draft’s form only when the order was made from an RFQ', () => {
+    const draft = { ...pending, status: 'draft' as const, po_no: null };
+    const form = (order: PurchaseOrderDetail) =>
+      renderToStaticMarkup(
+        <PurchaseOrderFormCard editing={order} suppliers={[]} products={[]} today="2026-10-10" actions={actions} onClose={() => {}} />,
+      );
+    const made = form({ ...draft, rfq_id: 'rfq-1', award_reason: 'Delivers next day' });
+    expect(text(made)).toContain('Why this supplier');
+    expect(made).toContain('value="Delivers next day"');
+    expect(made).toContain('maxLength="200"');
+    expect(text(form(draft))).not.toContain('Why this supplier');
   });
 });
 

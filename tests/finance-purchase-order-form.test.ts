@@ -41,7 +41,7 @@ describe('a new purchase order form', () => {
   it('is dated today, with no expected date, no terms, no address, no supplier and one empty line', () => {
     expect(newPurchaseOrderForm(today, 'k1')).toEqual({
       supplier_id: '', po_date: today, expected_date: '', payment_terms_days: '', termsEdited: false,
-      delivery_address: '', notes: '', lines: [emptyLine('k1')], fx: ringgitFields(),
+      delivery_address: '', rfq_id: null, award_reason: '', notes: '', lines: [emptyLine('k1')], fx: ringgitFields(),
     });
   });
 });
@@ -64,7 +64,7 @@ describe('a saved draft, as the form shows it', () => {
   const detail = {
     id: PO, po_no: null, supplier_id: SUPPLIER, supplier_name: 'Syarikat Kertas', rfq_id: null, rfq_no: null,
     po_date: '2026-10-01', expected_date: null, status: 'draft', created_by: 'u1', submitted_by: null, rejection_reason: null,
-    payment_terms_days: null, delivery_address: 'Lot 3, Shah Alam', total: 0, delivery: 'pending', received_total: 0,
+    payment_terms_days: null, delivery_address: 'Lot 3, Shah Alam', award_reason: null, total: 0, delivery: 'pending', received_total: 0,
     billed_total: 0, over_billed: false, billed_over_received: false, subtotal: 0, sst_total: 0, notes: null,
     currency: 'MYR', fx_rate: 1, fx_rate_text: '1.0000000000', fx_rate_source: null, fx_rate_date: null, total_myr: 0,
     lines: [
@@ -74,12 +74,17 @@ describe('a saved draft, as the form shows it', () => {
   it('shows the saved terms as they are, as set by hand, and an empty box for none', () => {
     expect(purchaseOrderFormFromDetail(detail)).toEqual({
       id: PO, supplier_id: SUPPLIER, po_date: '2026-10-01', expected_date: '', payment_terms_days: '', termsEdited: true,
-      delivery_address: 'Lot 3, Shah Alam', notes: '',
+      delivery_address: 'Lot 3, Shah Alam', rfq_id: null, award_reason: '', notes: '',
       lines: [{ key: LINE_1, product_id: PRODUCT, description: 'Printer paper', quantity: '5', uom: 'ream', pack_size: 'box of 5', unit_price: '12.5', sst_rate: '6', discount_pct: '', discount_amount: '' }],
       fx: ringgitFields(),
     });
     expect(purchaseOrderFormFromDetail({ ...detail, payment_terms_days: 0, expected_date: '2026-10-20' })).toMatchObject({
       payment_terms_days: '0', expected_date: '2026-10-20',
+    });
+  });
+  it('carries the RFQ it was made from and the reason given for its supplier', () => {
+    expect(purchaseOrderFormFromDetail({ ...detail, rfq_id: 'rfq-1', award_reason: 'Delivers next day' })).toMatchObject({
+      rfq_id: 'rfq-1', award_reason: 'Delivers next day',
     });
   });
 });
@@ -173,11 +178,28 @@ describe('the purchase order form, as the shared card draws it', () => {
   });
   it('draws payment terms and delivery address after the dates', () => {
     const extras = PURCHASE_ORDER_FORM_KIND.extras!;
-    expect(extras.map((e) => e.label)).toEqual(['Payment terms (days)', 'Delivery address (optional)']);
+    expect(extras.map((e) => e.label)).toEqual(['Payment terms (days)', 'Delivery address (optional)', 'Why this supplier']);
     expect(extras[0].inputMode).toBe('numeric');
     expect(extras[0].get(filled())).toBe('30');
     expect(extras[1].get(filled({ delivery_address: 'Lot 3' }))).toBe('Lot 3');
     expect(extras[1].set(filled(), 'Lot 9')).toMatchObject({ delivery_address: 'Lot 9' });
+  });
+  it('draws "Why this supplier" only on an order made from an RFQ, as a box of at most 200 characters', () => {
+    const why = PURCHASE_ORDER_FORM_KIND.extras![2];
+    expect(why.show!(filled())).toBe(false);
+    expect(why.show!(filled({ rfq_id: 'rfq-1' }))).toBe(true);
+    expect(why.maxLength).toBe(200);
+    expect(why.get(filled({ rfq_id: 'rfq-1', award_reason: 'Delivers next day' }))).toBe('Delivers next day');
+    expect(why.set(filled({ rfq_id: 'rfq-1' }), 'Brand asked for')).toMatchObject({ award_reason: 'Brand asked for' });
+    // The other boxes are always drawn.
+    expect(PURCHASE_ORDER_FORM_KIND.extras!.slice(0, 2).every((e) => e.show === undefined)).toBe(true);
+  });
+  it('sends the reason only for an order made from an RFQ, and an emptied box as empty', () => {
+    expect(purchaseOrderPayload(filled())).not.toHaveProperty('award_reason');
+    expect(purchaseOrderPayload(filled({ rfq_id: 'rfq-1', award_reason: 'Delivers next day' }))).toMatchObject({ award_reason: 'Delivers next day' });
+    expect(purchaseOrderPayload(filled({ rfq_id: 'rfq-1', award_reason: '' }))).toMatchObject({ award_reason: '' });
+    expect(purchaseOrderFormError(filled({ rfq_id: 'rfq-1', award_reason: 'x'.repeat(201) }))).toBe('That is too long. Keep it to 200 characters or fewer.');
+    expect(purchaseOrderFormError(filled({ rfq_id: 'rfq-1', award_reason: 'Delivers next day' }))).toBeNull();
   });
   it('is the form’s own rules, not a second set', () => {
     expect(PURCHASE_ORDER_FORM_KIND.withProduct).toBe(withOrderProduct);

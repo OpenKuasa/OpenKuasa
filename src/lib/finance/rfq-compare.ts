@@ -3,8 +3,8 @@
  * makes a group: the first RFQ, and every RFQ that names it as its source (a
  * copy of a copy names the first too). Compare quotes lays a group's lines out
  * as rows and its suppliers as columns, and marks the lowest price on each
- * line. It marks figures only: the cheapest is not always the supplier chosen
- * (delivery time, past service), so the choice is the person's. Pure.
+ * line. The cheapest is not always the supplier chosen (delivery time, past
+ * service), so the choice is the person's: a split only starts on the lowest. Pure.
  *
  * Quotes may be in different currencies (stage 4p). Each is shown in its own
  * currency; what is compared is ringgit, at each RFQ's own indicative rate.
@@ -67,6 +67,8 @@ export function orderableRfq(rfqs: RfqDetail[], id: string | null): RfqDetail | 
 
 /** One supplier's answer on one line. */
 export type QuoteCell = {
+  /** The RFQ line this answers: what Split between suppliers chooses. */
+  line_id: string;
   quantity: number;
   /** null until the supplier's answer is recorded: a price typed on the RFQ before then is not a quote. */
   unit_price: number | null;
@@ -75,6 +77,11 @@ export type QuoteCell = {
   total: number | null;
   /** The lowest unit price on this line, SST included. Every supplier tied at the lowest is marked. */
   lowest: boolean;
+  /**
+   * What one unit costs in the terms `lowest` compares by (see unitCost, in ringgit when the quotes are in several
+   * currencies); null when unpriced, or when its RFQ has no exchange rate to put it into ringgit.
+   */
+  cost: bigint | null;
   /**
    * This supplier's own description of the line, when it is not the row's: lines matched by product
    * can be worded differently, and a substitute is told apart only by its description. null when it
@@ -117,9 +124,11 @@ function unitCost(price: number, rate: number): bigint {
   return BigInt(Math.round(price * 10 ** 4)) * BigInt(Math.round((100 + rate) * 100));
 }
 
+const RATE_SCALE = BigInt(10) ** BigInt(10);
+
 /** One unit of the RFQ's currency in ringgit, in 10^-10 units: exact, from the rate's text; null with no rate. */
 function ringgitPerUnit(rfq: Pick<RfqListRow, 'currency' | 'fx_rate' | 'fx_rate_text'>): bigint | null {
-  if (rfq.currency === BASE_CURRENCY) return BigInt(10) ** BigInt(10);
+  if (rfq.currency === BASE_CURRENCY) return RATE_SCALE;
   if (rfq.fx_rate_text !== null) return scaledFromText(rfq.fx_rate_text) ?? null;
   return rfq.fx_rate === null ? null : (scaledFromText(rfq.fx_rate.toFixed(10)) ?? null);
 }
@@ -194,7 +203,7 @@ export function compareQuotes(rfqs: RfqDetail[]): ComparisonRow[] {
         total = Math.round((amount + sst) * 100) / 100;
       }
       const description = words(line.description) === words(row.description) ? null : line.description;
-      row.cells[column] = { quantity: line.quantity, unit_price, sst_rate: line.sst_rate, total, lowest: false, description };
+      row.cells[column] = { line_id: line.id, quantity: line.quantity, unit_price, sst_rate: line.sst_rate, total, lowest: false, cost: null, description };
     });
   });
 
@@ -206,12 +215,163 @@ export function compareQuotes(rfqs: RfqDetail[]): ComparisonRow[] {
     const priced = row.cells
       .map((c, column) => ({ c, rate: perUnit[column] }))
       .filter((p): p is { c: QuoteCell & { unit_price: number }; rate: bigint } => p.c !== null && p.c.unit_price !== null && p.rate !== null);
-    if (priced.length < 2) continue;
     const costs = priced.map(({ c, rate }) => unitCost(c.unit_price, c.sst_rate) * rate);
+    priced.forEach(({ c }, i) => {
+      c.cost = costs[i];
+    });
+    if (priced.length < 2) continue;
     const lowest = costs.reduce((a, b) => (b < a ? b : a));
     priced.forEach(({ c }, i) => {
       c.lowest = costs[i] === lowest;
     });
   }
   return [...rows.values()];
+}
+
+/* ---- splitting between suppliers ---------------------------------------- */
+
+/** The line chosen for each row: the row's key, then the id of the RFQ whose answer it is. A row not in it is not ordered. */
+export type SplitChoice = Record<string, string>;
+
+/** Chooses an RFQ's answer for a row, taking the row from whichever had it; choosing the same again clears the row. */
+export function toggleChoice(choice: SplitChoice, key: string, rfqId: string): SplitChoice {
+  const { [key]: current, ...rest } = choice;
+  return current === rfqId ? rest : { ...rest, [key]: rfqId };
+}
+
+/**
+ * Where choosing starts. A row starts on the one supplier marked lowest on it or, when no price is marked, the one
+ * supplier who quoted it. A tie marks every tied cell, so a tie starts on none, as does a row nobody quoted: those are
+ * the person's to decide. With an order already made from the request nothing starts chosen: this screen can't tell
+ * which lines that order holds, and the database doesn't stop a row being ordered twice across separate splits.
+ */
+export function startingChoice(rows: ComparisonRow[], rfqs: RfqDetail[]): SplitChoice {
+  const choice: SplitChoice = {};
+  if (rfqs.some((r) => r.purchase_order_id !== null)) return choice;
+  for (const row of rows) {
+    const quoted = row.cells.flatMap((c, i) => (c && c.unit_price !== null ? [i] : []));
+    const lowest = quoted.filter((i) => row.cells[i]?.lowest);
+    const only = lowest.length > 0 ? lowest : quoted;
+    if (only.length === 1 && rfqActions(rfqs[only[0]]).includes('convert')) choice[row.key] = rfqs[only[0]].id;
+  }
+  return choice;
+}
+
+/**
+ * Whether ordering this cell needs a reason, as the database decides it for a split (finance_award_rfq_lines): another
+ * RFQ's comparable price for the same row is strictly lower ('lower'), or, with the quotes in several currencies, this
+ * one has no exchange rate to compare by and another RFQ quoted the row ('no_rate'). A tie, or a row only this RFQ
+ * quoted, needs none. tests/bendahara-rfq-split.test.ts holds this to the database.
+ */
+export function cellNeedsReason(row: ComparisonRow, column: number, mixed: boolean): 'lower' | 'no_rate' | null {
+  const cell = row.cells[column];
+  if (!cell || cell.unit_price === null) return null;
+  const others = row.cells.filter((c, j): c is QuoteCell => j !== column && c !== null && c.unit_price !== null);
+  if (mixed && cell.cost === null) return others.length > 0 ? 'no_rate' : null;
+  const cost = cell.cost;
+  return cost !== null && others.some((o) => o.cost !== null && o.cost < cost) ? 'lower' : null;
+}
+
+/** One draft order a split would make: the lines chosen from one RFQ. */
+export type SplitOrder = {
+  rfq: RfqDetail;
+  /** The chosen lines, in row order. */
+  lines: { row: ComparisonRow; cell: QuoteCell }[];
+  /** How many lines this RFQ quoted, chosen or not. */
+  quoted: number;
+  /** The chosen lines' amounts and SST, in whole sen of the RFQ's own currency. */
+  sen: number;
+  /** The items that need a reason: another supplier quoted them for less, or this quote has no exchange rate. */
+  lower: string[];
+  noRate: string[];
+};
+
+export type SplitPlan = {
+  /** One per supplier with a chosen line, in the order of the columns. */
+  orders: SplitOrder[];
+  /** The quotes are in several currencies: figures are then ringgit at each RFQ's own indicative rate. */
+  mixed: boolean;
+  /** What `totalSen` and `rowSen` are in. */
+  currency: string;
+  /** Each chosen row's amount in sen, in `currency`; null when its RFQ has no rate (mixed only). A row not chosen is absent. */
+  rowSen: Record<string, number | null>;
+  /** The chosen lines added up, leaving out those in `unrated`. */
+  totalSen: number;
+  /** Chosen lines with no exchange rate, left out of `totalSen` because they cannot be put into ringgit. */
+  unrated: number;
+  /** Rows nobody quoted, so nothing to order. */
+  noQuote: number;
+  /** Rows somebody quoted that no line is chosen for. */
+  notChosen: number;
+};
+
+/** The label of the button that makes the split's orders. */
+export const makeSplitLabel = (n: number) => (n === 1 ? 'Make purchase order' : `Make ${n} purchase orders`);
+
+/** The label of the button that opens the question before them. */
+export const reviewSplitLabel = (n: number) => (n === 1 ? 'Review purchase order' : n === 0 ? 'Review purchase orders' : `Review ${n} purchase orders`);
+
+/** What the split sends: each order's RFQ, lines and the reason typed for it, which the input schema trims. */
+export function splitAwards(plan: Pick<SplitPlan, 'orders'>, reasons: Record<string, string>) {
+  return plan.orders.map((o) => ({ rfq_id: o.rfq.id, line_ids: o.lines.map((l) => l.cell.line_id), reason: reasons[o.rfq.id] }));
+}
+
+/** The sentence under an order's reason box, when it needs one; null when it doesn't. */
+export function splitReasonHint(order: Pick<SplitOrder, 'lower' | 'noRate'>): string | null {
+  const says = (items: string[], what: string) => (items.length ? `${items.join(', ')} ${items.length === 1 ? 'has' : 'have'} ${what}` : null);
+  const needs = [says(order.lower, 'a lower quote'), says(order.noRate, 'no exchange rate to compare')].filter((text) => text !== null);
+  return needs.length ? `Needs a reason: ${needs.join('. ')}.` : null;
+}
+
+/**
+ * What choosing these lines would do: the orders, the figures beside the comparison and the lines left out. A
+ * choice whose RFQ can no longer be ordered, or whose cell is gone, is ignored, so a group read again after a
+ * refusal needs no tidying. Indicative: the order itself is converted at its own date's rate by the database.
+ */
+export function splitPlan(rfqs: RfqDetail[], rows: ComparisonRow[], choice: SplitChoice): SplitPlan {
+  const mixed = quotesInSeveralCurrencies(rfqs);
+  const orders: SplitOrder[] = rfqs.map((rfq) => ({ rfq, lines: [], quoted: 0, sen: 0, lower: [], noRate: [] }));
+  const plan: SplitPlan = {
+    orders: [],
+    mixed,
+    currency: mixed ? BASE_CURRENCY : (rfqs.find((r) => r.quoted_at !== null)?.currency ?? BASE_CURRENCY),
+    rowSen: {},
+    totalSen: 0,
+    unrated: 0,
+    noQuote: 0,
+    notChosen: 0,
+  };
+  for (const row of rows) {
+    row.cells.forEach((c, i) => {
+      if (c && c.unit_price !== null) orders[i].quoted += 1;
+    });
+    if (!row.cells.some((c) => c && c.unit_price !== null)) {
+      plan.noQuote += 1;
+      continue;
+    }
+    const column = rfqs.findIndex((r) => r.id === choice[row.key]);
+    const cell = column < 0 ? null : row.cells[column];
+    if (!cell || cell.total === null || !rfqActions(rfqs[column]).includes('convert')) {
+      plan.notChosen += 1;
+      continue;
+    }
+    const order = orders[column];
+    const own = Math.round(cell.total * 100);
+    order.lines.push({ row, cell });
+    order.sen += own;
+    const needs = cellNeedsReason(row, column, mixed);
+    if (needs) (needs === 'lower' ? order.lower : order.noRate).push(row.description);
+    const rate = mixed ? ringgitPerUnit(rfqs[column]) : RATE_SCALE;
+    if (rate === null) {
+      plan.rowSen[row.key] = null;
+      plan.unrated += 1;
+    } else {
+      // Whole sen, rounded half up: a cell's amount is never negative.
+      const sen = Number((BigInt(own) * rate + RATE_SCALE / BigInt(2)) / RATE_SCALE);
+      plan.rowSen[row.key] = sen;
+      plan.totalSen += sen;
+    }
+  }
+  plan.orders = orders.filter((o) => o.lines.length > 0);
+  return plan;
 }

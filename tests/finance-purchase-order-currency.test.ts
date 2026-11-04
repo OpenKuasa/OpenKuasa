@@ -340,7 +340,7 @@ describe('comparing quotes in different currencies', () => {
 const listRow = (extra: Partial<PurchaseOrderListRow> = {}): PurchaseOrderListRow => ({
   id: ID, po_no: 'PO-0009', supplier_id: SUPPLIER, supplier_name: 'Pacific Tools Inc', rfq_id: null, rfq_no: null,
   po_date: '2026-10-15', expected_date: null, status: 'approved', created_by: 'u1', submitted_by: 'u1', rejection_reason: null,
-  payment_terms_days: 30, delivery_address: null, total: 1000, delivery: 'pending', received_total: 0, billed_total: 0,
+  payment_terms_days: 30, delivery_address: null, award_reason: null, total: 1000, delivery: 'pending', received_total: 0, billed_total: 0,
   over_billed: false, billed_over_received: false,
   currency: 'MYR', fx_rate: 1, fx_rate_text: '1.0000000000', fx_rate_source: null, fx_rate_date: null, total_myr: 1000,
   ...extra,
