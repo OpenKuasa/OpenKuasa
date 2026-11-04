@@ -1,24 +1,58 @@
 ---
 title: Run your own copy
-description: Self-host OpenKuasa on your own Supabase project and any Node server.
+description: Run OpenKuasa on your laptop with Docker, or self-host it on your own Supabase project and any Node server.
 order: 1
-ask: How do I self-host OpenKuasa on my own Supabase project?
+ask: How do I run OpenKuasa myself, on my laptop or on my own Supabase project?
 ---
-OpenKuasa is free to self-host under AGPL-3.0. You need a Supabase project for data and sign-in, and a server that runs Node.
+OpenKuasa is free to self-host under AGPL-3.0. The quickest way is Docker on your own computer. You can also point it at your own Supabase project and run it on any Node server.
 
-## Who can do this
+## Run it on your laptop with Docker
+
+### Before you start
+
+- Docker Desktop (Mac or Windows), or Docker Engine with Compose v2.24 or newer (Linux).
+- Nothing else. No Supabase account and no Node.
+
+### Steps
+
+```bash
+git clone --depth 1 https://github.com/OpenKuasa/OpenKuasa.git
+cd OpenKuasa
+cp .env.example .env      # fill in your own keys (optional ones can stay blank)
+docker compose up -d
+```
+
+Open http://localhost:58272. Sign up to get your own workspace, or press "Try the demo" to see the sample company.
+
+Sign-in emails land in the mail viewer at http://localhost:58274. Open it to find your confirmation link.
+
+Every key in `.env` is optional. Add `OPENROUTER_API_KEY` to turn on the AI chat. See [AI models and keys](/docs/developers/ai-models-and-keys).
+
+### Update, stop and wipe
+
+```bash
+git pull && docker compose pull && docker compose up -d   # update
+docker compose down                                       # stop, keeps your data
+docker compose down -v                                    # wipe, deletes all local data
+```
+
+## Hosted Supabase
+
+Use this path to run OpenKuasa on a server, with your own Supabase project for data and sign-in and a host that runs Node.
+
+### Who can do this
 
 Anyone running their own copy. You need access to a Supabase project and to the server you deploy on.
 
-## Before you start
+### Before you start (hosted)
 
 - Node 22 or newer.
 - pnpm. Always use pnpm, not npm or yarn.
 - A Supabase project.
 
-## Steps
+### Hosted steps
 
-### 1. Get the code
+#### 1. Get the code
 
 ```bash
 git clone https://github.com/OpenKuasa/OpenKuasa.git
@@ -29,7 +63,7 @@ pnpm dev
 
 Open http://localhost:3000. With no Supabase project set, the app opens in preview mode: every visitor is a read-only "Guest" in a "Preview workspace", and the screens show sample data.
 
-### 2. Point it at your Supabase project
+#### 2. Point it at your Supabase project
 
 Create a `.env.local` file in the project root with your project's URL and anon key (Supabase dashboard → Project Settings → API):
 
@@ -40,7 +74,7 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=<your-anon-key>
 
 The rest of the app is turned on by more variables. See [Environment variables](/docs/developers/environment-variables).
 
-### 3. Create the tables
+#### 3. Create the tables
 
 Run the migrations once against your project:
 
@@ -50,7 +84,7 @@ pnpm db:migrate --apply
 
 It asks you to type the project ref before it writes anything. See [Keep the database up to date](/docs/developers/database-migrations).
 
-### 4. Set up Supabase Auth
+#### 4. Set up Supabase Auth
 
 In the Supabase dashboard, under Authentication:
 
@@ -60,7 +94,7 @@ In the Supabase dashboard, under Authentication:
 
 The sign-in email templates are in `supabase/email-templates/`. They are not set by the migrations: paste each file into the matching template in the Supabase dashboard (Authentication → Emails → Templates). Every link in them points at the app's `/auth/confirm` route.
 
-### 5. Build and run it on your server
+#### 5. Build and run it on your server
 
 ```bash
 pnpm build
@@ -69,7 +103,7 @@ pnpm start
 
 Any host that runs Node 22 and these two commands will do. openkuasa.com runs on Railway.
 
-### 6. Add the scheduler
+#### 6. Add the scheduler
 
 Some background work runs only when your scheduler calls it. See [Scheduled jobs](/docs/developers/scheduled-jobs).
 

@@ -12,6 +12,9 @@ volunteer contributors.
 would rather not run it themselves. It is built on the code in this repository,
 which stays open source under AGPL-3.0.
 
+**[Try the demo](https://openkuasa.com/login)** — press "Try the demo" on the
+login page to look around a sample company. No sign-up.
+
 <p align="center">
   <img src="docs/screenshots/dashboard.png" alt="OpenKuasa — the Jebat (Ads) module overview; every module has a dashboard like this" width="900">
 </p>
@@ -28,6 +31,30 @@ which stays open source under AGPL-3.0.
 >   an alternative to.
 > - The software is provided "as is", without warranty of any kind — self-host it
 >   at your own risk.
+
+## Run it on your laptop
+
+You need only [Docker Desktop](https://www.docker.com/products/docker-desktop/)
+(Mac or Windows), or Docker Engine with Compose v2.24 or newer (Linux). No
+Supabase account, no Node.
+
+```bash
+git clone --depth 1 https://github.com/OpenKuasa/OpenKuasa.git
+cd OpenKuasa
+cp .env.example .env      # fill in your own keys (optional ones can stay blank)
+docker compose up -d
+```
+
+- Open the app at <http://localhost:58272>. Sign up to get your own workspace,
+  or press "Try the demo" to see the sample company.
+- Sign-in emails land in the mail viewer at <http://localhost:58274>.
+- Every key in `.env` is optional. Add `OPENROUTER_API_KEY` to turn on the AI
+  chat.
+- Update: `git pull && docker compose pull && docker compose up -d`
+- Stop: `docker compose down` (keeps your data)
+- Wipe: `docker compose down -v` (deletes all local data)
+
+More in [Run your own copy](https://openkuasa.com/docs/developers/self-hosting).
 
 ## What's inside
 
@@ -205,6 +232,9 @@ repository stays available under AGPL-3.0.
 - **Vitest** for tests
 
 ## Getting Started
+
+This is for contributors. To just run OpenKuasa, use
+[Run it on your laptop](#run-it-on-your-laptop) above.
 
 Requires Node 22+ and [pnpm](https://pnpm.io).
 
