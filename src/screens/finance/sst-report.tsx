@@ -38,7 +38,6 @@ import {
   type SstFormLine,
   type SstLineRow,
   type SstPaidInvoice,
-  type SstNoInvoiceMoney,
   type SstReturn,
   type SstTypedFigures,
   NO_TYPED_FIGURES,
@@ -47,7 +46,14 @@ import {
   recentSstPeriods,
   sstCards,
 } from '@/lib/finance/sst-return';
-import { listSstFiled, listSstFigures, readSstNoInvoiceMoney, readSstPaidInvoices, readSstRows } from '@/lib/finance/sst-return-data';
+import {
+  type SstNoInvoiceMoney,
+  listSstFiled,
+  listSstFigures,
+  readSstNoInvoiceMoney,
+  readSstPaidInvoices,
+  readSstRows,
+} from '@/lib/finance/sst-return-data';
 import { displayDate } from '@/lib/finance/view-helpers';
 import { todayInMalaysia } from '@/lib/people/dates';
 import { createClient } from '@/lib/supabase/server';
@@ -103,10 +109,10 @@ const shown = (l: SstFormLine) => ({
 const lines = (n: number) => (n === 1 ? '1 line' : `${n} lines`);
 
 /**
- * The "Not on the form" notes of a return: lines with no form item, lines with no tax type, and an item 14 below
- * zero.
+ * The "Not on the form" notes of a return: lines with no form item, lines with no tax type, an item 14 below
+ * zero, and on a service return the money received with no invoice behind it.
  */
-function notesOf(ret: SstReturn): string[] {
+function notesOf(ret: SstReturn, settings: SstSettings, noInvoice?: SstNoInvoiceMoney): string[] {
   const notes: string[] = [];
   const one = (n: number) => n === 1;
   if (ret.offForm.count > 0) {
@@ -128,11 +134,17 @@ function notesOf(ret: SstReturn): string[] {
     );
   }
   // Money in that settles no invoice carries no rate, so it is on no item of a service return. Named, not
-  // guessed into a line: much of it may not be for a taxable service at all.
-  if (ret.type === 'service' && ret.noInvoice.count > 0) {
-    const across = ret.noInvoice.count > 1 ? `, across ${ret.noInvoice.count} receipts` : '';
+  // guessed into a line: much of it may not be for a taxable service at all. The way to count it depends on the
+  // basis: a payment-basis return counts receipts against invoices, and a posted receipt's split cannot be
+  // changed (FIN09), so the receipt is voided and recorded again; an invoice-basis return counts the invoice.
+  if (ret.type === 'service' && noInvoice && noInvoice.count > 0) {
+    const across = noInvoice.count > 1 ? `, across ${noInvoice.count} receipts` : '';
+    const fix =
+      settings.service_tax_basis === 'payment'
+        ? 'void the receipt and record it again against the invoice for that service (issue one first if there is none), so its tax is counted.'
+        : 'and the service has no invoice yet, issue one so its tax is counted.';
     notes.push(
-      `Not counted: ${rm(ret.noInvoice.amount)} received with no invoice${across}. If any of it is payment for a taxable service, put it against an invoice so its tax is counted.`,
+      `Not counted: ${rm(noInvoice.amount_myr)} received with no invoice${across}. If any of it is payment for a taxable service, ${fix}`,
     );
   }
   return notes;
@@ -150,11 +162,22 @@ function basisNote(type: SstReturn['type'], settings: SstSettings): string {
  * any "Not on the form" note, and Part D. Payment basis is worked out from the money received, so its service
  * return reads the same parts as an invoice-basis one.
  */
-export function SstReturnBody({ ret, settings, companyName }: { ret: SstReturn; settings: SstSettings; companyName: string }) {
+export function SstReturnBody({
+  ret,
+  settings,
+  companyName,
+  noInvoice,
+}: {
+  ret: SstReturn;
+  settings: SstSettings;
+  companyName: string;
+  /** Money received in this period with no invoice behind it (service returns only). */
+  noInvoice?: SstNoInvoiceMoney;
+}) {
   const service = ret.type === 'service';
   const registration = (service ? settings.service_tax_no : settings.sales_tax_no) || 'Not registered: add the number in SST settings above';
   const deductionsTotal = ret.deductions.reduce((s, d) => s + Math.round(d.tax * 100), 0) / 100;
-  const notes = notesOf(ret);
+  const notes = notesOf(ret, settings, noInvoice);
   // The items the tile sums.
   const deductionsHint = service ? '13(a), 13(c) and 13(d)' : '13(a), 13(b), 13A and 13(d)';
   const partA = [
@@ -390,20 +413,18 @@ export default async function SstReportScreen({
   // The figures are read once too, and each period is built with its own (none is zeros).
   // Payment basis counts money received, so its service return reads the receipts as well (and only then).
   const onPayments = view.type === 'service' && settings.service_tax_basis === 'payment';
-  const onService = view.type === 'service';
   const [{ lines: rows, credits }, filed, figures, paid, noInvoice] = await Promise.all([
     data.rows(span),
     data.filed(view.type),
     data.figures(view.type),
     onPayments ? data.paid(span) : Promise.resolve([]),
-    // Money that settles no invoice is named on the shown period alone: it is not a figure any entry is built from.
-    onService ? data.noInvoice(view.period) : Promise.resolve({ count: 0, amount_myr: 0 }),
+    // Money that settles no invoice is named on the shown period alone: no figure of the return is built from it.
+    view.type === 'service' ? data.noInvoice(view.period) : Promise.resolve(undefined),
   ]);
   const build = (period: SstPeriod) =>
     buildSstReturn(view.type, period, rows, credits, figures[period.start], {
       basis: onPayments ? 'payment' : 'invoice',
       paid,
-      noInvoice: period.start === view.period.start ? noInvoice : undefined,
     });
 
   const ret = build(view.period);
@@ -430,7 +451,7 @@ export default async function SstReportScreen({
       />
       <BentoGrid>
         {card}
-        <SstReturnBody ret={ret} settings={settings} companyName={data.companyName} />
+        <SstReturnBody ret={ret} settings={settings} companyName={data.companyName} noInvoice={noInvoice} />
         <SstFiguresCard
           key={`${view.type}-${view.period.start}`}
           type={view.type}

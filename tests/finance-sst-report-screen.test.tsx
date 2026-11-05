@@ -405,20 +405,26 @@ describe('the typed-in figures on the SST Report (#222 stage 5)', () => {
 describe('money received with no invoice on the SST Report (#222)', () => {
   const html = async (params: Record<string, string> = {}) => renderToStaticMarkup(await SstReportScreen({ searchParams: Promise.resolve(params) }));
 
-  it('names it on the service return, with the amount and how many receipts', async () => {
+  it('names it on an invoice-basis service return, and asks for the invoice that would count it', async () => {
     state.settings = async () => SAVED;
     state.noInvoice = async () => ({ count: 2, amount_myr: 2800 });
     const text = textOf(await html());
-    expect(text).toContain('RM 2,800.00 received with no invoice, across 2 receipts');
-    expect(text).toContain('put it against an invoice so its tax is counted');
+    expect(text).toContain(
+      'RM 2,800.00 received with no invoice, across 2 receipts. If any of it is payment for a taxable service, and the service has no invoice yet, issue one so its tax is counted.',
+    );
   });
 
-  it('names one receipt in the singular, and names it on a payment-basis return too', async () => {
+  it('on payment basis asks for the receipt to be recorded again against the invoice, in the singular for one', async () => {
+    // A posted receipt's split cannot be changed (FIN09), so "put it against an invoice" is not something the
+    // app lets anyone do: the receipt is voided and recorded again.
     state.settings = async () => ({ ...SAVED, service_tax_basis: 'payment' });
     state.noInvoice = async () => ({ count: 1, amount_myr: 1500 });
     const text = textOf(await html());
-    expect(text).toContain('RM 1,500.00 received with no invoice. If any of it is payment for a taxable service');
+    expect(text).toContain(
+      'RM 1,500.00 received with no invoice. If any of it is payment for a taxable service, void the receipt and record it again against the invoice for that service (issue one first if there is none), so its tax is counted.',
+    );
     expect(text).not.toContain('across 1 receipts');
+    expect(text).not.toContain('put it against an invoice');
   });
 
   it('says nothing when every receipt in the period settles an invoice', async () => {
@@ -427,9 +433,14 @@ describe('money received with no invoice on the SST Report (#222)', () => {
     expect(text).not.toContain('received with no invoice');
   });
 
-  it('says nothing on the sales return: sales tax is counted when the goods are sold', async () => {
+  it('says nothing on the sales return, and does not read the receipts for it', async () => {
     state.settings = async () => SAVED;
-    state.noInvoice = async () => ({ count: 2, amount_myr: 2800 });
+    let reads = 0;
+    state.noInvoice = async () => {
+      reads += 1;
+      return { count: 2, amount_myr: 2800 };
+    };
     expect(textOf(await html({ tax: 'sales' }))).not.toContain('received with no invoice');
+    expect(reads).toBe(0);
   });
 });
