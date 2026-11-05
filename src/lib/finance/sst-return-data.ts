@@ -13,7 +13,7 @@ import { z } from 'zod';
 import { addDays, malaysiaDate } from '@/lib/people/dates';
 import { type FinanceWriteContext, PG_FORBIDDEN, PG_UNIQUE, pgCode, writeFailed } from './result';
 import { type SstTaxType, sstPeriodFor, taxTypeForRate } from './sst';
-import type { SstCreditRow, SstLineRow, SstNoInvoiceMoney, SstPaidInvoice, SstReturnType, SstTypedFigures } from './sst-return';
+import type { SstCreditRow, SstLineRow, SstPaidInvoice, SstReturnType, SstTypedFigures } from './sst-return';
 
 export const SST_RETURN_PAGE_SIZE = 1000;
 /** Invoice ids per `in (...)` filter, to keep the URL short. */
@@ -525,21 +525,19 @@ export async function readSstPaidInvoices(
   return out;
 }
 
+/** Money received in a period with no invoice behind it, in ringgit. */
+export type SstNoInvoiceMoney = { count: number; amount_myr: number };
+
 /**
  * Money received in the span that settles no invoice, which the return cannot count: a receipt can name an
  * income category and no allocation (FIN15), so no line carries a rate and nothing reaches an item.
  *
- * A transfer between the workspace's own accounts is money in on one side and is not money received, so it is
- * left out by the read's own filter (`transfer_id is null`), not by a later test. Ringgit comes off the
- * movement's own ringgit figure (`amount_myr`), which is null on a ringgit account. Throws when a read fails,
- * as the other reads here do.
- *
- * Leaving out every receipt an allocation names is exact, not cautious: each path that posts a receipt makes
- * its split the whole receipt (`finance_post_cash_receipt` in `20261120110000_bendahara_fx_payments_in.sql:794`,
- * `finance_record_payment_in` at `:695`), a receipt recorded as it arrives carries an income category and no
- * split (`20261122110000_bendahara_fx_foreign_account_money.sql:1263`), and a split cannot change once its
- * receipt is posted (`:430`, FIN09). So a posted receipt either settles documents for all of its money or
- * settles none, and no remainder is left out of the note.
+ * Read from `finance_cash_receipts`, the view the Cash Receipts screen lists, so the note and that screen agree
+ * on what a receipt is: money in that is not a transfer between the workspace's own accounts, `kind = 'income'`
+ * when no invoice is allocated (money in can only be allocated to an invoice, FIN04), and `amount_myr` in
+ * ringgit. A posted receipt settles invoices for all of its money or for none: each posting path makes its split
+ * the whole receipt, and the split cannot change once it is posted (FIN09). Throws when a read fails, as the
+ * other reads here do.
  */
 export async function readSstNoInvoiceMoney(
   ctx: FinanceWriteContext,
@@ -547,37 +545,16 @@ export async function readSstNoInvoiceMoney(
 ): Promise<SstNoInvoiceMoney> {
   const money = await allPages(() =>
     ctx.client
-      .from('finance_transactions')
-      .select('id,amount,amount_myr')
+      .from('finance_cash_receipts')
+      .select('transaction_id,amount_myr')
       .eq('org_id', ctx.orgId)
-      .eq('direction', 'in')
+      .eq('kind', 'income')
       .eq('status', 'posted')
-      .is('transfer_id', null)
       .gte('txn_date', span.start)
       .lte('txn_date', span.end)
-      .order('id', { ascending: true }),
+      .order('transaction_id', { ascending: true }),
   );
-  if (money.length === 0) return { count: 0, amount_myr: 0 };
-
-  const allocated = new Set<string>();
-  for (const chunk of chunks(money.map((t) => t.id as string), ID_CHUNK)) {
-    const rows = await allPages(() =>
-      ctx.client
-        .from('finance_allocations')
-        .select('id,transaction_id')
-        .eq('org_id', ctx.orgId)
-        .in('transaction_id', chunk)
-        .order('id', { ascending: true }),
-    );
-    for (const r of rows) allocated.add(r.transaction_id as string);
-  }
-
-  let count = 0;
   let sen = 0;
-  for (const t of money) {
-    if (allocated.has(t.id as string)) continue;
-    count += 1;
-    sen += toSen(num(t.amount_myr ?? t.amount));
-  }
-  return { count, amount_myr: fromSen(sen) };
+  for (const r of money) sen += toSen(num(r.amount_myr));
+  return { count: money.length, amount_myr: fromSen(sen) };
 }
