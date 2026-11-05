@@ -533,6 +533,13 @@ export async function readSstPaidInvoices(
  * left out by the read's own filter (`transfer_id is null`), not by a later test. Ringgit comes off the
  * movement's own ringgit figure (`amount_myr`), which is null on a ringgit account. Throws when a read fails,
  * as the other reads here do.
+ *
+ * Leaving out every receipt an allocation names is exact, not cautious: each path that posts a receipt makes
+ * its split the whole receipt (`finance_post_cash_receipt` in `20261120110000_bendahara_fx_payments_in.sql:794`,
+ * `finance_record_payment_in` at `:695`), a receipt recorded as it arrives carries an income category and no
+ * split (`20261122110000_bendahara_fx_foreign_account_money.sql:1263`), and a split cannot change once its
+ * receipt is posted (`:430`, FIN09). So a posted receipt either settles documents for all of its money or
+ * settles none, and no remainder is left out of the note.
  */
 export async function readSstNoInvoiceMoney(
   ctx: FinanceWriteContext,
