@@ -24,6 +24,7 @@ const state = vi.hoisted(() => ({
   company: async (): Promise<{ name: string; sstNo: string }> => ({ name: 'Rimba Ventures Sdn Bhd', sstNo: '' }),
   rows: async (): Promise<{ lines: unknown[]; credits: unknown[] }> => ({ lines: [], credits: [] }),
   paid: async (): Promise<unknown[]> => [],
+  noInvoice: async (): Promise<{ count: number; amount_myr: number }> => ({ count: 0, amount_myr: 0 }),
   filed: async (): Promise<Record<string, string>> => ({}),
   figures: async (): Promise<Record<string, unknown>> => ({}),
   figureReads: [] as string[],
@@ -39,6 +40,7 @@ vi.mock('@/lib/finance/sst-return-data', async (importOriginal) => ({
     return state.rows();
   },
   readSstPaidInvoices: () => state.paid(),
+  readSstNoInvoiceMoney: () => state.noInvoice(),
   listSstFiled: () => state.filed(),
   listSstFigures: (_ctx: unknown, type: string) => {
     state.figureReads.push(type);
@@ -64,6 +66,7 @@ beforeEach(() => {
   state.company = async () => ({ name: 'Rimba Ventures Sdn Bhd', sstNo: '' });
   state.rows = async () => ({ lines: [], credits: [] });
   state.paid = async () => [];
+  state.noInvoice = async () => ({ count: 0, amount_myr: 0 });
   state.filed = async () => ({});
   state.figures = async () => ({});
   state.figureReads = [];
@@ -396,5 +399,48 @@ describe('the typed-in figures on the SST Report (#222 stage 5)', () => {
     const sales = textOf(await html({ tax: 'sales' }));
     expect(sales).toMatch(/Deductions \(item 13\) RM 0\.00 13\(a\), 13\(b\), 13A and 13\(d\) Tax payable/);
     for (const t of [service, sales]) expect(t).not.toMatch(/Deductions \(item 13\) RM [\d.,-]+ credit notes/);
+  });
+});
+
+describe('money received with no invoice on the SST Report (#222)', () => {
+  const html = async (params: Record<string, string> = {}) => renderToStaticMarkup(await SstReportScreen({ searchParams: Promise.resolve(params) }));
+
+  it('names it on an invoice-basis service return, and asks for the invoice that would count it', async () => {
+    state.settings = async () => SAVED;
+    state.noInvoice = async () => ({ count: 2, amount_myr: 2800 });
+    const text = textOf(await html());
+    expect(text).toContain(
+      'RM 2,800.00 received with no invoice, across 2 receipts. If any of it is payment for a taxable service, and the service has no invoice yet, issue one so its tax is counted.',
+    );
+  });
+
+  it('on payment basis asks for the receipt to be recorded again against the invoice, in the singular for one', async () => {
+    // A posted receipt's split cannot be changed (FIN09), so "put it against an invoice" is not something the
+    // app lets anyone do: the receipt is voided and recorded again.
+    state.settings = async () => ({ ...SAVED, service_tax_basis: 'payment' });
+    state.noInvoice = async () => ({ count: 1, amount_myr: 1500 });
+    const text = textOf(await html());
+    expect(text).toContain(
+      'RM 1,500.00 received with no invoice. If any of it is payment for a taxable service, void the receipt and record it again against the invoice for that service (issue one first if there is none), so its tax is counted.',
+    );
+    expect(text).not.toContain('across 1 receipts');
+    expect(text).not.toContain('put it against an invoice');
+  });
+
+  it('says nothing when every receipt in the period settles an invoice', async () => {
+    state.settings = async () => SAVED;
+    const text = textOf(await html());
+    expect(text).not.toContain('received with no invoice');
+  });
+
+  it('says nothing on the sales return, and does not read the receipts for it', async () => {
+    state.settings = async () => SAVED;
+    let reads = 0;
+    state.noInvoice = async () => {
+      reads += 1;
+      return { count: 2, amount_myr: 2800 };
+    };
+    expect(textOf(await html({ tax: 'sales' }))).not.toContain('received with no invoice');
+    expect(reads).toBe(0);
   });
 });

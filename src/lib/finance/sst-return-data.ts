@@ -524,3 +524,37 @@ export async function readSstPaidInvoices(
   }
   return out;
 }
+
+/** Money received in a period with no invoice behind it, in ringgit. */
+export type SstNoInvoiceMoney = { count: number; amount_myr: number };
+
+/**
+ * Money received in the span that settles no invoice, which the return cannot count: a receipt can name an
+ * income category and no allocation (FIN15), so no line carries a rate and nothing reaches an item.
+ *
+ * Read from `finance_cash_receipts`, the view the Cash Receipts screen lists, so the note and that screen agree
+ * on what a receipt is: money in that is not a transfer between the workspace's own accounts, `kind = 'income'`
+ * when no invoice is allocated (money in can only be allocated to an invoice, FIN04), and `amount_myr` in
+ * ringgit. A posted receipt settles invoices for all of its money or for none: each posting path makes its split
+ * the whole receipt, and the split cannot change once it is posted (FIN09). Throws when a read fails, as the
+ * other reads here do.
+ */
+export async function readSstNoInvoiceMoney(
+  ctx: FinanceWriteContext,
+  span: { start: string; end: string },
+): Promise<SstNoInvoiceMoney> {
+  const money = await allPages(() =>
+    ctx.client
+      .from('finance_cash_receipts')
+      .select('transaction_id,amount_myr')
+      .eq('org_id', ctx.orgId)
+      .eq('kind', 'income')
+      .eq('status', 'posted')
+      .gte('txn_date', span.start)
+      .lte('txn_date', span.end)
+      .order('transaction_id', { ascending: true }),
+  );
+  let sen = 0;
+  for (const r of money) sen += toSen(num(r.amount_myr));
+  return { count: money.length, amount_myr: fromSen(sen) };
+}
