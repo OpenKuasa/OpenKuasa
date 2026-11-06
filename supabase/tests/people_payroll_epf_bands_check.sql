@@ -180,11 +180,13 @@ begin
     fails := array_append(fails, 'the EPF category rows do not follow the part the employee falls in');
   end if;
 
-  -- ==== 8. SOCSO and EIS are untouched =============================================
-  -- This migration rewrites every EPF row and no other scheme's, so their figures
-  -- have to be exactly what they were: rates on the wage, held at the tables' ceilings.
+  -- ==== 8. the employee SOCSO share and EIS are untouched =========================
+  -- The EPF migration rewrites every EPF row and no other scheme's, and the SOCSO
+  -- migration that follows it rewrites the employer share only, so these figures have
+  -- to be exactly what they were: rates on the wage, held at the tables' ceilings. The
+  -- employer share is a band amount now and is pinned by people_payroll_socso_bands_check.
   if private.hr_payroll_proposal('socso', 325000, 30, 'citizen') <> 1625
-     or private.hr_payroll_proposal('socso', 325000, 30, 'citizen', 'employer') <> 5690
+     or private.hr_payroll_proposal('socso', 325000, 30, 'citizen', 'employer') <> 5685
      or private.hr_payroll_proposal('eis', 325000, 30, 'citizen') <> 650
      or private.hr_payroll_proposal('socso', 595000, 30, 'citizen') <> 2975
      or private.hr_payroll_proposal('socso', 595000, 30, 'citizen', 'employer') <> 10415

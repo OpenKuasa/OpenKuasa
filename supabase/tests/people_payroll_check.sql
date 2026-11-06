@@ -181,7 +181,10 @@ begin
   select string_agg(format('%s %s %s-%s %s %s', s.scheme, s.citizenship, s.employee_from_age, coalesce(s.employee_until_age::text, ''),
            s.rate, coalesce(s.max_cents::text, 'none')), '; ' order by s.scheme, s.citizenship, s.employee_from_age) into t
   from public.hr_statutory_rules s where s.payer = 'employee' and s.amount_cents is null;
-  -- The employer rows: who pays, the age band, and the wage band from which the row applies.
+  -- The employer rows that are still a rate: who pays, the age band, and the wage band
+  -- from which the row applies. The SOCSO employer rows are Akta 4 band amounts now
+  -- (20261203100000) and are read by people_payroll_socso_bands_check, so they are
+  -- left out here the way the EPF band rows are.
   select string_agg(format('%s %s %s %s-%s %s %s %s', s.scheme, s.payer, s.citizenship, s.employee_from_age,
            coalesce(s.employee_until_age::text, ''), s.wage_from_cents, s.rate, coalesce(s.max_cents::text, 'none')), '; '
            order by s.scheme, s.payer, s.citizenship, s.employee_from_age, s.wage_from_cents) into snap
@@ -208,12 +211,7 @@ begin
        || 'epf employer non_citizen_before_1998 0-60 2000001 0.12000 none; '
        || 'epf employer non_citizen_before_1998 60-75 2000001 0.06000 none; '
        || 'epf employer permanent_resident 0-60 2000001 0.12000 none; '
-       || 'epf employer permanent_resident 60-75 2000001 0.06000 none; '
-       || 'socso employer citizen 0-60 0 0.01750 10415; socso employer citizen 60- 0 0.01250 7440; '
-       || 'socso employer non_citizen 0-60 0 0.01750 10415; socso employer non_citizen 60- 0 0.01250 7440; '
-       || 'socso employer non_citizen_before_1998 0-60 0 0.01750 10415; '
-       || 'socso employer non_citizen_before_1998 60- 0 0.01250 7440; '
-       || 'socso employer permanent_resident 0-60 0 0.01750 10415; socso employer permanent_resident 60- 0 0.01250 7440' then
+       || 'epf employer permanent_resident 60-75 2000001 0.06000 none' then
     fails := array_append(fails, format('the employer statutory rules are: %s', snap));
   end if;
   -- The columns of the spec.
@@ -1358,22 +1356,21 @@ begin
   -- bases. Nothing here is in net pay: every figure above is unchanged by it.
   for label, who, want in
     select * from (values
-      ('basic only', b1, 'epf 39000 socso 5250 eis 600'),
+      ('basic only', b1, 'epf 39000 socso 5165 eis 600'),
       -- 13% to RM 5,000 and 12% above it, so 8,000.00 is 960.00, not 1,040.00.
       ('gross above every maximum', hi, 'epf 96000 socso 10415 eis 1190'),
       -- Turned 60 inside the month: March is still 13% and the first category.
-      ('turned sixty inside the month', turned60, 'epf 65000 socso 8750 eis 1000'),
+      ('turned sixty inside the month', turned60, 'epf 65000 socso 8665 eis 1000'),
       -- A non-citizen employer pays 2%, and SOCSO as anyone; no EIS under any category.
-      ('fifty nine all month, non-citizen', turns60, 'epf 6000 socso 5250 eis 0'),
+      ('fifty nine all month, non-citizen', turns60, 'epf 6000 socso 5165 eis 0'),
       -- From 60, a permanent resident: 6.5%, the employer-only second category, no EIS.
       ('sixty before the month began, by identity card, permanent resident', icsixty,
-        'epf 26000 socso 5000 eis 0'),
-      ('seventeen', teen, 'epf 19500 socso 2625 eis 0'),
+        'epf 26000 socso 4940 eis 0'),
+      ('seventeen', teen, 'epf 19500 socso 2535 eis 0'),
       -- Overtime is EPF wages for nobody, so the employer's EPF is 13% of 3,000.00 while
-      -- SOCSO and EIS take the gross, rounded to five sen: 1.75% of 3,133.27 is 54.83, so
-      -- 54.85. That is the rate's figure, not PERKESO's: its table charges a fixed RM55.15
-      -- for wages above RM3,100 and up to RM3,200. The banded figures are #423.
-      ('overtime', ot, 'epf 39000 socso 5485 eis 625')
+      -- SOCSO and EIS take the gross. SOCSO is Akta 4's figure for the band that gross
+      -- falls in, RM55.15 for wages above RM3,100 and up to RM3,200, not 1.75% of it.
+      ('overtime', ot, 'epf 39000 socso 5515 eis 625')
     ) as c(label, employee, want)
   loop
     select p.id into pa from public.hr_payslips p where p.payroll_run_id = mar_run and p.employee_id = who;

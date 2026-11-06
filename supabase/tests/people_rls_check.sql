@@ -337,10 +337,11 @@ begin
     fails := array_append(fails, 'a member wrote a read mark directly');
   exception when insufficient_privilege then null;
   end;
-  -- Every rule: the 12 the employee pays and the 17 the employer pays, plus the 4,411
-  -- Third Schedule band rows 20261203090000 loads (20261128090000, 20261203090000).
+  -- Every rule: the 12 the employee pays and the 9 the employer pays beside them, plus
+  -- the 4,411 Third Schedule band rows of 20261203090000 and the 520 Akta 4 employer
+  -- bands of 20261203100000 (20261128090000, 20261203090000, 20261203100000).
   select count(*) into n from public.hr_statutory_rules;
-  if n <> 4440 then fails := array_append(fails, format('a member reads %s statutory rules, expected 4440', n)); end if;
+  if n <> 4952 then fails := array_append(fails, format('a member reads %s statutory rules, expected 4952', n)); end if;
   foreach t in array hr_only loop
     execute format('select count(*) from public.%I where org_id = %L', t, org) into n;
     if n <> 0 then fails := array_append(fails, format('a member reads %s rows of HR-only %s', n, t)); end if;
