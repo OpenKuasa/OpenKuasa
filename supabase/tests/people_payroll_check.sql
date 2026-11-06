@@ -176,15 +176,19 @@ begin
     fails := array_append(fails, 'hr_statutory_rules is not read-only for signed-in users and closed to everyone else');
   end if;
   -- The employee rows, exactly as they were: a payer and a wage band were added around
-  -- them, and not one of their rates, caps or age bands moved.
+  -- them, and not one of their rates, caps or age bands moved. The EPF band rows are
+  -- read by their own check (people_payroll_epf_bands_check), so they are left out here.
   select string_agg(format('%s %s %s-%s %s %s', s.scheme, s.citizenship, s.employee_from_age, coalesce(s.employee_until_age::text, ''),
            s.rate, coalesce(s.max_cents::text, 'none')), '; ' order by s.scheme, s.citizenship, s.employee_from_age) into t
-  from public.hr_statutory_rules s where s.payer = 'employee';
-  -- The employer rows: who pays, the age band, and the wage band from which the row applies.
+  from public.hr_statutory_rules s where s.payer = 'employee' and s.amount_cents is null;
+  -- The employer rows that are still a rate: who pays, the age band, and the wage band
+  -- from which the row applies. The SOCSO employer rows are Akta 4 band amounts now
+  -- (20261203100000) and are read by people_payroll_socso_bands_check, so they are
+  -- left out here the way the EPF band rows are.
   select string_agg(format('%s %s %s %s-%s %s %s %s', s.scheme, s.payer, s.citizenship, s.employee_from_age,
            coalesce(s.employee_until_age::text, ''), s.wage_from_cents, s.rate, coalesce(s.max_cents::text, 'none')), '; '
            order by s.scheme, s.payer, s.citizenship, s.employee_from_age, s.wage_from_cents) into snap
-  from public.hr_statutory_rules s where s.payer = 'employer';
+  from public.hr_statutory_rules s where s.payer = 'employer' and s.amount_cents is null;
   -- Two rows of one scheme, payer and category that start at the same wage never both hold
   -- the same age, so the row a wage falls in is never a choice of two.
   select count(*) into n from public.hr_statutory_rules a join public.hr_statutory_rules b
@@ -202,21 +206,12 @@ begin
     fails := array_append(fails, format('the employee statutory rules are: %s', t));
   end if;
   if snap is distinct from 'eis employer citizen 18-60 0 0.00200 1190; eis employer permanent_resident 18-60 0 0.00200 1190; '
-       || 'epf employer citizen 0-60 0 0.13000 none; epf employer citizen 0-60 500001 0.12000 none; '
-       || 'epf employer citizen 60-75 0 0.04000 none; epf employer non_citizen 0-75 0 0.02000 none; '
-       || 'epf employer non_citizen_before_1998 0-60 0 0.13000 none; '
-       || 'epf employer non_citizen_before_1998 0-60 500001 0.12000 none; '
-       || 'epf employer non_citizen_before_1998 60-75 0 0.06500 none; '
-       || 'epf employer non_citizen_before_1998 60-75 500001 0.06000 none; '
-       || 'epf employer permanent_resident 0-60 0 0.13000 none; '
-       || 'epf employer permanent_resident 0-60 500001 0.12000 none; '
-       || 'epf employer permanent_resident 60-75 0 0.06500 none; '
-       || 'epf employer permanent_resident 60-75 500001 0.06000 none; '
-       || 'socso employer citizen 0-60 0 0.01750 10415; socso employer citizen 60- 0 0.01250 7440; '
-       || 'socso employer non_citizen 0-60 0 0.01750 10415; socso employer non_citizen 60- 0 0.01250 7440; '
-       || 'socso employer non_citizen_before_1998 0-60 0 0.01750 10415; '
-       || 'socso employer non_citizen_before_1998 60- 0 0.01250 7440; '
-       || 'socso employer permanent_resident 0-60 0 0.01750 10415; socso employer permanent_resident 60- 0 0.01250 7440' then
+       || 'epf employer citizen 0-60 2000001 0.12000 none; epf employer citizen 60-75 2000001 0.04000 none; '
+       || 'epf employer non_citizen 0-75 0 0.02000 none; '
+       || 'epf employer non_citizen_before_1998 0-60 2000001 0.12000 none; '
+       || 'epf employer non_citizen_before_1998 60-75 2000001 0.06000 none; '
+       || 'epf employer permanent_resident 0-60 2000001 0.12000 none; '
+       || 'epf employer permanent_resident 60-75 2000001 0.06000 none' then
     fails := array_append(fails, format('the employer statutory rules are: %s', snap));
   end if;
   -- The columns of the spec.
@@ -681,7 +676,7 @@ begin
   -- A line can change its kind: the same line as an earning, and back.
   fails := fails || pg_temp.pay_expect(owner_id, 'the deduction becomes an earning',
     format('select public.hr_save_payslip_line(%L, %L, ''earning'', ''Salary advance'', 25000)', pa, line2), null);
-  if pg_temp.pay_slip(pa) is distinct from 'basic 300000 gross 380000 epf 41250 socso 1900 eis 760 pcb 0 other 0 net 336090 set [] pending' then
+  if pg_temp.pay_slip(pa) is distinct from 'basic 300000 gross 380000 epf 41400 socso 1900 eis 760 pcb 0 other 0 net 335940 set [] pending' then
     fails := array_append(fails, 'A with the deduction turned into an earning: ' || pg_temp.pay_slip(pa));
   end if;
   fails := fails || pg_temp.pay_expect(owner_id, 'the earning becomes a deduction again',
@@ -1280,19 +1275,19 @@ begin
         'basic 300000 gross 300000 epf 33000 socso 1500 eis 600 pcb 0 other 0 net 264900 set [] pending', 'none'),
       -- 11 of March's 31 days: 311111 x 11 / 31 = 110394.23, so 110394 is paid and 200717 is not (s.18A).
       ('a joiner on 21 March', ej,
-        'basic 311111 gross 110394 epf 12143 socso 552 eis 221 pcb 0 other 0 net 97478 set [] pending',
+        'basic 311111 gross 110394 epf 12400 socso 552 eis 221 pcb 0 other 0 net 97221 set [] pending',
         'joiner unpaid "Joined 21 Mar 2025 (11 of 31 days)" 200717'),
       -- 400000 x 2 / 31 = 25806.45, so 25806 off (s.18A, days in the wage period).
       ('two days of unpaid leave', u2,
-        'basic 400000 gross 374194 epf 41161 socso 1871 eis 748 pcb 0 other 0 net 330414 set [] pending',
+        'basic 400000 gross 374194 epf 41400 socso 1871 eis 748 pcb 0 other 0 net 330175 set [] pending',
         'unpaid_leave unpaid "Unpaid leave, 2 of 31 days" 25806'),
       -- Half a day: 400000 x 0.5 / 31 = 6451.61, so 6452.
       ('half a day of unpaid leave', uh,
-        'basic 400000 gross 393548 epf 43290 socso 1968 eis 787 pcb 0 other 0 net 347503 set [] pending',
+        'basic 400000 gross 393548 epf 43400 socso 1968 eis 787 pcb 0 other 0 net 347393 set [] pending',
         'unpaid_leave unpaid "Unpaid leave, 0.5 of 31 days" 6452'),
       -- 28 to 31 March is 4 calendar days, the Sunday included: 260000 x 27 / 31 is paid.
       ('unpaid leave that runs into April', us,
-        'basic 260000 gross 226452 epf 24910 socso 1132 eis 453 pcb 0 other 0 net 199957 set [] pending',
+        'basic 260000 gross 226452 epf 25100 socso 1132 eis 453 pcb 0 other 0 net 199767 set [] pending',
         'unpaid_leave unpaid "Unpaid leave, 4 of 31 days" 33548'),
       -- Employed from the 21st, on unpaid leave every one of those 11 days: nothing is
       -- paid, and the leave before the 21st is not taken off a second time.
@@ -1301,12 +1296,12 @@ begin
         'joiner unpaid "Joined 21 Mar 2025 (11 of 31 days)" 200717; unpaid_leave unpaid "Unpaid leave, 11 of 31 days" 110394'),
       -- A whole month away pays only the public holiday inside it: 300000 / 31.
       ('unpaid leave for the whole month', fm,
-        'basic 300000 gross 9677 epf 1064 socso 48 eis 19 pcb 0 other 0 net 8546 set [] pending',
+        'basic 300000 gross 9677 epf 1100 socso 48 eis 19 pcb 0 other 0 net 8510 set [] pending',
         'unpaid_leave unpaid "Unpaid leave, 30 of 31 days" 290323'),
       -- Paid 300002 x 10.5 / 31 = 101614, rounded once: the joiner and the half day
       -- add up to 300002 - 101614. Rounded on its own the half day would be 4839.
       ('a joiner with half a day of unpaid leave, rounded once', jh,
-        'basic 300002 gross 101614 epf 11178 socso 508 eis 203 pcb 0 other 0 net 89725 set [] pending',
+        'basic 300002 gross 101614 epf 11300 socso 508 eis 203 pcb 0 other 0 net 89603 set [] pending',
         'joiner unpaid "Joined 21 Mar 2025 (11 of 31 days)" 193550; unpaid_leave unpaid "Unpaid leave, 0.5 of 31 days" 4838'),
       -- Overtime is not EPF wages: 11% of 3000.00, not of 3133.27. SOCSO and EIS still take the gross.
       ('overtime', ot,
@@ -1317,7 +1312,7 @@ begin
         'basic 800000 gross 800000 epf 88000 socso 2975 eis 1190 pcb 0 other 0 net 707835 set [] pending', 'none'),
       -- Joining on the first of the month is not joining part-way through it.
       ('gross just below the maximum', lo,
-        'basic 594000 gross 594000 epf 65340 socso 2970 eis 1188 pcb 0 other 0 net 524502 set [] pending', 'none'),
+        'basic 594000 gross 594000 epf 66000 socso 2970 eis 1188 pcb 0 other 0 net 523842 set [] pending', 'none'),
       -- Turned 60 on 15 March: March still has every employee share. They stop in April.
       ('turned sixty inside the month', turned60,
         'basic 500000 gross 500000 epf 55000 socso 2500 eis 1000 pcb 0 other 0 net 441500 set [] pending', 'none'),
@@ -1340,7 +1335,7 @@ begin
         'leaver unpaid "Joined 10 Mar 2025, left 20 Mar 2025 (11 of 31 days)" 200000'),
       -- 8 days of leave asked for, 2 of them inside the 20 days worked: 4000.00 x 18 / 31.
       ('a leaver with unpaid leave, after the last day not counted', lu,
-        'basic 400000 gross 232258 epf 25548 socso 1161 eis 465 pcb 0 other 0 net 205084 set [] pending',
+        'basic 400000 gross 232258 epf 25800 socso 1161 eis 465 pcb 0 other 0 net 204832 set [] pending',
         'leaver unpaid "Left 20 Mar 2025 (20 of 31 days)" 141935; unpaid_leave unpaid "Unpaid leave, 2 of 31 days" 25807'),
       -- Left on the month's last day: a full month, and no line at all.
       ('left on the last day of the month', ld,
@@ -1361,22 +1356,21 @@ begin
   -- bases. Nothing here is in net pay: every figure above is unchanged by it.
   for label, who, want in
     select * from (values
-      ('basic only', b1, 'epf 39000 socso 5250 eis 600'),
+      ('basic only', b1, 'epf 39000 socso 5165 eis 600'),
       -- 13% to RM 5,000 and 12% above it, so 8,000.00 is 960.00, not 1,040.00.
       ('gross above every maximum', hi, 'epf 96000 socso 10415 eis 1190'),
       -- Turned 60 inside the month: March is still 13% and the first category.
-      ('turned sixty inside the month', turned60, 'epf 65000 socso 8750 eis 1000'),
+      ('turned sixty inside the month', turned60, 'epf 65000 socso 8665 eis 1000'),
       -- A non-citizen employer pays 2%, and SOCSO as anyone; no EIS under any category.
-      ('fifty nine all month, non-citizen', turns60, 'epf 6000 socso 5250 eis 0'),
+      ('fifty nine all month, non-citizen', turns60, 'epf 6000 socso 5165 eis 0'),
       -- From 60, a permanent resident: 6.5%, the employer-only second category, no EIS.
       ('sixty before the month began, by identity card, permanent resident', icsixty,
-        'epf 26000 socso 5000 eis 0'),
-      ('seventeen', teen, 'epf 19500 socso 2625 eis 0'),
+        'epf 26000 socso 4940 eis 0'),
+      ('seventeen', teen, 'epf 19500 socso 2535 eis 0'),
       -- Overtime is EPF wages for nobody, so the employer's EPF is 13% of 3,000.00 while
-      -- SOCSO and EIS take the gross, rounded to five sen: 1.75% of 3,133.27 is 54.83, so
-      -- 54.85. That is the rate's figure, not PERKESO's: its table charges a fixed RM55.15
-      -- for wages above RM3,100 and up to RM3,200. The banded figures are #423.
-      ('overtime', ot, 'epf 39000 socso 5485 eis 625')
+      -- SOCSO and EIS take the gross. SOCSO is Akta 4's figure for the band that gross
+      -- falls in, RM55.15 for wages above RM3,100 and up to RM3,200, not 1.75% of it.
+      ('overtime', ot, 'epf 39000 socso 5515 eis 625')
     ) as c(label, employee, want)
   loop
     select p.id into pa from public.hr_payslips p where p.payroll_run_id = mar_run and p.employee_id = who;
@@ -1391,9 +1385,14 @@ begin
         private.hr_payroll_proposal('socso', n, null, null), private.hr_payroll_proposal('eis', n, null, null), want));
     end if;
   end loop;
-  if private.hr_payroll_proposal('epf', 100000000, null, null) <> 11000000 or private.hr_payroll_proposal('epf', 5, null, null) <> 1
-     or private.hr_payroll_proposal('epf', 4, null, null) <> 0 or private.hr_payroll_proposal('pcb', 100000, null, null) <> 0 then
-    fails := array_append(fails, 'EPF has a maximum, is not rounded to the sen, or a scheme with no rule is not zero');
+  -- Above RM 20,000.00 the Schedule charges the rate on the wage itself, and the
+  -- first band is NIL: 11% of 1,000,000.00 is 110,000.00, and nothing is paid on
+  -- RM 10.00 or less.
+  if private.hr_payroll_proposal('epf', 100000000, null, null) <> 11000000
+     or private.hr_payroll_proposal('epf', 1000, null, null) <> 0
+     or private.hr_payroll_proposal('epf', 1001, null, null) <> 300
+     or private.hr_payroll_proposal('pcb', 100000, null, null) <> 0 then
+    fails := array_append(fails, 'EPF above RM 20,000 is not the rate on the wage, the first band is not NIL, or a scheme with no rule is not zero');
   end if;
   -- From the age of 60 there is no employee share of EPF, SOCSO or EIS, and none
   -- of EIS below 18. An unknown age keeps every share.
@@ -1402,10 +1401,11 @@ begin
      or private.hr_payroll_proposal('socso', 500000, 60, null) <> 0 or private.hr_payroll_proposal('eis', 500000, 60, null) <> 0 then
     fails := array_append(fails, 'the employee share from the age of 60 is not zero, or a missing date of birth is not under 60');
   end if;
-  -- The employer's share comes from the same rows, through the payer argument: at
-  -- RM 5,000.00 it is 13% and at a sen more it is 12%, which no rate and maximum can say.
+  -- The employer's share comes from the same rows, through the payer argument: RM
+  -- 5,000.00 is the top of a 13% band, 650.00, and a sen more falls in the next
+  -- band, whose printed figure is 612.00.
   if private.hr_payroll_proposal('epf', 500000, 55, null, 'employer') <> 65000
-     or private.hr_payroll_proposal('epf', 500001, 55, null, 'employer') <> 60000
+     or private.hr_payroll_proposal('epf', 500001, 55, null, 'employer') <> 61200
      or private.hr_payroll_proposal('epf', 500000, 61, null, 'employer') <> 20000
      or private.hr_payroll_proposal('epf', 500000, 61, 'permanent_resident', 'employer') <> 32500
      or private.hr_payroll_proposal('epf', 600000, 61, 'permanent_resident', 'employer') <> 36000
@@ -1573,16 +1573,16 @@ begin
         'basic 200000 gross 200000 epf 22000 socso 1000 eis 400 pcb 0 other 0 net 176600 set [] pending', 'none'),
       -- Joined in March: paid in full in April.
       ('last month''s joiner', ej,
-        'basic 311111 gross 311111 epf 34222 socso 1556 eis 622 pcb 0 other 0 net 274711 set [] pending', 'none'),
+        'basic 311111 gross 311111 epf 34400 socso 1556 eis 622 pcb 0 other 0 net 274533 set [] pending', 'none'),
       -- 16 of April's 30 days: 300000 x 16 / 30 = 160000.00 (s.18A).
       ('a joiner on 15 April', fj,
         'basic 300000 gross 160000 epf 17600 socso 800 eis 320 pcb 0 other 0 net 141280 set [] pending',
         'joiner unpaid "Joined 15 Apr 2025 (16 of 30 days)" 140000'),
       ('the April days of leave that began in March', us,
-        'basic 260000 gross 242667 epf 26693 socso 1213 eis 485 pcb 0 other 0 net 214276 set [] pending',
+        'basic 260000 gross 242667 epf 26900 socso 1213 eis 485 pcb 0 other 0 net 214069 set [] pending',
         'unpaid_leave unpaid "Unpaid leave, 2 of 30 days" 17333'),
       ('one day of unpaid leave', u2,
-        'basic 400000 gross 386667 epf 42533 socso 1933 eis 773 pcb 0 other 0 net 341428 set [] pending',
+        'basic 400000 gross 386667 epf 42700 socso 1933 eis 773 pcb 0 other 0 net 341261 set [] pending',
         'unpaid_leave unpaid "Unpaid leave, 1 of 30 days" 13333'),
       -- Only the record worked in April: March's three were paid in March.
       ('overtime worked in April', ot,
