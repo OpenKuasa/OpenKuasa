@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const getViewer = vi.fn();
 const createClient = vi.fn();
@@ -32,6 +32,11 @@ const viewer = (over: Record<string, unknown> = {}) => ({
 
 type Result = { data: { name: string; holiday_date: string }[] | null; error: unknown };
 
+/** 22 Nov 2026, 12:00 in Kuala Lumpur, a day the built-in calendar does not hold. */
+const ORDINARY_DAY = new Date('2026-11-22T04:00:00Z');
+/** Christmas Day, which the built-in calendar does hold. */
+const FESTIVE_DAY = new Date('2026-12-25T04:00:00Z');
+
 function fakeClient(result: Result | Error) {
   const eq2 = vi.fn(async () => {
     if (result instanceof Error) throw result;
@@ -47,6 +52,15 @@ beforeEach(() => {
   vi.clearAllMocks();
   readProductCounts.mockResolvedValue({});
   readAllCounts.mockResolvedValue({});
+  // loadServerGreeting reads the clock itself, so the file pins the day instead of
+  // inheriting the one the suite runs on: three "not festive" assertions used to
+  // read differently on a festival date (2026-12-25 gave 3 failed | 3 passed).
+  vi.useFakeTimers({ toFake: ['Date'] });
+  vi.setSystemTime(ORDINARY_DAY);
+});
+
+afterEach(() => {
+  vi.useRealTimers();
 });
 
 describe('loadServerGreeting', () => {
@@ -90,6 +104,15 @@ describe('loadServerGreeting', () => {
     expect(f.eq1).toHaveBeenCalledWith('org_id', 'o1');
     expect(f.eq2).toHaveBeenCalledWith('holiday_date', today);
     expect(g.isFestive).toBe(true);
+  });
+
+  it('wishes the festival the built-in calendar holds for the day', async () => {
+    getViewer.mockResolvedValue(viewer());
+    createClient.mockResolvedValue(fakeClient({ data: [], error: null }).client);
+    vi.setSystemTime(FESTIVE_DAY);
+    const g = await loadServerGreeting('people');
+    expect(g.isFestive).toBe(true);
+    expect(g.lead).toBe('Merry Christmas');
   });
 
   it('survives a rejecting counts reader and holidays query', async () => {
