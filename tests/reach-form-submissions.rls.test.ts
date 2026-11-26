@@ -32,10 +32,14 @@ async function ownedOrg(c: SupabaseClient, name: string) {
 type Owned = Awaited<ReturnType<typeof ownedOrg>>;
 let owner: Owned;
 let other: Owned;
-/** Someone who is not signed in: what a visitor to a public form is. */
-const visitor = client();
+/**
+ * Someone who is not signed in: what a visitor to a public form is. Built in the hook, not here,
+ * because `createClient` refuses an empty URL. At import that refusal fails the file instead of
+ * skipping it, so a checkout with no `.env.local` reports one failed file for every run.
+ */
+let visitor: SupabaseClient;
 /** Who sends a response and counts a view: the server once the database lets nobody else, else the visitor. */
-let writer: SupabaseClient = visitor;
+let writer: SupabaseClient;
 /** True once those functions are the server's alone. */
 let serverOnly = false;
 /** True until the public lead forms migration has been applied to the database. */
@@ -48,6 +52,8 @@ const UNKNOWN = '00000000-0000-4000-8000-00000000dead';
 
 beforeAll(async () => {
   if (!hasSupabaseEnv) return;
+  visitor = client();
+  writer = visitor;
   const first = await signedIn();
   migrationMissing = await formSubmissionsMissing(first);
   if (migrationMissing) {
