@@ -242,7 +242,7 @@ export function EmployeeForm({
             {text('base_salary', 'Monthly base salary (RM)', { placeholder: '3500' })}
             {text('nric', 'NRIC / passport no.')}
             {text('date_of_birth', 'Date of birth', { type: 'date' })}
-            <div className="sm:col-span-2">
+            <div className="min-w-0 sm:col-span-2">
               <Field label="Citizenship (for EPF and EIS)">
                 <Select
                   value={values.citizenship || CITIZENSHIP_UNSET}
